@@ -286,8 +286,9 @@ def process_single_task(args):
         if Path.exists(Path(file_name)):
             continue
 
-        # Retarget motion
-        retargeted_motions, _, _, _ = retargeter.retarget_motion(
+        # Retarget motion. The result is saved to ``dest_res_path`` inside
+        # retarget_motion; the returned RetargetResult is unused on this path.
+        retargeter.retarget_motion(
             human_joint_motions=human_joints,
             object_poses=object_poses,
             object_poses_augmented=object_poses_augmented,

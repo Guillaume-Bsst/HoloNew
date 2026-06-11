@@ -745,9 +745,11 @@ def run_headless(cfg: RetargetingConfig | None = None, **overrides) -> RetargetR
                 val = Path(val)
             setattr(cfg, key, val)
 
-    # Disable visualization and debug so nothing tries to open a window
+    # Work on a copy so the caller's cfg is not mutated, then disable
+    # visualization and debug so nothing tries to open a window.
     from dataclasses import replace
 
+    cfg = replace(cfg)
     cfg.retargeter = replace(cfg.retargeter, visualize=False, debug=False)
 
     return main(cfg)

@@ -11,6 +11,8 @@ from HoloNew.src.viewer import Viewer
 def view(cfg: RetargetingConfig) -> None:
     result = run_headless(cfg=cfg)
     qpos_keys = tuple(s.key for s in STAGE_SPECS if s.produces_qpos)
+    # TODO: pass the object URDF + has_dynamic_object for object_interaction /
+    # climbing tasks so the object appears in the viewer (robot_only has none).
     viewer = Viewer(
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
         object_model_path=None,

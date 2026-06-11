@@ -341,7 +341,8 @@ class InteractionMeshRetargeter:
             q_a_nominal (np.ndarray, optional): Nominal robot configuration.
 
         Returns:
-            tuple: (retargeted_motions, obj_pts_demo_list, obj_pts_list, tetrahedra)
+            RetargetResult: the qpos trajectory and per-frame stage data
+            (``mapped``, ``in_object``) plus the final solver cost.
         """
         num_frames = human_joint_motions.shape[0]
         if q_nominal_list is not None:
@@ -846,9 +847,10 @@ class InteractionMeshRetargeter:
 
     def draw_q(self, q: np.ndarray):
         """Draw a single robot configuration (delegates to Viewer)."""
+        if not hasattr(self, "viewer"):
+            return
         # Sync the flag in case it was determined after _setup_visualization ran.
-        if hasattr(self, "viewer"):
-            self.viewer.has_dynamic_object = self.has_dynamic_object
+        self.viewer.has_dynamic_object = self.has_dynamic_object
         self.viewer.draw_q(q, stage="socp")
 
     def draw_keypoints(self, p, name="keypoint", rgba=(0, 0, 1, 1)):
