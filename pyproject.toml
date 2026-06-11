@@ -32,6 +32,7 @@ dependencies = [
     "libigl",
     "tyro",
     "POT",
+    "coal",
 ]
 
 [project.optional-dependencies]

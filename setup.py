@@ -28,5 +28,6 @@ setup(
         "libigl",
         "tyro",
         "POT",
+        "coal",
     ],
 )
