@@ -241,74 +241,24 @@ class InteractionMeshRetargeter:
         )
 
     def _setup_visualization(self):
-        """Setup Viser visualization components."""
-        self.server = viser.ViserServer()
+        """Setup viser via the extracted Viewer (single robot, unchanged behaviour).
 
-        # 1) Ensure a world frame exists (absolute path!)
-        try:
-            self.server.scene.add_frame("/world", show_axes=False)
-        except Exception:
-            print("Starting viser")
-
-        # Create parent frames for robot and object
-        self.robot_base = self.server.scene.add_frame("/world/robot", show_axes=False)
-
-        print("robot_model_path: ", self.robot_model_path)
-
-        # Load robot URDF
-        self.robot_urdf = yourdfpy.URDF.load(
-            self.robot_model_path,
-            load_meshes=True,
-            build_scene_graph=True,
+        NOTE: has_dynamic_object is not yet known at this point (it is set after
+        the MuJoCo model loads).  The Viewer is constructed with False and the
+        retargeter's draw_q shim syncs the flag at call time.
+        """
+        from .viewer import Viewer
+        self.viewer = Viewer(
+            robot_model_path=self.robot_model_path,
+            object_model_path=self.object_model_path,
+            stage_keys=("socp",),
+            has_dynamic_object=False,
         )
-
-        print("Viser using robot URDF: ", self.robot_model_path)
-
-        # Create ViserUrdf instance for robot, attaching it to the robot_base frame
-        self.viser_robot = ViserUrdf(
-            self.server,
-            urdf_or_path=self.robot_urdf,
-            root_node_name="/world/robot",  # This links to the robot_base frame we created
-        )
-
-        # Similarly for object
-        if self.object_model_path:
-            self.object_base = self.server.scene.add_frame("/world/object", show_axes=False)
-
-            self.object_urdf = yourdfpy.URDF.load(
-                self.object_model_path,
-                load_meshes=True,
-                build_scene_graph=True,
-            )
-
-            # Create ViserUrdf instance for object, attaching it to the object_base frame
-            self.viser_object = ViserUrdf(
-                self.server,
-                urdf_or_path=self.object_urdf,
-                root_node_name="/world/object",  # This links to the object_base frame we created
-            )
-            print("Viser using object URDF: ", self.object_model_path)
-
-        else:
-            self.viser_object = None
-
-        # Check the number of actuated joints and their names
-        robot_joint_limits = self.viser_robot.get_actuated_joint_limits()
-        print("\nRobot joints:")
-        print("Number of actuated joints:", len(robot_joint_limits))
-        print("Joint names:", list(robot_joint_limits.keys()))
-
-        # Initialize robot with this configuration
-        robot_initial_config = np.zeros(len(robot_joint_limits))
-        self.viser_robot.update_cfg(robot_initial_config)
-
-        # Add grid
-        self.server.scene.add_grid(
-            "/world/grid",
-            width=8,
-            height=8,
-            position=(0.0, 0.0, 0.0),
-        )
+        self.server = self.viewer.server
+        self.viser_robot = self.viewer.robots["socp"].urdf
+        self.robot_base = self.viewer.robots["socp"].base
+        self.viser_object = self.viewer.viser_object
+        self.object_base = self.viewer.object_base
 
     def draw_mesh_from_geom(self, model, data, geom_id, geom_name, name="/mesh", color=(50, 150, 255), opacity=0.5):
         """
@@ -888,73 +838,23 @@ class InteractionMeshRetargeter:
                 )
 
     def draw_q(self, q: np.ndarray):
-        """Draw a single robot configuration."""
-        # Update robot joint configurations
-        robot_joint_positions = q[7 : 7 + self.task_constants.ROBOT_DOF]
-        self.viser_robot.update_cfg(robot_joint_positions)
-
-        # Update robot base pose using set_transform
-        robot_quat = q[3:7]  # Base orientation
-        robot_pos = q[:3]  # Base position
-
-        # Update robot base frame
-        self.robot_base.position = robot_pos
-        self.robot_base.wxyz = robot_quat  # Assuming quaternion is in wxyz order
-
-        # Update object pose if it exists
-        if hasattr(self, "viser_object") and self.viser_object is not None:
-            if self.has_dynamic_object:
-                object_quat = q[-4:]
-                object_pos = q[-7:-4]
-            else:
-                object_quat = np.asarray([1, 0, 0, 0])
-                object_pos = np.zeros(3)
-
-            # Update object base frame
-            self.object_base.position = object_pos
-            self.object_base.wxyz = object_quat  # Assuming quaternion is in wxyz order
+        """Draw a single robot configuration (delegates to Viewer)."""
+        # Sync the flag in case it was determined after _setup_visualization ran.
+        if hasattr(self, "viewer"):
+            self.viewer.has_dynamic_object = self.has_dynamic_object
+        self.viewer.draw_q(q, stage="socp")
 
     def draw_keypoints(self, p, name="keypoint", rgba=(0, 0, 1, 1)):
-        """Draw keypoints in visualization."""
-        if not hasattr(self, "server"):
+        """Draw keypoints in visualization (delegates to Viewer).
+
+        Returns a list of handles to preserve the original contract: the debug
+        path in retarget_motion iterates over the result and calls .clear() on
+        it, so a single handle would break debug mode.
+        """
+        if not hasattr(self, "viewer"):
             return None
-
-        # Create a sphere mesh using trimesh
-        sphere = trimesh.primitives.Sphere(radius=0.02)
-        vertices = sphere.vertices
-        faces = sphere.faces
-
-        color = tuple(int(c * 255) for c in rgba[:3])
-        opacity = float(rgba[3])
-
-        kpts_handle_list = []
-
-        # Draw keypoints
-        if len(p.shape) == 1:
-            # Single point
-            kpts_handle = self.server.scene.add_mesh_simple(
-                f"/{name}",
-                vertices=vertices,
-                faces=faces,
-                position=p,
-                color=color,
-                opacity=opacity,
-            )
-            kpts_handle_list.append(kpts_handle)
-        elif len(p.shape) == 2:
-            # Multiple points
-            kpts_handle = self.server.scene.add_batched_meshes_simple(
-                f"/{name}",
-                vertices=vertices,
-                faces=faces,
-                batched_positions=p,
-                batched_wxyzs=np.tile(np.array([1, 0, 0, 0]), (p.shape[0], 1)),
-                batched_colors=color,
-                opacity=opacity,
-            )
-            kpts_handle_list.append(kpts_handle)
-
-        return kpts_handle_list
+        handle = self.viewer.draw_keypoints(p, name=name, rgba=rgba)
+        return [handle] if handle is not None else []
 
     def visualize_motion(
         self,
