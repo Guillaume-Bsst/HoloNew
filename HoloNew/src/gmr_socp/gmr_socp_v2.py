@@ -124,6 +124,11 @@ class GmrSocpRetargeterV2:
         # None until from_config populates it; not used in the solve yet.
         self.correspondence = None
 
+        # Contact assets (loaded by from_config from the bundled artifacts).
+        # None until from_config populates them; not used in the solve yet.
+        self.object_sdf = None
+        self.contact_fields = None
+
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
         available_bodies = {self.robot_model.body(i).name for i in range(self.robot_model.nbody)}
@@ -602,5 +607,17 @@ class GmrSocpRetargeterV2:
         elif Path(SMPLX_MODEL_DIR_DEFAULT).is_dir():
             rt.correspondence = build_table(SMPLX_MODEL_DIR_DEFAULT, "neutral", None,
                                             G1_29DOF_URDF, HUMAN_GRID_DENSITY, G1_DENSITY, OT_REG)
+
+        # Load bundled contact assets (data only — NOT used in the solve yet;
+        # will be wired into the objective in a later task).
+        from HoloNew.src.contact.backends.sdf import load_object_sdf
+        from HoloNew.src.contact.contact_io import load_contact_fields
+        _contact_assets = Path(__file__).resolve().parent.parent.parent / "assets" / "contact"
+        _sdf_path = _contact_assets / "largebox_sdf.npz"
+        _contact_path = _contact_assets / f"contact_{cfg.task_name}.npz"
+        if _sdf_path.exists():
+            rt.object_sdf = load_object_sdf(_sdf_path)
+        if _contact_path.exists():
+            rt.contact_fields = load_contact_fields(_contact_path)
 
         return rt
