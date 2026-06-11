@@ -27,5 +27,6 @@ setup(
         "cvxpy",
         "libigl",
         "tyro",
+        "POT",
     ],
 )
