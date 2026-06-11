@@ -120,6 +120,10 @@ class GmrSocpRetargeterV2:
                 task_constants.MANUAL_UB.values()
             )
 
+        # Correspondence table (loaded by from_config from the bundled artifact).
+        # None until from_config populates it; not used in the solve yet.
+        self.correspondence = None
+
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
         available_bodies = {self.robot_model.body(i).name for i in range(self.robot_model.nbody)}
@@ -584,5 +588,19 @@ class GmrSocpRetargeterV2:
         rt.human_pos = human_joints   # (T, J, 3)
         rt.human_quat = human_quat    # (T, 52, 4) wxyz
         rt.q_init_full = q_init_full  # (nq,)
+
+        # Load the bundled human->G1 correspondence table (data only,
+        # NOT used in the solve yet — will be wired in a later task).
+        from pathlib import Path
+        from HoloNew.src.correspondence.build_correspondence import load_correspondence, build_table
+        from HoloNew.src.correspondence.constants import (
+            G1_29DOF_URDF, SMPLX_MODEL_DIR_DEFAULT, HUMAN_GRID_DENSITY, G1_DENSITY, OT_REG,
+        )
+        _bundled = Path(__file__).resolve().parent.parent.parent / "assets" / "correspondence" / "corr_neutral.npz"
+        if _bundled.exists():
+            rt.correspondence = load_correspondence(_bundled)
+        elif Path(SMPLX_MODEL_DIR_DEFAULT).is_dir():
+            rt.correspondence = build_table(SMPLX_MODEL_DIR_DEFAULT, "neutral", None,
+                                            G1_29DOF_URDF, HUMAN_GRID_DENSITY, G1_DENSITY, OT_REG)
 
         return rt
