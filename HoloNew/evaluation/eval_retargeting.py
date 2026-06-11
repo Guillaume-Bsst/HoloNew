@@ -24,13 +24,13 @@ import tyro
 src_root = Path(__file__).resolve().parents[2]
 if str(src_root) not in sys.path:
     sys.path.insert(0, str(src_root))
-from holosoma_retargeting.config_types.data_type import (  # noqa: E402
+from HoloNew.config_types.data_type import (  # noqa: E402
     SMPLH_DEMO_JOINTS,
     MotionDataConfig,
 )
-from holosoma_retargeting.config_types.robot import RobotConfig  # noqa: E402
-from holosoma_retargeting.src.mujoco_utils import _world_mesh_from_geom  # type: ignore[import-not-found]  # noqa: E402
-from holosoma_retargeting.src.utils import (  # type: ignore[import-not-found]  # noqa: E402
+from HoloNew.config_types.robot import RobotConfig  # noqa: E402
+from HoloNew.src.mujoco_utils import _world_mesh_from_geom  # type: ignore[import-not-found]  # noqa: E402
+from HoloNew.src.utils import (  # type: ignore[import-not-found]  # noqa: E402
     calculate_scale_factor,
     create_new_scene_xml_file,
     create_scaled_multi_boxes_xml,

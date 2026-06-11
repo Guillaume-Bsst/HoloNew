@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tyro
 
-from holosoma_retargeting.config_types.data_type import MotionDataConfig
+from HoloNew.config_types.data_type import MotionDataConfig
 
 
 def get_default_motion_data_config(

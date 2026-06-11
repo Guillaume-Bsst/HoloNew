@@ -21,15 +21,15 @@ src_root = Path(__file__).resolve().parents[2]
 if str(src_root) not in sys.path:
     sys.path.insert(0, str(src_root))
 
-from holosoma_retargeting.config_types.data_type import DEMO_JOINTS_REGISTRY, MotionDataConfig  # noqa: E402
-from holosoma_retargeting.config_types.retargeter import RetargeterConfig  # noqa: E402
-from holosoma_retargeting.config_types.retargeting import RetargetingConfig  # noqa: E402
-from holosoma_retargeting.config_types.robot import RobotConfig  # noqa: E402
-from holosoma_retargeting.config_types.task import TaskConfig  # noqa: E402
-from holosoma_retargeting.src.interaction_mesh_retargeter import (  # noqa: E402
+from HoloNew.config_types.data_type import DEMO_JOINTS_REGISTRY, MotionDataConfig  # noqa: E402
+from HoloNew.config_types.retargeter import RetargeterConfig  # noqa: E402
+from HoloNew.config_types.retargeting import RetargetingConfig  # noqa: E402
+from HoloNew.config_types.robot import RobotConfig  # noqa: E402
+from HoloNew.config_types.task import TaskConfig  # noqa: E402
+from HoloNew.src.interaction_mesh_retargeter import (  # noqa: E402
     InteractionMeshRetargeter,  # type: ignore[import-not-found]
 )
-from holosoma_retargeting.src.utils import (  # noqa: E402
+from HoloNew.src.utils import (  # noqa: E402
     augment_object_poses,
     calculate_scale_factor,
     create_new_scene_xml_file,

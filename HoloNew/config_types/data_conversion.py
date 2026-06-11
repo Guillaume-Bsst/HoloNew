@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from holosoma_retargeting.config_types.data_type import MotionDataConfig
-from holosoma_retargeting.config_types.robot import RobotConfig
+from HoloNew.config_types.data_type import MotionDataConfig
+from HoloNew.config_types.robot import RobotConfig
 
 _ROBOT_JOINT_NAMES_DEFAULT = {
     "g1": [
@@ -94,7 +94,7 @@ class DataConversionConfig:
     """Motion data configuration (nested - can override data_format, robot_type, etc.
     via --motion-data-config.data-format)."""
 
-    # --- Joint names, follow the pattern in holosoma_retargeting/config_types/robot.py ---
+    # --- Joint names, follow the pattern in HoloNew/config_types/robot.py ---
     joint_names: list[str] | None = None
     """Joint names to use."""
 

@@ -17,9 +17,9 @@ import tyro
 src_root = Path(__file__).resolve().parents[2]
 if str(src_root) not in sys.path:
     sys.path.insert(0, str(src_root))
-from holosoma_retargeting.config_types.data_conversion import DataConversionConfig  # noqa: E402
-from holosoma_retargeting.config_types.data_type import MotionDataConfig  # noqa: E402
-from holosoma_retargeting.config_types.robot import RobotConfig  # noqa: E402
+from HoloNew.config_types.data_conversion import DataConversionConfig  # noqa: E402
+from HoloNew.config_types.data_type import MotionDataConfig  # noqa: E402
+from HoloNew.config_types.robot import RobotConfig  # noqa: E402
 
 DynamicState = Tuple[
     torch.Tensor,

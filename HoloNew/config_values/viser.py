@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from holosoma_retargeting.config_types.viser import ViserConfig
+from HoloNew.config_types.viser import ViserConfig
 
 
 def get_default_viser_config() -> ViserConfig:

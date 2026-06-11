@@ -1,9 +1,9 @@
 from setuptools import find_packages, setup  # type: ignore[import-untyped]
 
 setup(
-    name="holosoma-retargeting",
+    name="holonew",
     version="0.1.0",
-    description="holosoma-retargeting: retargeting components for converting human motions to robot motions",
+    description="HoloNew: retargeting components for converting human motions to robot motions",
     author="Amazon FAR Team",
     packages=find_packages(),
     python_requires=">=3.10",

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
-from holosoma_retargeting.config_types.robot import (
+from HoloNew.config_types.robot import (
     RobotDefaults,
     _default_robot_defaults,
     _validate_robot_type,

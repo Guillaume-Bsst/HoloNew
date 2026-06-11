@@ -15,8 +15,8 @@ from viser.extras import ViserUrdf  # type: ignore[import-not-found]
 src_root = Path(__file__).resolve().parent.parent
 if str(src_root) not in sys.path:
     sys.path.insert(0, str(src_root))
-from holosoma_retargeting.config_types.viser import ViserConfig  # noqa: E402
-from holosoma_retargeting.src.viser_utils import create_motion_control_sliders  # noqa: E402
+from HoloNew.config_types.viser import ViserConfig  # noqa: E402
+from HoloNew.src.viser_utils import create_motion_control_sliders  # noqa: E402
 
 
 def load_npz(npz_path: str):

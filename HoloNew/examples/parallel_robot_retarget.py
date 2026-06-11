@@ -23,12 +23,12 @@ src_root = Path(__file__).resolve().parents[2]
 if str(src_root) not in sys.path:
     sys.path.insert(0, str(src_root))
 
-from holosoma_retargeting.config_types.data_type import MotionDataConfig  # noqa: E402
-from holosoma_retargeting.config_types.retargeting import ParallelRetargetingConfig  # noqa: E402
-from holosoma_retargeting.config_types.robot import RobotConfig  # noqa: E402
+from HoloNew.config_types.data_type import MotionDataConfig  # noqa: E402
+from HoloNew.config_types.retargeting import ParallelRetargetingConfig  # noqa: E402
+from HoloNew.config_types.robot import RobotConfig  # noqa: E402
 
 # Import reusable functions from robot_retarget.py
-from holosoma_retargeting.examples.robot_retarget import (  # type: ignore[import-not-found]  # noqa: E402
+from HoloNew.examples.robot_retarget import (  # type: ignore[import-not-found]  # noqa: E402
     DEFAULT_DATA_FORMATS,
     build_retargeter_kwargs_from_config,
     create_task_constants,
@@ -38,10 +38,10 @@ from holosoma_retargeting.examples.robot_retarget import (  # type: ignore[impor
 )
 
 # Import after path modification
-from holosoma_retargeting.src.interaction_mesh_retargeter import (  # noqa: E402
+from HoloNew.src.interaction_mesh_retargeter import (  # noqa: E402
     InteractionMeshRetargeter,  # type: ignore[import-not-found]
 )
-from holosoma_retargeting.src.utils import (  # type: ignore[import-not-found]  # noqa: E402
+from HoloNew.src.utils import (  # type: ignore[import-not-found]  # noqa: E402
     extract_foot_sticking_sequence_velocity,
     preprocess_motion_data,
 )

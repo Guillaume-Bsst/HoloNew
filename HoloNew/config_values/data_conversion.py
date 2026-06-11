@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from holosoma_retargeting.config_types.data_conversion import DataConversionConfig
+from HoloNew.config_types.data_conversion import DataConversionConfig
 
 
 def get_default_data_conversion_config(

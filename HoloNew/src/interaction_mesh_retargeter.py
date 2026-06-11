@@ -16,7 +16,7 @@ from scipy.spatial.transform import Rotation  # type: ignore[import-untyped]
 from tqdm import tqdm
 from viser.extras import ViserUrdf  # type: ignore[import-not-found]
 
-from holosoma_retargeting.config_types.retargeter import FootLockConfig, SelfCollisionConfig
+from HoloNew.config_types.retargeter import FootLockConfig, SelfCollisionConfig
 
 # Add src to path for direct execution
 src_path = Path(__file__).parent.parent / "src"

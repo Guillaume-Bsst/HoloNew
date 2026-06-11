@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tyro
 
-from holosoma_retargeting.config_types.robot import RobotConfig
+from HoloNew.config_types.robot import RobotConfig
 
 
 def get_default_robot_config(robot_type: str = "g1") -> RobotConfig:
