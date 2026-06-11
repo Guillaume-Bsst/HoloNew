@@ -1,11 +1,11 @@
-"""GMR-SOCP retargeter v1 — position-tracking objective only.
+"""GMR-SOCP retargeter v1 — position + orientation tracking objective.
 
 Derived from src/interaction_mesh_retargeter.py (InteractionMeshRetargeter).
 Strips all visualization, self-collision, foot-lock, and interaction-mesh
-machinery and replaces the Laplacian objective with a GMR position-tracking
-objective (one term per robot frame, weighted by the IK table pos_weight).
+machinery and replaces the Laplacian objective with a GMR tracking objective
+(one term per robot frame, weighted by the IK table pos_weight and rot_weight).
 
-Orientation tracking is intentionally absent here — it is implemented in v2.
+Both position and orientation tracking are included in this version.
 """
 from __future__ import annotations
 
@@ -37,14 +37,17 @@ _BODY_NAME_REMAP: dict[str, str] = {
 
 
 class GmrSocpRetargeterV1:
-    """Position-tracking GMR-SOCP retargeter (v1).
+    """Position + orientation tracking GMR-SOCP retargeter (v1).
 
     Solves a two-pass linearised IK problem using a trust-region SOCP.
-    The objective is a sum of weighted position-error squared terms, one per
-    robot frame listed in IK_MATCH_TABLE1 / IK_MATCH_TABLE2, evaluated from
-    the targets produced by build_frame_targets.
+    The objective is a sum of weighted squared-error terms (one per robot
+    frame), combining position and orientation residuals.  Frame targets
+    are produced by build_frame_targets and have the form:
 
-    Orientation tracking is NOT included in this version.
+        {frame: (p_target (3,), R_target (3,3), w_p, w_r)}
+
+    where ``w_p`` weights the translational term and ``w_r`` the rotational
+    term.  Either weight may be zero to disable that term.
     """
 
     def __init__(
@@ -291,6 +294,64 @@ class GmrSocpRetargeterV1:
             positions.append(self.robot_data.xpos[body_id].copy())
         return np.array(positions)
 
+    def _body_jac(self, q: np.ndarray, body_name: str):
+        """World-frame (Jp, Jr) for a body, reduced to actuated columns.
+
+        Both Jacobians map actuated-DoF increments (dqa, shape nq_a) to
+        world-frame body velocity / angular velocity.
+
+        Args:
+            q: Full configuration vector (length nq).
+            body_name: MuJoCo body name.
+
+        Returns:
+            Tuple (Jp, Jr) each of shape (3, nq_a).
+        """
+        self.robot_data.qpos[:] = q
+        mujoco.mj_forward(self.robot_model, self.robot_data)
+
+        bid = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        jacp = np.zeros((3, self.robot_model.nv), dtype=np.float64)
+        jacr = np.zeros((3, self.robot_model.nv), dtype=np.float64)
+        mujoco.mj_jacBody(self.robot_model, self.robot_data, jacp, jacr, bid)
+
+        # T shape: (nv, nq) — maps qdot -> qvel (same convention used in
+        # _calc_contact_jacobian_from_point for the position Jacobian).
+        T = self._build_transform_qdot_to_qvel_fast()
+        Jp_qa = (jacp @ T)[:, self.q_a_indices]  # (3, nq_a)
+        Jr_qa = (jacr @ T)[:, self.q_a_indices]  # (3, nq_a)
+        return Jp_qa, Jr_qa
+
+    def body_position(self, q: np.ndarray, body_name: str) -> np.ndarray:
+        """World position of ``body_name`` at configuration ``q``.
+
+        Args:
+            q: Full configuration vector (length nq).
+            body_name: MuJoCo body name.
+
+        Returns:
+            Position array of shape (3,).
+        """
+        self.robot_data.qpos[:] = q
+        mujoco.mj_forward(self.robot_model, self.robot_data)
+        bid = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        return self.robot_data.xpos[bid].copy()
+
+    def body_rotation(self, q: np.ndarray, body_name: str) -> np.ndarray:
+        """World rotation matrix of ``body_name`` at configuration ``q``.
+
+        Args:
+            q: Full configuration vector (length nq).
+            body_name: MuJoCo body name.
+
+        Returns:
+            Rotation matrix of shape (3, 3).
+        """
+        self.robot_data.qpos[:] = q
+        mujoco.mj_forward(self.robot_model, self.robot_data)
+        bid = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        return self.robot_data.xmat[bid].reshape(3, 3).copy()
+
     # ------------------------------------------------------------------
     # Core solve
     # ------------------------------------------------------------------
@@ -303,7 +364,17 @@ class GmrSocpRetargeterV1:
         frame_targets: dict,
         init_t: bool = False,
     ):
-        """One linearised IK step with GMR position-tracking objective.
+        """One linearised IK step with GMR position + orientation objective.
+
+        Builds a SOCP of the form:
+
+            min  sum_f  w_p * ||Jp_f dqa - (p_t - p_c)||^2
+                      + w_r * ||Jr_body_f dqa - e_body||^2
+            s.t. ||dqa|| <= step_size
+                 q_lb <= q_a + dqa <= q_ub  (if activate_joint_limits)
+
+        where Jr_body_f = R_c.T @ Jr_f is the body-frame angular Jacobian and
+        e_body = log(R_c.T @ R_t) is the body-frame rotation error.
 
         Args:
             q_locked: Full configuration with the floating-base part locked.
@@ -320,18 +391,31 @@ class GmrSocpRetargeterV1:
         q = np.copy(q_locked)
         q[self.q_a_indices] = q_a_n_last
 
-        robot_frames = {f: self.robot_link_names[f] for f in frame_targets}
-        J_dict, p_dict, _ = self._calc_manipulator_jacobians(
-            q, links=robot_frames, obj_frame=False
-        )
-
         dqa = cp.Variable(self.nq_a, name="dqa")
 
         obj_terms = []
-        for frame, (p_t, _R_t, w_p, _w_r) in frame_targets.items():
-            if w_p == 0:
-                continue
-            obj_terms.append(w_p * cp.sum_squares(J_dict[frame] @ dqa - (p_t - p_dict[frame])))
+        for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
+            body = self.robot_link_names[frame]
+            Jp, Jr = self._body_jac(q, body)
+
+            if w_p > 0:
+                p_c = self.body_position(q, body)
+                obj_terms.append(
+                    w_p * cp.sum_squares(Jp @ dqa - (p_t - p_c))
+                )
+
+            if w_r > 0:
+                R_c = self.body_rotation(q, body)
+                # Orientation error in body frame; body-frame angular Jacobian.
+                # Convention (b): body-frame Jacobian = R_c.T @ Jr,
+                # body-frame error = log(R_c.T @ R_t).
+                # This is the convention that makes the linearisation consistent:
+                # body_omega ≈ (R_c.T @ Jr) @ dqa  and  e = log(R_c.T @ R_t).
+                e = Rotation.from_matrix(R_c.T @ R_t).as_rotvec()
+                Jr_body = R_c.T @ Jr
+                obj_terms.append(
+                    w_r * cp.sum_squares(Jr_body @ dqa - e)
+                )
 
         constraints = [cp.SOC(self.step_size, dqa)]
         if self.activate_joint_limits:
