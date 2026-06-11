@@ -17,3 +17,10 @@ def test_original_is_skeleton_only():
 def test_lookup_roundtrip():
     for s in STAGE_SPECS:
         assert spec_for_label(s.label).key == s.key
+
+def test_gmr_stages_present_and_drive_robots():
+    from HoloNew.src.stages import STAGE_SPECS, produces_qpos, key_for_label
+    labels = [s.label for s in STAGE_SPECS]
+    assert "GMR-SOCP v1" in labels and "GMR-SOCP v2" in labels
+    assert produces_qpos("GMR-SOCP v1") and key_for_label("GMR-SOCP v1") == "gmr_socp_v1"
+    assert produces_qpos("GMR-SOCP v2") and key_for_label("GMR-SOCP v2") == "gmr_socp_v2"

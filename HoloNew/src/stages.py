@@ -17,10 +17,12 @@ class StageSpec:
 
 
 STAGE_SPECS: tuple[StageSpec, ...] = (
-    StageSpec("Original", None,        False),
-    StageSpec("Mapped",   "mapped",    False),
-    StageSpec("InObject", "in_object", False),
-    StageSpec("SOCP",     "socp",      True),
+    StageSpec("Original",    None,          False),
+    StageSpec("Mapped",      "mapped",      False),
+    StageSpec("InObject",    "in_object",   False),
+    StageSpec("SOCP",        "socp",        True),
+    StageSpec("GMR-SOCP v1", "gmr_socp_v1", True),
+    StageSpec("GMR-SOCP v2", "gmr_socp_v2", True),
 )
 
 _BY_LABEL: dict[str, StageSpec] = {s.label: s for s in STAGE_SPECS}

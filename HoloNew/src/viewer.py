@@ -89,12 +89,25 @@ class Viewer:
             batched_wxyzs=np.tile(np.array([1, 0, 0, 0]), (p.shape[0], 1)),
             batched_colors=color, opacity=opacity)
 
-    def bind(self, result) -> None:
-        """Attach a RetargetResult and build slider + stage dropdown from the registry."""
+    def bind(self, result, extra_qpos: dict | None = None) -> None:
+        """Attach a RetargetResult and build slider + stage dropdown from the registry.
+
+        Args:
+            result: RetargetResult from the native SOCP retargeter.
+            extra_qpos: Optional mapping of stage_key -> (T, 7+dof) array for
+                additional robot trajectories (e.g. GMR-SOCP variants).
+        """
         self._result = result
+        self._extra_qpos = extra_qpos or {}
+
+        # Compute safe frame range: minimum T across native + all extra trajectories.
+        t_values = [result.qpos.shape[0]]
+        t_values.extend(len(v) for v in self._extra_qpos.values())
+        T = min(t_values)
+
         with self.server.gui.add_folder("Playback"):
             self._slider = self.server.gui.add_slider(
-                "Frame", min=0, max=max(0, result.qpos.shape[0] - 1), step=1, initial_value=0)
+                "Frame", min=0, max=max(0, T - 1), step=1, initial_value=0)
         with self.server.gui.add_folder("Display"):
             self._stage_dd = self.server.gui.add_dropdown(
                 "Stage", options=stage_labels(), initial_value="SOCP")
@@ -110,11 +123,15 @@ class Viewer:
     def _redraw(self, frame: int) -> None:
         spec = spec_for_label(self._stage_dd.value)
         if spec.produces_qpos:
-            self.draw_q(self._result.qpos[frame], stage=spec.key)
-        elif spec.key is None:
+            if spec.key == "socp":
+                self.draw_q(self._result.qpos[frame], stage=spec.key)
+            elif spec.key in self._extra_qpos:
+                self.draw_q(self._extra_qpos[spec.key][frame], stage=spec.key)
+            return
+        if spec.key is None:
             # 'Original' has no stored array in RetargetResult; nothing to draw yet.
             return
-        elif spec.key in self._result.stages:
+        if spec.key in self._result.stages:
             self.draw_keypoints(self._result.stages[spec.key][frame], name=f"stage_{spec.key}")
 
     def close(self) -> None:
