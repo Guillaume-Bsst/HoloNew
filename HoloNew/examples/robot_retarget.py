@@ -29,6 +29,7 @@ from HoloNew.config_types.task import TaskConfig  # noqa: E402
 from HoloNew.src.interaction_mesh_retargeter import (  # noqa: E402
     InteractionMeshRetargeter,  # type: ignore[import-not-found]
 )
+from HoloNew.src.retarget_result import RetargetResult  # noqa: E402
 from HoloNew.src.utils import (  # noqa: E402
     augment_object_poses,
     calculate_scale_factor,
@@ -598,7 +599,7 @@ def determine_output_path(
 # ----------------------------- Main -----------------------------
 
 
-def main(cfg: RetargetingConfig) -> None:
+def main(cfg: RetargetingConfig) -> RetargetResult | None:
     """Main retargeting pipeline.
     Args:
         cfg: Configuration arguments
@@ -704,7 +705,7 @@ def main(cfg: RetargetingConfig) -> None:
 
     # Retarget motion
     logger.info("Starting retargeting...")
-    retargeter.retarget_motion(
+    result = retargeter.retarget_motion(
         human_joint_motions=human_joints,
         object_poses=object_poses,
         object_poses_augmented=object_poses_augmented,
@@ -720,6 +721,36 @@ def main(cfg: RetargetingConfig) -> None:
 
     if cfg.retargeter.debug:
         input("Press Enter to exit ...")
+
+    return result
+
+
+def run_headless(cfg: RetargetingConfig | None = None, **overrides) -> RetargetResult:
+    """Run the full retargeting pipeline headlessly and return a RetargetResult.
+
+    Args:
+        cfg: Optional pre-built RetargetingConfig. If None, a default config is
+             constructed and overrides are applied as top-level attributes.
+        **overrides: Top-level RetargetingConfig field values to set when cfg is None
+                     (e.g. data_path, task_type, task_name, data_format).
+
+    Returns:
+        RetargetResult with qpos trajectory and per-frame stage data.
+    """
+    if cfg is None:
+        cfg = RetargetingConfig()
+        for key, val in overrides.items():
+            # Coerce string data_path to Path to match the field type
+            if key == "data_path" and not isinstance(val, Path):
+                val = Path(val)
+            setattr(cfg, key, val)
+
+    # Disable visualization and debug so nothing tries to open a window
+    from dataclasses import replace
+
+    cfg.retargeter = replace(cfg.retargeter, visualize=False, debug=False)
+
+    return main(cfg)
 
 
 if __name__ == "__main__":

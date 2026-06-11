@@ -357,6 +357,8 @@ class InteractionMeshRetargeter:
         tetrahedra = []
         obj_pts_demo_list = []  # scaled object pts
         obj_pts_list = []  # original size object pts
+        mapped_list = []
+        in_object_list = []
 
         print(f"\nStarting motion retargeting for {num_frames} frames...")
 
@@ -375,6 +377,9 @@ class InteractionMeshRetargeter:
                     human_mapped_joints_in_object = transform_points_world_to_local(
                         object_quat_demo, object_trans_demo, human_mapped_joints
                     )
+
+                mapped_list.append(human_mapped_joints)
+                in_object_list.append(human_mapped_joints_in_object)
 
                 source_vertices, source_tetrahedra = create_interaction_mesh(
                     np.vstack([human_mapped_joints_in_object, object_points_local_demo])
@@ -456,10 +461,13 @@ class InteractionMeshRetargeter:
                 handle.remove()
             robot_kpts_handle_list.clear()
 
+        from .retarget_result import RetargetResult
+        qpos = np.array(retargeted_motions)[1:]
+
         # Save results
         np.savez(
             dest_res_path,
-            qpos=np.array(retargeted_motions)[1:],
+            qpos=qpos,
             human_joints=human_joint_motions,
             fps=30,
             cost=cost,
@@ -473,7 +481,7 @@ class InteractionMeshRetargeter:
                 server=self.server,
                 viser_robot=self.viser_robot,
                 robot_base_frame=self.robot_base,
-                motion_sequence=np.asarray(retargeted_motions)[1:],
+                motion_sequence=qpos,
                 robot_dof=robot_dof,
                 viser_object=self.viser_object,
                 object_base_frame=getattr(self, "object_base", None) if self.viser_object else None,
@@ -493,11 +501,10 @@ class InteractionMeshRetargeter:
                     if self.viser_object is not None:
                         self.viser_object.show_visual = show_meshes_cb.value
 
-        return (
-            np.array(retargeted_motions)[1:],
-            obj_pts_demo_list,
-            obj_pts_list,
-            tetrahedra,
+        return RetargetResult(
+            qpos=qpos,
+            stages={"mapped": np.stack(mapped_list), "in_object": np.stack(in_object_list)},
+            cost=float(cost),
         )
 
     def solve_single_iteration(
