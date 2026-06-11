@@ -15,6 +15,8 @@ import viser
 from viser.extras import ViserUrdf
 import yourdfpy
 
+from .stages import STAGE_SPECS, spec_for_label, stage_labels
+
 
 @dataclass
 class RobotHandle:
@@ -86,6 +88,34 @@ class Viewer:
             batched_positions=p,
             batched_wxyzs=np.tile(np.array([1, 0, 0, 0]), (p.shape[0], 1)),
             batched_colors=color, opacity=opacity)
+
+    def bind(self, result) -> None:
+        """Attach a RetargetResult and build slider + stage dropdown from the registry."""
+        self._result = result
+        with self.server.gui.add_folder("Playback"):
+            self._slider = self.server.gui.add_slider(
+                "Frame", min=0, max=max(0, result.qpos.shape[0] - 1), step=1, initial_value=0)
+        with self.server.gui.add_folder("Display"):
+            self._stage_dd = self.server.gui.add_dropdown(
+                "Stage", options=stage_labels(), initial_value="SOCP")
+
+        @self._slider.on_update
+        def _(_evt): self._redraw(int(self._slider.value))
+
+        @self._stage_dd.on_update
+        def _(_evt): self._redraw(int(self._slider.value))
+
+        self._redraw(0)
+
+    def _redraw(self, frame: int) -> None:
+        spec = spec_for_label(self._stage_dd.value)
+        if spec.produces_qpos:
+            self.draw_q(self._result.qpos[frame], stage=spec.key)
+        elif spec.key is None:
+            # 'Original' has no stored array in RetargetResult; nothing to draw yet.
+            return
+        elif spec.key in self._result.stages:
+            self.draw_keypoints(self._result.stages[spec.key][frame], name=f"stage_{spec.key}")
 
     def close(self) -> None:
         self.server.stop()
