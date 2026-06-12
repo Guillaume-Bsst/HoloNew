@@ -468,6 +468,8 @@ class GmrSocpRetargeterV2:
         Returns:
             RetargetResult with qpos (T, 7+DOF) trajectory.
         """
+        from tqdm import tqdm
+
         from HoloNew.src.retarget_result import RetargetResult
         from .tables import IK_MATCH_TABLE1, IK_MATCH_TABLE2
         from .targets import ground_frame_targets
@@ -478,7 +480,7 @@ class GmrSocpRetargeterV2:
         q = np.copy(self.q_init_full)
         out = []
 
-        for t in range(T):
+        for t in tqdm(range(T), desc="GMR-SOCP v2"):
             # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
