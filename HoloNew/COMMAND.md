@@ -95,16 +95,41 @@ python examples/view_stages.py --task-type robot_only \
   --methods holosoma gmr_socp_v2
 ```
 
-Takes the same `RetargetingConfig` flags as `robot_retarget.py`, plus `--methods`.
+Takes the same `RetargetingConfig` flags as `robot_retarget.py`, plus `--methods`
+and `--omomo_dir` (see SMPL-X mesh below).
 
 The viewer also exposes (GUI folders, right panel):
 
-- **Skeleton** — toggle body/finger **bones** and **joints** of the 52-joint
-  source skeleton (shown on the `Original` stage).
-- **Meshes** — overlay the posed **SMPL-X mesh** (needs the SMPL-X model dir) and
-  the **object mesh**, on any stage.
+- **Playback** — Frame slider, **Play / Pause**, and an **FPS** control to play
+  the motion (scrubbing the slider pauses it).
+- **Display** — Method / Stage dropdowns and a **Show G1 URDF** toggle (hide the
+  robot mesh to see its skeleton underneath).
+- **Skeleton** — toggle body/finger **bones** and **joints**. Every stage renders
+  as a skeleton: the 52-joint source on `Original`, the mapped bodies on the
+  preprocessing stages, and the solved G1 (link FK) on the `Robot` stage.
+- **Meshes** — overlay the posed **SMPL-X mesh** and the **object mesh**, on any
+  stage.
 - **Ghost** — pick a second `(Method, Stage)` to overlay faded for comparison
   (`Off` to disable). The ghost covers skeleton stages, not the robot.
+
+### SMPL-X mesh (Meshes → SMPL-X mesh)
+
+The mesh is posed from the `.pt` per-joint quaternions and re-grounded onto the
+floor (median sole), like test_pipe. Two data sources:
+
+- **SMPL-X model dir** — used automatically (no flag), `SMPLX_MODEL_DIR_DEFAULT`:
+  `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models`
+- **Subject shape (betas + gender)** — pass `--omomo_dir` at the original OMOMO
+  release (the one holding `data/{train,test}_diffusion_manip_seq_joints24.p`, NOT
+  `OMOMO_new`). Without it the mesh uses the neutral mean shape, so the limbs will
+  not match the subject's skeleton:
+  `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO`
+
+```bash
+python examples/view_stages.py --task-type robot_only \
+  --task-name sub3_largebox_003 --data_format smplh --methods gmr_socp_v1 \
+  --omomo_dir /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO
+```
 
 ---
 
