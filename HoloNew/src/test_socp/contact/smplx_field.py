@@ -17,6 +17,13 @@ from HoloNew.src.holosoma.interaction_mesh import transform_points_world_to_loca
 
 
 @dataclass
+class ProbeFrame:
+    """One frame's probe output: the SMPL-X surface points (world) and their field."""
+    points: np.ndarray          # (N, 3)
+    field: "ContactField"
+
+
+@dataclass
 class SmplxGroundProbe:
     """Query the object SDF at the Grounded-pose SMPL-X surface samples, per frame.
 
@@ -38,15 +45,16 @@ class SmplxGroundProbe:
     obj_trans: np.ndarray
     margin: float
 
-    def __call__(self, t: int, quats_wxyz: np.ndarray, pelvis_grounded: np.ndarray) -> "ContactField":
-        """ContactField (distance + direction per sample) at frame t. Reads only t."""
+    def __call__(self, t: int, quats_wxyz: np.ndarray, pelvis_grounded: np.ndarray) -> "ProbeFrame":
+        """ProbeFrame (probe world points + their ContactField) at frame t. Reads only t."""
         world = self.human_body.placed_points(quats_wxyz, pelvis_grounded, self.cache, frame_idx=t)
         local = transform_points_world_to_local(self.obj_quat[t], self.obj_trans[t], world)
-        return self.object_sdf.query(local, self.margin)
+        return ProbeFrame(points=world.astype(np.float32),
+                          field=self.object_sdf.query(local, self.margin))
 
 
 def build_smplx_ground_probe(task_name, omomo_dir, model_dir, object_sdf,
-                             obj_poses, margin, density):
+                             obj_poses, margin, density, cache=None):
     """Build the probe: load the subject SMPL-X shape and sample its surface once.
 
     The object pose is used as-is (not grounded): the human is placed at its Grounded
@@ -62,7 +70,7 @@ def build_smplx_ground_probe(task_name, omomo_dir, model_dir, object_sdf,
 
     betas, gender = load_human_metadata(Path(omomo_dir), task_name)
     body = HumanBody(model_dir, betas, gender)
-    cache = body.build_point_cloud_cache(density)
+    cache = cache if cache is not None else body.build_point_cloud_cache(density)
 
     obj_poses = np.asarray(obj_poses, dtype=np.float64)
     return SmplxGroundProbe(body, cache, object_sdf, obj_poses[:, :4], obj_poses[:, 4:7], margin)
