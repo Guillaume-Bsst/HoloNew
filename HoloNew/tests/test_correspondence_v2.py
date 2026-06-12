@@ -3,7 +3,7 @@
 
 def test_v2_loads_bundled_correspondence():
     from HoloNew.examples.robot_retarget import RetargetingConfig
-    from HoloNew.src.gmr_socp.gmr_socp_v2 import GmrSocpRetargeterV2
+    from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
     from HoloNew.src.correspondence.build_correspondence import CorrespondenceTable
 
     rt = GmrSocpRetargeterV2.from_config(

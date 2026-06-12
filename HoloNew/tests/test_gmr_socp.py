@@ -10,7 +10,7 @@ def demo_cfg():
 
 
 from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
-from HoloNew.src.gmr_socp.gmr_socp_v2 import GmrSocpRetargeterV2
+from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
 
 
 @pytest.mark.parametrize("cls", [GmrSocpRetargeterV1, GmrSocpRetargeterV2])

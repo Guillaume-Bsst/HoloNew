@@ -9,7 +9,7 @@ from __future__ import annotations
 
 def test_v2_loads_bundled_contact():
     from HoloNew.examples.robot_retarget import RetargetingConfig
-    from HoloNew.src.gmr_socp.gmr_socp_v2 import GmrSocpRetargeterV2
+    from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
     from HoloNew.src.contact.contact_field import ContactField
 
     rt = GmrSocpRetargeterV2.from_config(
