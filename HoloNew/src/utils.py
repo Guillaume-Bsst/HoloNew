@@ -33,6 +33,26 @@ def load_intermimic_data(file_path):
     return human_joints, object_poses
 
 
+# Right-multiplier that undoes intermimic's PHC "upright_start" twist baked into
+# the stored global quats (interact2mimic.py writes global_rot * Q^-1, xyzw).
+_UPRIGHT_START_FIX_XYZW = np.array([0.5, 0.5, 0.5, 0.5])
+
+
+def load_intermimic_quats(file_path):
+    """Per-joint global SMPL-X orientations from a .pt, MuJoCo order, wxyz.
+
+    Returns (T, 52, 4) float32. The intermimic `upright_start` twist is undone so
+    these are true SMPL-X global orientations (the form HumanBody.placed_verts
+    expects). The .pt stores them xyzw at slice [383:383+52*4].
+    """
+    data = torch.load(file_path, map_location="cpu").detach().numpy()
+    quats_xyzw = data[:, 383 : 383 + 52 * 4].reshape(-1, 52, 4)
+    t, j, _ = quats_xyzw.shape
+    fixed = R.from_quat(quats_xyzw.reshape(-1, 4)) * R.from_quat(_UPRIGHT_START_FIX_XYZW)
+    quats_xyzw = fixed.as_quat().reshape(t, j, 4)
+    return quats_xyzw[:, :, [3, 0, 1, 2]].astype(np.float32)
+
+
 def load_object_data(
     object_file,
     smpl_scale=0.714,
