@@ -61,7 +61,7 @@ New optional fields (None for solvers that do not produce them):
 `view_stages` pulls these from the TEST-SOCP result and passes them to `Viewer`.
 Only TEST-SOCP populates them; other methods leave them `None` (toggles no-op).
 
-### "Interaction" GUI folder (extends the existing SDF Object toggle)
+### "Test" GUI folder (extends the existing SDF Object toggle)
 - **Human contact** — SMPL-X probes coloured by `min(human_object, human_floor)`.
 - **Object contact** — object_human probes (from `contact_fields`, bundled only).
 - **Floor contact** — floor_human probes (from `contact_fields`, bundled only).
