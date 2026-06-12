@@ -19,6 +19,7 @@ import yourdfpy
 
 from . import skeleton
 from .stages import ROBOT_STAGE, stages_for_method
+from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
 from HoloNew.src.test_socp.contact.viz import signed_distance_colors
 from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M
 
@@ -69,6 +70,11 @@ class MethodViz:
     human_dist: np.ndarray | None = None        # (T, N)    signed distance (min(object, floor))
     g1_transport_pts: np.ndarray | None = None  # (T, M, 3) transported points on the robot
     g1_dist: np.ndarray | None = None           # (T, M)    each G1 point's human-source distance
+    human_witness: np.ndarray | None = None     # (T, N, 3) object-local witness for human probes
+    contact_fields: dict | None = None          # bundled channels: object_human / floor_human
+    object_probe_pts: np.ndarray | None = None  # (M_o, 3) object-LOCAL object-probe positions
+    floor_probe_pts: np.ndarray | None = None   # (M_f, 3) world floor-probe positions
+    g1_witness: np.ndarray | None = None        # (T, M, 3) object-local witness per G1 point
 
 
 class Viewer:
@@ -85,6 +91,8 @@ class Viewer:
                  object_scaled_stages: tuple[str, ...] = (),
                  object_sdf_pts: np.ndarray | None = None,
                  object_sdf_cols: np.ndarray | None = None,
+                 object_sdf_floor_pts: np.ndarray | None = None,
+                 object_sdf_floor_cols: np.ndarray | None = None,
                  human_body: object | None = None) -> None:
         self.robot_model_path = robot_model_path
         self.object_model_path = object_model_path
@@ -107,6 +115,8 @@ class Viewer:
         # signed-distance colours, placed at the active stage's object pose.
         self.object_sdf_pts = object_sdf_pts
         self.object_sdf_cols = object_sdf_cols
+        self.object_sdf_floor_pts = object_sdf_floor_pts
+        self.object_sdf_floor_cols = object_sdf_floor_cols
         self.human_body = human_body
         self._smplx_handle = None
         # Persistent object handles, updated in place each frame (never removed/recreated)
@@ -117,6 +127,9 @@ class Viewer:
         self._sdf_handle = None
         self._human_handle = None
         self._g1_transport_handle = None
+        self._object_contact_handle = None
+        self._floor_contact_handle = None
+        self._sdf_floor_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -238,8 +251,11 @@ class Viewer:
             self._tog_human = self.server.gui.add_checkbox("Human contact", False)
             self._tog_g1_transport = self.server.gui.add_checkbox("G1 transport", False)
             self._tog_directions = self.server.gui.add_checkbox("Directions", False)
+            self._tog_object_contact = self.server.gui.add_checkbox("Object contact", False)
+            self._tog_floor_contact = self.server.gui.add_checkbox("Floor contact", False)
         for _cb in (self._tog_sdf, self._tog_sdf_floor, self._tog_human,
-                    self._tog_g1_transport, self._tog_directions):
+                    self._tog_g1_transport, self._tog_directions,
+                    self._tog_object_contact, self._tog_floor_contact):
             @_cb.on_update
             def _(_evt):
                 self._redraw(int(self._slider.value))
@@ -409,7 +425,6 @@ class Viewer:
         Both use persistent handles updated in place (not the per-frame add/remove of
         _dynamic_handles) so the object does not flicker during playback."""
         pose = None if self.object_mesh_verts is None else self._object_pose(self._stage_dd.value)
-        from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
 
         if pose is not None and self._tog_object.value:
             verts = transform_points_local_to_world(
@@ -460,7 +475,6 @@ class Viewer:
         """Object SDF near-surface band shell, coloured by signed distance, placed at the
         active stage's object pose (object-local points lifted to world). Persistent handle,
         updated in place; no-op when no SDF / object pose is available."""
-        from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
         pose = None if self.object_sdf_pts is None else self._object_pose(self._stage_dd.value)
         if self._tog_sdf.value and pose is not None:
             pts = transform_points_local_to_world(
@@ -507,6 +521,72 @@ class Viewer:
             "_g1_transport_handle", "/test/g1_transport",
             method.g1_transport_pts[frame] if show_g1 else None,
             method.g1_dist[frame] if show_g1 else None, show_g1)
+        cf = method.contact_fields if method is not None else None
+        # object_human probes: any stage, placed at the active object pose (identity when absent).
+        f_obj = cf.get("object_human") if cf else None
+        pose = self._object_pose(stage) if method is not None else None
+        show_o = (self._tog_object_contact.value and f_obj is not None
+                  and method.object_probe_pts is not None)
+        if show_o:
+            if pose is not None:
+                opts = transform_points_local_to_world(
+                    pose[frame, 3:7], pose[frame, :3], method.object_probe_pts)
+            else:
+                opts = method.object_probe_pts
+        else:
+            opts = None
+        self._draw_signed_cloud("_object_contact_handle", "/test/object_contact",
+                                opts, f_obj.distance[frame] if show_o else None, show_o)
+        # floor_human probes: any stage, already world.
+        f_flr = cf.get("floor_human") if cf else None
+        show_f = (self._tog_floor_contact.value and f_flr is not None
+                  and method.floor_probe_pts is not None)
+        self._draw_signed_cloud("_floor_contact_handle", "/test/floor_contact",
+                                method.floor_probe_pts if show_f else None,
+                                f_flr.distance[frame] if show_f else None, show_f)
+
+    def _draw_segments(self, name, a, b, dist):
+        segs = np.stack([a, b], axis=1).astype(np.float32)            # (K, 2, 3)
+        cols = np.repeat(signed_distance_colors(dist, CONTACT_MARGIN_M)[:, None, :], 2, axis=1)
+        h = self.server.scene.add_line_segments(name, segs, cols, line_width=1.5)
+        self._dynamic_handles.append(h)
+
+    def _draw_directions(self, frame: int) -> None:
+        """Probe -> witness lines: human (Grounded stage), G1 (Robot stage)."""
+        if not self._tog_directions.value:
+            return
+        method = self._methods.get(self._method_dd.value)
+        if method is None:
+            return
+        stage = self._stage_dd.value
+        if (stage == "Grounded" and method.human_probe_pts is not None
+                and getattr(method, "human_witness", None) is not None):
+            pose = self._object_pose(stage)
+            wit = transform_points_local_to_world(pose[frame, 3:7], pose[frame, :3],
+                                                  method.human_witness[frame])
+            self._draw_segments("/test/dir_human", method.human_probe_pts[frame], wit,
+                                method.human_dist[frame])
+        if (stage == ROBOT_STAGE and method.g1_transport_pts is not None
+                and method.g1_witness is not None):
+            pose = self._object_pose(stage)
+            wit = transform_points_local_to_world(pose[frame, 3:7], pose[frame, :3],
+                                                  method.g1_witness[frame])
+            self._draw_segments("/test/dir_g1", method.g1_transport_pts[frame], wit,
+                                method.g1_dist[frame])
+
+    def _draw_sdf_floor(self) -> None:
+        """Static analytic floor SDF band (world), toggled visible/invisible."""
+        show = (self._tog_sdf_floor.value and self.object_sdf_floor_pts is not None)
+        if not show:
+            if self._sdf_floor_handle is not None:
+                self._sdf_floor_handle.visible = False
+            return
+        if self._sdf_floor_handle is None:
+            self._sdf_floor_handle = self.server.scene.add_point_cloud(
+                "/test/sdf_floor", points=self.object_sdf_floor_pts.astype(np.float32),
+                colors=self.object_sdf_floor_cols, point_size=0.008)
+        else:
+            self._sdf_floor_handle.visible = True
 
     def _draw_stage_skeleton(self, prefix: str, pos: np.ndarray, bones, *, ghost: bool) -> None:
         """A non-source stage (mapped bodies or solved robot links) as a skeleton:
@@ -578,6 +658,8 @@ class Viewer:
         self._draw_g1_points(frame)
         self._draw_sdf(frame)
         self._draw_interaction(frame)
+        self._draw_directions(frame)
+        self._draw_sdf_floor()
         g_stage = self._ghost_stage_dd.value
         if g_stage != "Off":
             g_method = self._methods[self._ghost_method_dd.value]

@@ -239,3 +239,26 @@ def test_interaction_toggles_and_gating(robot_urdf):
     v._stage_dd.value = "Robot"; v._redraw(0)
     assert v._g1_transport_handle is not None and v._g1_transport_handle.visible
     v.close()
+
+
+def test_object_floor_channels_any_stage(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    from HoloNew.src.test_socp.contact.contact_field import ContactField
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+
+    def _ch(n):
+        return ContactField(distance=np.zeros((3, n)), direction=np.zeros((3, n, 3)),
+                            witness=np.zeros((3, n, 3)), active=np.zeros((3, n), bool))
+    fields = {"object_human": _ch(7), "floor_human": _ch(5)}
+    m = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((3, 36)),
+                  stages={"Original": oj}, contact_fields=fields,
+                  object_probe_pts=np.zeros((7, 3)), floor_probe_pts=np.zeros((5, 3)))
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("test_socp",), original_joints=oj)
+    v.bind_methods([m])
+    assert hasattr(v, "_tog_object_contact") and hasattr(v, "_tog_floor_contact")
+    v._tog_object_contact.value = True
+    v._stage_dd.value = "Robot"; v._redraw(0)            # any stage
+    assert v._object_contact_handle is not None and v._object_contact_handle.visible
+    v.close()
