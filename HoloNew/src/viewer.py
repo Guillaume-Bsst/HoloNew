@@ -37,7 +37,7 @@ class MethodViz:
     """
     label: str
     robot_key: str
-    qpos: "np.ndarray"
+    qpos: np.ndarray
     stages: dict = field(default_factory=dict)
 
 
@@ -105,7 +105,7 @@ class Viewer:
             batched_colors=color, opacity=opacity)
 
     def bind_methods(self, methods: list) -> None:
-        """Bind a list of MethodViz and build Frame + Method + Stage dropdowns."""
+        """Bind a list of MethodViz and build a Frame slider + Method/Stage dropdowns."""
         self._methods = {m.label: m for m in methods}
         T = min(len(m.qpos) for m in methods)
 

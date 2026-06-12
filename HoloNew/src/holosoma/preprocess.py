@@ -75,8 +75,6 @@ def compute_holosoma_stages(raw_joints, scale, toe_indices, mapped_indices, mat_
     on a mat) then scale (multiply all joints), then select the mapped joints. Returns
     {Original (T,52,3), Grounded (T,52,3), Scaled (T,52,3), Mapped (T,len(mapped),3)}.
     """
-    import numpy as np
-
     raw = np.asarray(raw_joints, dtype=float)
     original = raw.copy()
 
