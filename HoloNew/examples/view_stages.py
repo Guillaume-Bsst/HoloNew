@@ -30,6 +30,7 @@ from HoloNew.examples.robot_retarget import (
     run_headless,
 )
 from HoloNew.src import skeleton
+from HoloNew.src.contact.constants import OMOMO_DIR_DEFAULT
 from HoloNew.src.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.correspondence.human_body import HumanBody
 from HoloNew.src.correspondence.human_metadata import load_human_metadata
@@ -53,8 +54,10 @@ class ViewStagesConfig(RetargetingConfig):
     methods: tuple[Method, ...] = ("holosoma", "gmr_socp_v1", "gmr_socp_v2")
     # Original OMOMO dataset root (the one holding
     # data/{train,test}_diffusion_manip_seq_joints24.p, NOT OMOMO_new). Supplies
-    # the subject's SMPL-X betas + gender for the mesh; omit for the neutral shape.
-    omomo_dir: Path | None = None
+    # the subject's SMPL-X betas + gender for the mesh. Defaults to OMOMO_DIR_DEFAULT
+    # so the correct subject shape loads automatically; pass another path to override
+    # (a missing/absent file degrades gracefully to the neutral shape).
+    omomo_dir: Path | None = Path(OMOMO_DIR_DEFAULT)
 
 
 def view(cfg: ViewStagesConfig) -> None:
@@ -110,17 +113,11 @@ def view(cfg: ViewStagesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("SMPL-X unavailable (%s); mesh disabled.", exc)
 
-    # Re-ground the human like test_pipe: the raw capture floats a few cm above the
-    # floor, so drop every joint by the median lowest SMPL-X sole height. This puts
-    # the posed mesh and the Original skeleton on the ground instead of floating.
-    if human_body is not None and original_quats is not None:
-        try:
-            offset = human_body.floor_offset(original_quats, raw_joints)
-            raw_joints = raw_joints.copy()
-            raw_joints[:, :, 2] -= offset
-            logger.info("Re-grounded human by %.2f cm (median sole).", offset * 100)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Human re-grounding skipped (%s).", exc)
+    # NOTE: raw_joints is deliberately NOT re-grounded here. The Original stage must
+    # be the exact input each solver's preprocess receives (holosoma and GMR both
+    # read the same raw .pt joints), and each solver applies its own floor drop
+    # downstream (holosoma Grounded / GMR Ground). The SMPL-X mesh is posed on these
+    # same raw joints so it stays aligned with the Original skeleton.
 
     # Object motion (from the .pt), kept in the object's local frame so the viewer can
     # render it per stage: raw pose on unscaled stages, centred pose

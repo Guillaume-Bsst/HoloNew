@@ -111,20 +111,24 @@ The viewer also exposes (GUI folders, right panel):
 
 ### SMPL-X mesh (Meshes → SMPL-X mesh)
 
-The mesh is posed from the `.pt` per-joint quaternions and re-grounded onto the
-floor (median sole), like test_pipe. Two data sources:
+The mesh is posed from the `.pt` per-joint quaternions on the same raw joints the
+solvers receive (no extra re-grounding — the `Original` stage is the literal
+preprocess input, so the mesh stays aligned with it). Two data sources, both used
+automatically:
 
-- **SMPL-X model dir** — used automatically (no flag), `SMPLX_MODEL_DIR_DEFAULT`:
+- **SMPL-X model dir** — `SMPLX_MODEL_DIR_DEFAULT`:
   `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models`
-- **Subject shape (betas + gender)** — pass `--omomo_dir` at the original OMOMO
-  release (the one holding `data/{train,test}_diffusion_manip_seq_joints24.p`, NOT
-  `OMOMO_new`). Without it the mesh uses the neutral mean shape, so the limbs will
-  not match the subject's skeleton:
+- **Subject shape (betas + gender)** — loaded by default from `OMOMO_DIR_DEFAULT`
+  (the original OMOMO release holding `data/{train,test}_diffusion_manip_seq_joints24.p`,
+  NOT `OMOMO_new`), so the mesh gets the subject's real body, not the neutral mean:
   `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO`
 
+Override the OMOMO root with `--omomo_dir <path>` if needed; a missing file degrades
+to the neutral shape.
+
 ```bash
-python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp_v1 \
-  --omomo_dir /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO
+# betas load automatically — no extra flag needed
+python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp_v1
 ```
 
 ---
