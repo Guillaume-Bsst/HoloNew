@@ -254,11 +254,14 @@ def test_object_floor_channels_any_stage(robot_urdf):
     m = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((3, 36)),
                   stages={"Original": oj}, contact_fields=fields,
                   object_probe_pts=np.zeros((7, 3)), floor_probe_pts=np.zeros((5, 3)))
+    # Object probes are object-local, so an object pose is required to lift them.
+    pose = np.zeros((3, 7), dtype=np.float32)
+    pose[:, 3] = 1.0   # identity quaternion (wxyz)
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
-               stage_keys=("test_socp",), original_joints=oj)
+               stage_keys=("test_socp",), original_joints=oj, object_pose_raw=pose)
     v.bind_methods([m])
     assert hasattr(v, "_tog_object_contact") and hasattr(v, "_tog_floor_contact")
     v._tog_object_contact.value = True
-    v._stage_dd.value = "Robot"; v._redraw(0)            # any stage
+    v._stage_dd.value = "Robot"; v._redraw(0)            # any stage (lifted by the object pose)
     assert v._object_contact_handle is not None and v._object_contact_handle.visible
     v.close()

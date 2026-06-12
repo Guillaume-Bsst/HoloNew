@@ -522,19 +522,14 @@ class Viewer:
             method.g1_transport_pts[frame] if show_g1 else None,
             method.g1_dist[frame] if show_g1 else None, show_g1)
         cf = method.contact_fields if method is not None else None
-        # object_human probes: any stage, placed at the active object pose (identity when absent).
+        # object_human probes: any stage, placed at the active object pose. The probes are
+        # object-LOCAL, so an object pose is required to lift them to world.
         f_obj = cf.get("object_human") if cf else None
         pose = self._object_pose(stage) if method is not None else None
         show_o = (self._tog_object_contact.value and f_obj is not None
-                  and method.object_probe_pts is not None)
-        if show_o:
-            if pose is not None:
-                opts = transform_points_local_to_world(
-                    pose[frame, 3:7], pose[frame, :3], method.object_probe_pts)
-            else:
-                opts = method.object_probe_pts
-        else:
-            opts = None
+                  and method.object_probe_pts is not None and pose is not None)
+        opts = (transform_points_local_to_world(pose[frame, 3:7], pose[frame, :3],
+                                                method.object_probe_pts) if show_o else None)
         self._draw_signed_cloud("_object_contact_handle", "/test/object_contact",
                                 opts, f_obj.distance[frame] if show_o else None, show_o)
         # floor_human probes: any stage, already world.
