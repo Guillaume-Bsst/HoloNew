@@ -1,44 +1,43 @@
-"""Single source of truth for the viewer's retargeting stages.
+"""Per-method registry for the annex stage viewer.
 
-Adding a future stage (e.g. GMR-SOCP) is one StageSpec entry here plus a
-producer that fills its data. Dropdown, ghost overlay and robot-mesh gating all
-derive from this registry.
+Each method declares its robot key and the ordered skeleton stages of its
+pipeline; the implicit final "Robot" stage drives the solved robot mesh.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+ROBOT_STAGE = "Robot"
+
 
 @dataclass(frozen=True)
-class StageSpec:
-    label: str           # dropdown label
-    key: str | None      # key into RetargetResult.stages; None = raw human skeleton
-    produces_qpos: bool  # True => drives a robot mesh under /world/robot_<key>
+class MethodSpec:
+    label: str                     # dropdown label
+    robot_key: str                 # robot instance key, /world/robot_<robot_key>
+    skeleton_stages: tuple[str, ...]  # ordered preprocessing stages (skeletons)
 
 
-STAGE_SPECS: tuple[StageSpec, ...] = (
-    StageSpec("Original",    None,          False),
-    StageSpec("Mapped",      "mapped",      False),
-    StageSpec("InObject",    "in_object",   False),
-    StageSpec("SOCP",        "socp",        True),
-    StageSpec("GMR-SOCP v1", "gmr_socp_v1", True),
-    StageSpec("GMR-SOCP v2", "gmr_socp_v2", True),
+METHODS: tuple[MethodSpec, ...] = (
+    MethodSpec("holosoma", "holosoma", ("Original", "Grounded", "Scaled", "Mapped")),
+    MethodSpec("GMR-SOCP v1", "gmr_socp_v1", ("Original", "Mapped", "Scaled", "Offset", "Ground")),
+    MethodSpec("GMR-SOCP v2", "gmr_socp_v2", ("Original", "Mapped", "Scaled", "Offset", "Ground")),
 )
 
-_BY_LABEL: dict[str, StageSpec] = {s.label: s for s in STAGE_SPECS}
+_BY_LABEL = {m.label: m for m in METHODS}
 
 
-def stage_labels() -> list[str]:
-    return [s.label for s in STAGE_SPECS]
+def method_labels() -> list[str]:
+    return [m.label for m in METHODS]
 
 
-def spec_for_label(label: str) -> StageSpec:
+def method_for_label(label: str) -> MethodSpec:
     return _BY_LABEL[label]
 
 
-def key_for_label(label: str) -> str | None:
-    return _BY_LABEL[label].key
+def robot_key_for_method(label: str) -> str:
+    return _BY_LABEL[label].robot_key
 
 
-def produces_qpos(label: str) -> bool:
-    return _BY_LABEL[label].produces_qpos
+def stages_for_method(label: str) -> list[str]:
+    """Ordered stage labels for a method: its skeleton stages + the Robot stage."""
+    return list(_BY_LABEL[label].skeleton_stages) + [ROBOT_STAGE]

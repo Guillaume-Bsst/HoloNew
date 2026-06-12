@@ -1,26 +1,18 @@
 from HoloNew.src.stages import (
-    STAGE_SPECS, stage_labels, spec_for_label, key_for_label, produces_qpos,
+    METHODS, ROBOT_STAGE, method_labels, robot_key_for_method, stages_for_method,
 )
 
-def test_registry_has_native_socp_stage():
-    assert "SOCP" in stage_labels()
-    assert stage_labels()[0] == "Original"
+def test_method_labels():
+    assert method_labels() == ["holosoma", "GMR-SOCP v1", "GMR-SOCP v2"]
 
-def test_socp_drives_robot():
-    assert produces_qpos("SOCP") is True
-    assert key_for_label("SOCP") == "socp"
+def test_robot_keys():
+    assert robot_key_for_method("holosoma") == "holosoma"
+    assert robot_key_for_method("GMR-SOCP v1") == "gmr_socp_v1"
+    assert robot_key_for_method("GMR-SOCP v2") == "gmr_socp_v2"
 
-def test_original_is_skeleton_only():
-    assert produces_qpos("Original") is False
-    assert key_for_label("Original") is None
-
-def test_lookup_roundtrip():
-    for s in STAGE_SPECS:
-        assert spec_for_label(s.label).key == s.key
-
-def test_gmr_stages_present_and_drive_robots():
-    from HoloNew.src.stages import STAGE_SPECS, produces_qpos, key_for_label
-    labels = [s.label for s in STAGE_SPECS]
-    assert "GMR-SOCP v1" in labels and "GMR-SOCP v2" in labels
-    assert produces_qpos("GMR-SOCP v1") and key_for_label("GMR-SOCP v1") == "gmr_socp_v1"
-    assert produces_qpos("GMR-SOCP v2") and key_for_label("GMR-SOCP v2") == "gmr_socp_v2"
+def test_stage_lists_end_with_robot():
+    hs = stages_for_method("holosoma")
+    assert hs == ["Original", "Grounded", "Scaled", "Mapped", ROBOT_STAGE]
+    g1 = stages_for_method("GMR-SOCP v1")
+    assert g1 == ["Original", "Mapped", "Scaled", "Offset", "Ground", ROBOT_STAGE]
+    assert stages_for_method("GMR-SOCP v2") == g1
