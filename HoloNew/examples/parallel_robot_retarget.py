@@ -38,7 +38,7 @@ from HoloNew.examples.robot_retarget import (  # type: ignore[import-not-found] 
 )
 
 # Import after path modification
-from HoloNew.src.interaction_mesh_retargeter import (  # noqa: E402
+from HoloNew.src.holosoma.interaction_mesh_retargeter import (  # noqa: E402
     InteractionMeshRetargeter,  # type: ignore[import-not-found]
 )
 from HoloNew.src.utils import (  # type: ignore[import-not-found]  # noqa: E402

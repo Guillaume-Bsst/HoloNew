@@ -18,8 +18,8 @@ from viser.extras import ViserUrdf  # type: ignore[import-not-found]
 
 from HoloNew.config_types.retargeter import FootLockConfig, SelfCollisionConfig
 
-# Add src to path for direct execution
-src_path = Path(__file__).parent.parent / "src"
+# Add src to path for direct execution (file lives at src/holosoma/, so parent = src/)
+src_path = Path(__file__).parent.parent
 sys.path.insert(0, str(src_path))
 
 # Import with type ignore for mypy compatibility
@@ -245,7 +245,7 @@ class InteractionMeshRetargeter:
         the MuJoCo model loads).  The Viewer is constructed with False and the
         retargeter's draw_q shim syncs the flag at call time.
         """
-        from .viewer import Viewer
+        from HoloNew.src.viewer import Viewer
         self.viewer = Viewer(
             robot_model_path=self.robot_model_path,
             object_model_path=self.object_model_path,
@@ -460,7 +460,7 @@ class InteractionMeshRetargeter:
                 handle.remove()
             robot_kpts_handle_list.clear()
 
-        from .retarget_result import RetargetResult
+        from HoloNew.src.retarget_result import RetargetResult
         qpos = np.array(retargeted_motions)[1:]
 
         # Save results

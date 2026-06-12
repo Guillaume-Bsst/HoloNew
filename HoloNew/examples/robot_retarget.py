@@ -26,7 +26,7 @@ from HoloNew.config_types.retargeter import RetargeterConfig  # noqa: E402
 from HoloNew.config_types.retargeting import RetargetingConfig  # noqa: E402
 from HoloNew.config_types.robot import RobotConfig  # noqa: E402
 from HoloNew.config_types.task import TaskConfig  # noqa: E402
-from HoloNew.src.interaction_mesh_retargeter import (  # noqa: E402
+from HoloNew.src.holosoma.interaction_mesh_retargeter import (  # noqa: E402
     InteractionMeshRetargeter,  # type: ignore[import-not-found]
 )
 from HoloNew.src.retarget_result import RetargetResult  # noqa: E402
