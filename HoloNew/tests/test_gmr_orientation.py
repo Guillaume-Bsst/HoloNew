@@ -12,7 +12,7 @@ from scipy.spatial.transform import Rotation
 
 def test_orientation_error_decreases():
     from HoloNew.config_types.retargeting import RetargetingConfig
-    from HoloNew.src.gmr_socp.gmr_socp_v1 import GmrSocpRetargeterV1
+    from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
 
     rt = GmrSocpRetargeterV1.from_config(
         RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh")

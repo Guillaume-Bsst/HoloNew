@@ -9,8 +9,6 @@ Both position and orientation tracking are included in this version.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 from types import ModuleType
 
 import cvxpy as cp
@@ -18,12 +16,7 @@ import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-# Fix up sys.path so that mujoco_utils, utils, viser_utils (in src/) are
-# importable. This file lives in src/gmr_socp/, so parent.parent is src/.
-_src_path = Path(__file__).parent.parent
-sys.path.insert(0, str(_src_path))
-
-from .tables import IK_MATCH_TABLE1  # noqa: E402
+from .tables import IK_MATCH_TABLE1
 
 # Body name remapping: keys are IK table frame names; values are actual G1
 # MuJoCo body names.  Only entries that differ from the table key are listed.

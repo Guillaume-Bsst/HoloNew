@@ -4,7 +4,7 @@ from __future__ import annotations
 import tyro
 
 from HoloNew.examples.robot_retarget import RetargetingConfig, run_headless
-from HoloNew.src.gmr_socp.gmr_socp_v1 import GmrSocpRetargeterV1
+from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
 from HoloNew.src.gmr_socp.gmr_socp_v2 import GmrSocpRetargeterV2
 from HoloNew.src.stages import STAGE_SPECS
 from HoloNew.src.viewer import Viewer

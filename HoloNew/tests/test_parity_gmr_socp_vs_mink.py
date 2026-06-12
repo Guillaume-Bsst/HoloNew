@@ -35,7 +35,7 @@ _MINK = Path(__file__).parent / "golden" / "gmr_mink_qpos.npz"
 @pytest.mark.skipif(not _MINK.exists(), reason="mink GMR reference not present")
 def test_gmr_socp_is_close_to_mink():
     from HoloNew.examples.robot_retarget import RetargetingConfig
-    from HoloNew.src.gmr_socp.gmr_socp_v1 import GmrSocpRetargeterV1
+    from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
 
     mink = np.load(_MINK)["qpos"]
     rt = GmrSocpRetargeterV1.from_config(

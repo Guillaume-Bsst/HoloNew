@@ -1,4 +1,4 @@
-from HoloNew.src.gmr_socp.tables import (
+from HoloNew.src.gmr_socp_v1.tables import (
     IK_MATCH_TABLE1, IK_MATCH_TABLE2, HUMAN_BODY_TO_IDX,
 )
 from HoloNew.config_types.data_type import SMPLH_DEMO_JOINTS

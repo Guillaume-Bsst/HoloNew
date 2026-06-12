@@ -9,7 +9,7 @@ def demo_cfg():
     return RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh")
 
 
-from HoloNew.src.gmr_socp.gmr_socp_v1 import GmrSocpRetargeterV1
+from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
 from HoloNew.src.gmr_socp.gmr_socp_v2 import GmrSocpRetargeterV2
 
 
