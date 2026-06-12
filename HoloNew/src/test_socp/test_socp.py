@@ -126,6 +126,10 @@ class TestSocpRetargeter:
         self.object_sdf = None
         self.contact_fields = None
 
+        # Online SMPL-X -> SDF probe + its per-frame outputs (set by from_config).
+        self.smplx_ground_probe = None
+        self.smplx_sdf_fields: list = []
+
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
         available_bodies = {self.robot_model.body(i).name for i in range(self.robot_model.nbody)}
@@ -482,8 +486,14 @@ class TestSocpRetargeter:
         T = gpos.shape[0]
         q = np.copy(self.q_init_full)
         out = []
+        pelvis_grounded = self.gmr_grounded[:, 0]   # (T, 3) grounded SMPL-X pelvis per frame
 
         for t in tqdm(range(T), desc="TEST-SOCP"):
+            # Online SMPL-X -> object-SDF query for this frame (causal: reads only t).
+            # Available as smplx_field for the step; also recorded for inspection.
+            if self.smplx_ground_probe is not None:
+                smplx_field = self.smplx_ground_probe(t, self.human_quat[t], pelvis_grounded[t])
+                self.smplx_sdf_fields.append(smplx_field)
             # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
@@ -614,5 +624,18 @@ class TestSocpRetargeter:
             rt.object_sdf = load_object_sdf(_sdf_path)
         if _contact_path.exists():
             rt.contact_fields = load_contact_fields(_contact_path)
+
+        # Online SMPL-X -> object-SDF probe (causal, per frame). Built only when the
+        # object SDF is available: sample the subject SMPL-X surface once, and ground the
+        # .pt object pose by the same z-shift as the human so both share one frame.
+        if rt.object_sdf is not None:
+            from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
+            from HoloNew.src.test_socp.contact.smplx_field import build_smplx_ground_probe
+            from HoloNew.src.utils import load_intermimic_data
+            _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
+            z0 = float(raw_joints[0, 0, 2] - rt.gmr_grounded[0, 0, 2])   # human ground z-shift
+            rt.smplx_ground_probe = build_smplx_ground_probe(
+                cfg.task_name, OMOMO_DIR_DEFAULT, SMPLX_MODEL_DIR_DEFAULT,
+                rt.object_sdf, obj_poses[:T], z0, CONTACT_MARGIN_M, HUMAN_GRID_DENSITY)
 
         return rt
