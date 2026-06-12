@@ -57,7 +57,12 @@ class Viewer:
                  has_dynamic_object: bool = False,
                  original_joints: np.ndarray | None = None,
                  original_quats: np.ndarray | None = None,
-                 object_poses: np.ndarray | None = None,
+                 object_mesh_verts: np.ndarray | None = None,
+                 object_mesh_faces: np.ndarray | None = None,
+                 object_points_local: np.ndarray | None = None,
+                 object_pose_raw: np.ndarray | None = None,
+                 object_pose_scaled: np.ndarray | None = None,
+                 object_scaled_stages: tuple[str, ...] = (),
                  human_body: object | None = None) -> None:
         self.robot_model_path = robot_model_path
         self.object_model_path = object_model_path
@@ -65,7 +70,17 @@ class Viewer:
         # Original source motion, shared by every method's "Original" stage.
         self.original_joints = original_joints
         self.original_quats = original_quats
-        self.object_poses = object_poses
+        # Stage-dependent object: the mesh + surface samples are kept in the object's
+        # local frame and lifted to world per frame by the active stage's pose. On a
+        # scaled stage (object_scaled_stages) the centred pose is used, otherwise the raw
+        # pose. The object keeps its native SIZE in both — holosoma scales the object's
+        # position toward the centre, not its geometry — so only the placement changes.
+        self.object_mesh_verts = object_mesh_verts
+        self.object_mesh_faces = object_mesh_faces
+        self.object_points_local = object_points_local
+        self.object_pose_raw = object_pose_raw
+        self.object_pose_scaled = object_pose_scaled
+        self.object_scaled_stages = frozenset(object_scaled_stages)
         self.human_body = human_body
         self._smplx_handle = None
         self._dynamic_handles: list = []
@@ -164,7 +179,8 @@ class Viewer:
         with self.server.gui.add_folder("Meshes"):
             self._tog_smplx = self.server.gui.add_checkbox("SMPL-X mesh", False)
             self._tog_object = self.server.gui.add_checkbox("Object mesh", False)
-        for _cb in (self._tog_smplx, self._tog_object):
+            self._tog_object_pts = self.server.gui.add_checkbox("Object points", False)
+        for _cb in (self._tog_smplx, self._tog_object, self._tog_object_pts):
             @_cb.on_update
             def _(_evt):
                 self._redraw(int(self._slider.value))
@@ -296,17 +312,38 @@ class Viewer:
             self._smplx_handle.vertices = verts
             self._smplx_handle.visible = True
 
+    def _object_pose(self, stage: str):
+        """Object pose for the given stage: the centred pose on a scaled stage, else the
+        raw pose. The object keeps its native size in both (holosoma scales the object's
+        position toward the centre, not its geometry); only the placement changes."""
+        if stage in self.object_scaled_stages:
+            return self.object_pose_scaled
+        return self.object_pose_raw
+
     def _draw_object(self, frame: int) -> None:
-        """Position the static object mesh for the given frame; no-op when data absent."""
-        show = (self._tog_object.value and self.viser_object is not None
-                and self.object_base is not None and self.object_poses is not None)
-        if self.viser_object is not None:
-            self.viser_object.show_visual = bool(show)
-        if not show:
+        """Native-size mesh + surface samples of the object for the given frame, placed
+        with the active stage's pose (centred on a scaled stage, raw otherwise). The mesh
+        ("Object mesh") and points ("Object points") are independently toggled."""
+        if self.object_mesh_verts is None or self.object_pose_raw is None:
             return
-        # object_poses layout: [x, y, z, qw, qx, qy, qz] (MuJoCo order).
-        self.object_base.position = self.object_poses[frame, :3]
-        self.object_base.wxyz = self.object_poses[frame, 3:7]
+        from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
+
+        pose = self._object_pose(self._stage_dd.value)
+        if pose is None:
+            return
+        quat, trans = pose[frame, 3:7], pose[frame, :3]
+        if self._tog_object.value:
+            verts = transform_points_local_to_world(quat, trans, self.object_mesh_verts)
+            h = self.server.scene.add_mesh_simple(
+                "/object/mesh", verts.astype(np.float32), self.object_mesh_faces,
+                color=(180, 180, 190), opacity=0.6)
+            self._dynamic_handles.append(h)
+        if self._tog_object_pts.value and self.object_points_local is not None:
+            pts = transform_points_local_to_world(quat, trans, self.object_points_local)
+            col = np.broadcast_to((255, 140, 0), (len(pts), 3)).astype(np.uint8)
+            h = self.server.scene.add_point_cloud(
+                "/object/pts", pts.astype(np.float32), col, point_size=0.012)
+            self._dynamic_handles.append(h)
 
     def _draw_stage_skeleton(self, prefix: str, pos: np.ndarray, bones, *, ghost: bool) -> None:
         """A non-source stage (mapped bodies or solved robot links) as a skeleton:

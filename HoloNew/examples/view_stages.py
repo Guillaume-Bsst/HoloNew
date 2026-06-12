@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
+import trimesh
 import tyro
 
 from HoloNew.config_types.data_type import MotionDataConfig
@@ -38,7 +39,6 @@ from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
 from HoloNew.src.holosoma.preprocess import compute_holosoma_stages, scale_object_poses_to_center
 from HoloNew.src.robot_fk import robot_link_positions
 from HoloNew.src.stages import ROBOT_STAGE
-from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
 from HoloNew.src.utils import load_intermimic_data, load_intermimic_quats, load_object_data
 from HoloNew.src.viewer import MethodViz, Viewer
 
@@ -122,34 +122,32 @@ def view(cfg: ViewStagesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Human re-grounding skipped (%s).", exc)
 
-    # Object motion (from the .pt) pulled toward the world centre by the same
-    # holosoma scale factor as the robot, so object and robot stay aligned. The
-    # .pt pose is [qw,qx,qy,qz,x,y,z]; the viewer wants MuJoCo order. The object
-    # name is the second token of the sequence (e.g. sub3_largebox_003 -> largebox).
-    object_model_path, object_poses = None, None
-    object_points, object_points_demo = None, None
+    # Object motion (from the .pt), kept in the object's local frame so the viewer can
+    # render it per stage: raw pose on unscaled stages, centred pose
+    # (scale_object_poses_to_center) on the scaled stages — native object size in both,
+    # since holosoma scales the object's position, not its geometry. The .pt pose is
+    # [qw,qx,qy,qz,x,y,z]; the viewer wants MuJoCo order. Object name is the 2nd token
+    # (sub3_largebox_003 -> largebox).
+    object_mesh_verts = object_mesh_faces = object_points_local = None
+    object_pose_raw = object_pose_scaled = None
     if data_format == "smplh":
         parts = cfg.task_name.split("_")
-        obj_dir = Path("models") / parts[1] if len(parts) >= 2 else None
+        obj_file = Path("models") / parts[1] / f"{parts[1]}.obj" if len(parts) >= 2 else None
         try:
             _, obj_poses = load_intermimic_data(str(cfg.data_path / f"{cfg.task_name}.pt"))
-            obj_urdf = obj_dir / f"{parts[1]}.urdf" if obj_dir is not None else None
-            if obj_urdf is not None and obj_urdf.exists():
-                obj_poses = scale_object_poses_to_center(obj_poses, smpl_scale)
-                object_poses = convert_object_poses_to_mujoco_order(obj_poses)
-                object_model_path = str(obj_urdf)
-                # Object interaction samples, placed per frame exactly like the classic
-                # holosoma viewer: local points from load_object_data lifted to world by
-                # transform_points_local_to_world. *_demo are the smpl_scale source points
-                # the solve tracks; the others are the full-mesh target points.
-                local_pts, local_pts_demo = load_object_data(
-                    str(obj_dir / f"{parts[1]}.obj"), smpl_scale=smpl_scale, sample_count=100)
-                object_points = np.stack(
-                    [transform_points_local_to_world(p[3:7], p[:3], local_pts) for p in object_poses])
-                object_points_demo = np.stack(
-                    [transform_points_local_to_world(p[3:7], p[:3], local_pts_demo) for p in object_poses])
+            if obj_file is not None and obj_file.exists():
+                object_pose_raw = convert_object_poses_to_mujoco_order(obj_poses)
+                object_pose_scaled = convert_object_poses_to_mujoco_order(
+                    scale_object_poses_to_center(obj_poses, smpl_scale))
+                mesh = trimesh.load(str(obj_file), force="mesh", process=False)
+                object_mesh_verts = np.asarray(mesh.vertices, np.float32)
+                object_mesh_faces = np.asarray(mesh.faces, np.uint32)
+                # Native-size local samples (same sampling as the solve: sample_count=100,
+                # seed=42); placed at the active stage's pose, native size on every stage.
+                object_points_local, _ = load_object_data(
+                    str(obj_file), smpl_scale=smpl_scale, sample_count=100)
             else:
-                logger.warning("No object URDF at %s; object disabled.", obj_urdf)
+                logger.warning("No object mesh at %s; object disabled.", obj_file)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Object unavailable (%s); object disabled.", exc)
 
@@ -203,15 +201,22 @@ def view(cfg: ViewStagesConfig) -> None:
         m.stages["Original"] = raw_joints[:T, :, :]
 
     keys = tuple(m.robot_key for m in methods)
+    # Stages whose skeleton lives in the smpl_scale-shrunk, centred world: the object is
+    # shown shrunk + centred there, and at raw size/pose on the others (Original, Grounded
+    # for holosoma; Original, Mapped for GMR — Mapped here is only position-anchored).
+    object_scaled_stages = ("Scaled", "Mapped", "Offset", "Ground", ROBOT_STAGE)
     viewer = Viewer(
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
-        object_model_path=object_model_path,
+        object_model_path=None,
         stage_keys=keys,
         original_joints=raw_joints[:T, :, :],
         original_quats=None if original_quats is None else original_quats[:T],
-        object_poses=None if object_poses is None else object_poses[:T],
-        object_points=None if object_points is None else object_points[:T],
-        object_points_demo=None if object_points_demo is None else object_points_demo[:T],
+        object_mesh_verts=object_mesh_verts,
+        object_mesh_faces=object_mesh_faces,
+        object_points_local=object_points_local,
+        object_pose_raw=None if object_pose_raw is None else object_pose_raw[:T],
+        object_pose_scaled=None if object_pose_scaled is None else object_pose_scaled[:T],
+        object_scaled_stages=object_scaled_stages,
         human_body=human_body,
     )
     viewer.bind_methods(methods)
