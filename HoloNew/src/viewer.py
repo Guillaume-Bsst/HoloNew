@@ -560,27 +560,33 @@ class Viewer:
         self._dynamic_handles.append(h)
 
     def _draw_directions(self, frame: int) -> None:
-        """Probe -> witness lines: human (Grounded stage), G1 (Robot stage)."""
+        """Probe -> witness lines for the ACTIVE probes: human (Grounded), G1 (Robot).
+        The witness is object-local, so an object pose is required to lift it to world."""
         if not self._tog_directions.value:
             return
         method = self._methods.get(self._method_dd.value)
         if method is None:
             return
         stage = self._stage_dd.value
+        pose = self._object_pose(stage)
+        if pose is None:
+            return
         if (stage == "Grounded" and method.human_probe_pts is not None
-                and getattr(method, "human_witness", None) is not None):
-            pose = self._object_pose(stage)
-            wit = transform_points_local_to_world(pose[frame, 3:7], pose[frame, :3],
-                                                  method.human_witness[frame])
-            self._draw_segments("/test/dir_human", method.human_probe_pts[frame], wit,
-                                method.human_dist[frame])
+                and method.human_witness is not None and method.human_dist is not None):
+            d = method.human_dist[frame]
+            a = d < CONTACT_MARGIN_M
+            if a.any():
+                wit = transform_points_local_to_world(
+                    pose[frame, 3:7], pose[frame, :3], method.human_witness[frame][a])
+                self._draw_segments("/test/dir_human", method.human_probe_pts[frame][a], wit, d[a])
         if (stage == ROBOT_STAGE and method.g1_transport_pts is not None
-                and method.g1_witness is not None):
-            pose = self._object_pose(stage)
-            wit = transform_points_local_to_world(pose[frame, 3:7], pose[frame, :3],
-                                                  method.g1_witness[frame])
-            self._draw_segments("/test/dir_g1", method.g1_transport_pts[frame], wit,
-                                method.g1_dist[frame])
+                and method.g1_witness is not None and method.g1_dist is not None):
+            d = method.g1_dist[frame]
+            a = d < CONTACT_MARGIN_M
+            if a.any():
+                wit = transform_points_local_to_world(
+                    pose[frame, 3:7], pose[frame, :3], method.g1_witness[frame][a])
+                self._draw_segments("/test/dir_g1", method.g1_transport_pts[frame][a], wit, d[a])
 
     def _draw_sdf_floor(self) -> None:
         """Static analytic floor SDF band (world), toggled visible/invisible."""
