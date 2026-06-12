@@ -12,8 +12,8 @@ from pathlib import Path
 import numpy as np
 import viser
 
-from HoloNew.src.contact.contact_io import load_contact_fields
-from HoloNew.src.contact.constants import CONTACT_MARGIN_M
+from HoloNew.src.gmr_socp_v2.contact.contact_io import load_contact_fields
+from HoloNew.src.gmr_socp_v2.contact.constants import CONTACT_MARGIN_M
 
 
 def _bundled() -> Path:

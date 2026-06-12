@@ -1,8 +1,8 @@
 """Tests for the per-frame contact-field driver (combined.py)."""
 import numpy as np
 import trimesh
-from HoloNew.src.contact.backends.sdf import build_object_field
-from HoloNew.src.contact.combined import compute_contact_fields
+from HoloNew.src.gmr_socp_v2.contact.backends.sdf import build_object_field
+from HoloNew.src.gmr_socp_v2.contact.combined import compute_contact_fields
 
 
 def test_compute_contact_fields_sdf_mode():

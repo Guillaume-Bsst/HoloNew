@@ -30,17 +30,17 @@ from HoloNew.examples.robot_retarget import (
     run_headless,
 )
 from HoloNew.src import skeleton
-from HoloNew.src.contact.backends.sdf import (
+from HoloNew.src.gmr_socp_v2.contact.backends.sdf import (
     band_points,
     build_object_field,
     load_object_sdf,
     save_object_sdf,
 )
-from HoloNew.src.contact.constants import CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION, OMOMO_DIR_DEFAULT
-from HoloNew.src.contact.viz import signed_distance_colors
-from HoloNew.src.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
-from HoloNew.src.correspondence.human_body import HumanBody
-from HoloNew.src.correspondence.human_metadata import load_human_metadata
+from HoloNew.src.gmr_socp_v2.contact.constants import CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION, OMOMO_DIR_DEFAULT
+from HoloNew.src.gmr_socp_v2.contact.viz import signed_distance_colors
+from HoloNew.src.gmr_socp_v2.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
+from HoloNew.src.gmr_socp_v2.correspondence.human_body import HumanBody
+from HoloNew.src.gmr_socp_v2.correspondence.human_metadata import load_human_metadata
 from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import _BODY_NAME_REMAP, GmrSocpRetargeterV1
 from HoloNew.src.gmr_socp_v1.tables import HUMAN_BODY_TO_IDX, IK_MATCH_TABLE1
 from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2

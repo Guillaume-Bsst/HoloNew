@@ -1,6 +1,6 @@
 import numpy as np
-from HoloNew.src.contact.contact_field import ContactField
-from HoloNew.src.contact.contact_io import save_contact_fields, load_contact_fields
+from HoloNew.src.gmr_socp_v2.contact.contact_field import ContactField
+from HoloNew.src.gmr_socp_v2.contact.contact_io import save_contact_fields, load_contact_fields
 
 
 def _cf(T, N):
@@ -19,7 +19,7 @@ def test_contact_fields_roundtrip(tmp_path):
 
 
 def test_motion_loads_demo_shapes():
-    from HoloNew.src.contact.motion import load_pt_motion
+    from HoloNew.src.gmr_socp_v2.contact.motion import load_pt_motion
     joints, obj_poses, quats = load_pt_motion("demo_data/OMOMO_new/sub3_largebox_003.pt")
     assert joints.shape[1:] == (52, 3)
     assert obj_poses.shape[1] == 7

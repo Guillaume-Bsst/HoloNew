@@ -1,6 +1,6 @@
 from pathlib import Path
 
-_PKG = Path(__file__).resolve().parent.parent.parent       # .../HoloNew/HoloNew
+_PKG = Path(__file__).resolve().parents[3]       # .../HoloNew/HoloNew
 G1_29DOF_URDF = str(_PKG / "models" / "g1" / "g1_29dof.urdf")
 HUMAN_GRID_DENSITY = 2000.0
 G1_DENSITY = 3000.0

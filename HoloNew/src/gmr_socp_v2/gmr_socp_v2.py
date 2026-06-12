@@ -589,8 +589,8 @@ class GmrSocpRetargeterV2:
         # Load the bundled human->G1 correspondence table (data only,
         # NOT used in the solve yet — will be wired in a later task).
         from pathlib import Path
-        from HoloNew.src.correspondence.build_correspondence import load_correspondence, build_table
-        from HoloNew.src.correspondence.constants import (
+        from HoloNew.src.gmr_socp_v2.correspondence.build_correspondence import load_correspondence, build_table
+        from HoloNew.src.gmr_socp_v2.correspondence.constants import (
             G1_29DOF_URDF, SMPLX_MODEL_DIR_DEFAULT, HUMAN_GRID_DENSITY, G1_DENSITY, OT_REG,
         )
         _bundled = Path(__file__).resolve().parent.parent.parent / "assets" / "correspondence" / "corr_neutral.npz"
@@ -602,8 +602,8 @@ class GmrSocpRetargeterV2:
 
         # Load bundled contact assets (data only — NOT used in the solve yet;
         # will be wired into the objective in a later task).
-        from HoloNew.src.contact.backends.sdf import load_object_sdf
-        from HoloNew.src.contact.contact_io import load_contact_fields
+        from HoloNew.src.gmr_socp_v2.contact.backends.sdf import load_object_sdf
+        from HoloNew.src.gmr_socp_v2.contact.contact_io import load_contact_fields
         _contact_assets = Path(__file__).resolve().parent.parent.parent / "assets" / "contact"
         _sdf_path = _contact_assets / "largebox_sdf.npz"
         _contact_path = _contact_assets / f"contact_{cfg.task_name}.npz"

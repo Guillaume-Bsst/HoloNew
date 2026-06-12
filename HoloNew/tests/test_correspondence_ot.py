@@ -1,6 +1,6 @@
 import numpy as np
 from dataclasses import dataclass
-from HoloNew.src.correspondence.ot_couple import couple
+from HoloNew.src.gmr_socp_v2.correspondence.ot_couple import couple
 
 @dataclass
 class _Src:

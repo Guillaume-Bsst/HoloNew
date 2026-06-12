@@ -1,5 +1,5 @@
 import numpy as np
-from HoloNew.src.correspondence.segments import (
+from HoloNew.src.gmr_socp_v2.correspondence.segments import (
     SEGMENTS, g1_link_to_segment, point_segments, SMPLX_JOINT_TO_SEGMENT,
 )
 

@@ -164,7 +164,7 @@ python examples/view_correspondence.py
 Requires a local SMPL-X models directory (not bundled).
 
 ```bash
-python -m HoloNew.src.correspondence.build_correspondence \
+python -m HoloNew.src.gmr_socp_v2.correspondence.build_correspondence \
   --model-dir /path/to/models/smplx \
   --gender neutral \
   --out assets/correspondence/corr_neutral.npz
@@ -177,7 +177,7 @@ Prints axial-monotonicity / neighbour-preservation / coverage per body segment
 (no ground-truth pairing needed).
 
 ```bash
-python -m HoloNew.src.correspondence.quality \
+python -m HoloNew.src.gmr_socp_v2.correspondence.quality \
   --model-dir /path/to/models/smplx --gender neutral
 # Optional: --g1-density 50000, --reg 0.005
 ```
