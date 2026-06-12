@@ -7,7 +7,7 @@ under assets/contact/.
 from __future__ import annotations
 
 
-def test_v2_loads_bundled_contact():
+def test_test_socp_loads_bundled_contact():
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
     from HoloNew.src.test_socp.contact.contact_field import ContactField

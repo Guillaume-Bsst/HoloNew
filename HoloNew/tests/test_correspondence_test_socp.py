@@ -1,7 +1,7 @@
 """Test that TestSocpRetargeter loads the bundled correspondence."""
 
 
-def test_v2_loads_bundled_correspondence():
+def test_test_socp_loads_bundled_correspondence():
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
     from HoloNew.src.test_socp.correspondence.build_correspondence import CorrespondenceTable
