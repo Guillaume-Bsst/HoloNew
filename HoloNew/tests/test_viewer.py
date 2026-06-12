@@ -92,9 +92,13 @@ def test_ghost_overlays_skeleton_stage(robot_urdf):
     v.bind_methods([m1])
     assert v._ghost_stage_dd.value == "Off"
     assert "Robot" not in v._ghost_stage_dd.options
+    # Ghost Method offers only bound methods, so an unsolved method cannot be
+    # selected (would KeyError in _redraw).
+    assert list(v._ghost_method_dd.options) == ["GMR-SOCP v1"]
     v._ghost_method_dd.value = "GMR-SOCP v1"
     v._ghost_stage_dd.value = "Mapped"
     v._redraw(0)   # must not raise
+    assert len(v._dynamic_handles) > 0   # ghost actually drew something
     v._ghost_stage_dd.value = "Off"
     v._redraw(0)
     v.close()

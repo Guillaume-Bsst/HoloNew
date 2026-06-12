@@ -16,7 +16,7 @@ from viser.extras import ViserUrdf
 import yourdfpy
 
 from . import skeleton
-from .stages import ROBOT_STAGE, method_labels, stages_for_method
+from .stages import ROBOT_STAGE, stages_for_method
 
 
 @dataclass
@@ -59,7 +59,6 @@ class Viewer:
         self.object_poses = object_poses
         self.human_body = human_body
         self._smplx_handle = None
-        self._object_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -120,6 +119,9 @@ class Viewer:
     def bind_methods(self, methods: list) -> None:
         """Bind a list of MethodViz and build a Frame slider + Method/Stage dropdowns."""
         self._methods = {m.label: m for m in methods}
+        # Dropdowns offer only the methods actually bound (e.g. when --methods
+        # selects a subset); otherwise selecting an unsolved method KeyErrors.
+        bound_labels = [m.label for m in methods]
         T = min(len(m.qpos) for m in methods)
 
         with self.server.gui.add_folder("Playback"):
@@ -128,7 +130,7 @@ class Viewer:
         with self.server.gui.add_folder("Display"):
             first = methods[0].label
             self._method_dd = self.server.gui.add_dropdown(
-                "Method", options=method_labels(), initial_value=first)
+                "Method", options=bound_labels, initial_value=first)
             self._stage_dd = self.server.gui.add_dropdown(
                 "Stage", options=stages_for_method(first), initial_value=ROBOT_STAGE)
 
@@ -158,7 +160,7 @@ class Viewer:
         with self.server.gui.add_folder("Ghost"):
             first = methods[0].label
             self._ghost_method_dd = self.server.gui.add_dropdown(
-                "Method", options=method_labels(), initial_value=first)
+                "Method", options=bound_labels, initial_value=first)
             self._ghost_stage_dd = self.server.gui.add_dropdown(
                 "Stage", options=_ghost_stages(first), initial_value="Off")
 
