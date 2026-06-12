@@ -30,7 +30,14 @@ from HoloNew.examples.robot_retarget import (
     run_headless,
 )
 from HoloNew.src import skeleton
-from HoloNew.src.contact.constants import OMOMO_DIR_DEFAULT
+from HoloNew.src.contact.backends.sdf import (
+    band_points,
+    build_object_field,
+    load_object_sdf,
+    save_object_sdf,
+)
+from HoloNew.src.contact.constants import CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION, OMOMO_DIR_DEFAULT
+from HoloNew.src.contact.viz import signed_distance_colors
 from HoloNew.src.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.correspondence.human_body import HumanBody
 from HoloNew.src.correspondence.human_metadata import load_human_metadata
@@ -130,6 +137,7 @@ def view(cfg: ViewStagesConfig) -> None:
     # (sub3_largebox_003 -> largebox).
     object_mesh_verts = object_mesh_faces = object_points_local = None
     object_pose_raw = object_pose_scaled = None
+    object_sdf_pts = object_sdf_cols = None
     if data_format == "smplh":
         parts = cfg.task_name.split("_")
         obj_file = Path("models") / parts[1] / f"{parts[1]}.obj" if len(parts) >= 2 else None
@@ -146,6 +154,24 @@ def view(cfg: ViewStagesConfig) -> None:
                 # seed=42); placed at the active stage's pose, native size on every stage.
                 object_points_local, _ = load_object_data(
                     str(obj_file), smpl_scale=smpl_scale, sample_count=100)
+
+                # Object SDF "boosted" with Coal's witness + active flag. Auto-cached under
+                # assets/contact/<obj>_sdf.npz: load it if present, else build it once (the
+                # only Coal pass) and cache it, BEFORE the solvers run. The near-surface band
+                # shell is what the viewer's "SDF Object" toggle draws.
+                sdf_path = Path("assets/contact") / f"{parts[1]}_sdf.npz"
+                if sdf_path.exists():
+                    sdf = load_object_sdf(sdf_path)
+                    logger.info("Loaded object SDF cache: %s", sdf_path)
+                else:
+                    sdf = build_object_field(mesh, CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION)
+                    sdf_path.parent.mkdir(parents=True, exist_ok=True)
+                    save_object_sdf(sdf, sdf_path)
+                    logger.info("Built + cached object SDF (%d nodes): %s",
+                                int(np.prod(sdf.dims)), sdf_path)
+                band_pts, band_dist = band_points(sdf, CONTACT_MARGIN_M)
+                object_sdf_pts = band_pts
+                object_sdf_cols = signed_distance_colors(band_dist, CONTACT_MARGIN_M)
             else:
                 logger.warning("No object mesh at %s; object disabled.", obj_file)
         except Exception as exc:  # noqa: BLE001
@@ -229,6 +255,8 @@ def view(cfg: ViewStagesConfig) -> None:
         object_pose_raw=None if object_pose_raw is None else object_pose_raw[:T],
         object_pose_scaled=None if object_pose_scaled is None else object_pose_scaled[:T],
         object_scaled_stages=object_scaled_stages,
+        object_sdf_pts=object_sdf_pts,
+        object_sdf_cols=object_sdf_cols,
         human_body=human_body,
     )
     viewer.bind_methods(methods)

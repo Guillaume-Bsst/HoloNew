@@ -187,3 +187,26 @@ def test_holosoma_g1_points_toggle(robot_urdf):
     v._tog_g1_pts.value = False; v._redraw(0)
     assert v._g1_pts_handle.visible is False
     v.close()
+
+
+def test_sdf_object_toggle(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    band = np.zeros((5, 3), dtype=np.float32)
+    cols = np.zeros((5, 3), dtype=np.uint8)
+    pose = np.zeros((3, 7), dtype=np.float32)
+    pose[:, 3] = 1.0   # identity quaternion (wxyz)
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)), stages={"Original": oj})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj,
+               object_sdf_pts=band, object_sdf_cols=cols, object_pose_raw=pose)
+    v.bind_methods([m])
+    assert hasattr(v, "_tog_sdf")
+    assert v._sdf_handle is None
+    v._tog_sdf.value = True; v._redraw(0)
+    assert v._sdf_handle is not None and v._sdf_handle.visible
+    v._tog_sdf.value = False; v._redraw(0)
+    assert v._sdf_handle.visible is False
+    v.close()

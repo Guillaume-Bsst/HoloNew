@@ -77,6 +77,8 @@ class Viewer:
                  object_pose_raw: np.ndarray | None = None,
                  object_pose_scaled: np.ndarray | None = None,
                  object_scaled_stages: tuple[str, ...] = (),
+                 object_sdf_pts: np.ndarray | None = None,
+                 object_sdf_cols: np.ndarray | None = None,
                  human_body: object | None = None) -> None:
         self.robot_model_path = robot_model_path
         self.object_model_path = object_model_path
@@ -95,6 +97,10 @@ class Viewer:
         self.object_pose_raw = object_pose_raw
         self.object_pose_scaled = object_pose_scaled
         self.object_scaled_stages = frozenset(object_scaled_stages)
+        # Object SDF near-surface band shell: object-local points + precomputed
+        # signed-distance colours, placed at the active stage's object pose.
+        self.object_sdf_pts = object_sdf_pts
+        self.object_sdf_cols = object_sdf_cols
         self.human_body = human_body
         self._smplx_handle = None
         # Persistent object handles, updated in place each frame (never removed/recreated)
@@ -102,6 +108,7 @@ class Viewer:
         self._object_mesh_handle = None
         self._object_pts_handle = None
         self._g1_pts_handle = None
+        self._sdf_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -215,6 +222,13 @@ class Viewer:
             @_cb.on_update
             def _(_evt):
                 self._redraw(int(self._slider.value))
+
+        with self.server.gui.add_folder("Interaction"):
+            # Object SDF near-surface band shell, coloured by signed distance.
+            self._tog_sdf = self.server.gui.add_checkbox("SDF Object", False)
+        @self._tog_sdf.on_update
+        def _(_evt):
+            self._redraw(int(self._slider.value))
 
         def _ghost_stages(label: str) -> list:
             return ["Off"] + [s for s in stages_for_method(label) if s != ROBOT_STAGE]
@@ -411,11 +425,12 @@ class Viewer:
 
     def _draw_g1_points(self, frame: int) -> None:
         """Holosoma's G1 morphological-graph keypoints (the robot links the interaction
-        mesh pairs with the object points) at the active method's solved pose. Persistent
-        handle, updated in place like the object points so it does not flicker."""
+        mesh pairs with the object points) at the active method's solved pose. Shown only
+        on the Robot stage (the solved robot), hidden elsewhere. Persistent handle, updated
+        in place like the object points so it does not flicker."""
         method = self._methods.get(self._method_dd.value)
         g1 = None if method is None else method.g1_points
-        if self._tog_g1_pts.value and g1 is not None:
+        if self._tog_g1_pts.value and g1 is not None and self._stage_dd.value == ROBOT_STAGE:
             pts = g1[frame].astype(np.float32)
             if self._g1_pts_handle is None:
                 col = np.broadcast_to((0, 200, 0), (len(pts), 3)).astype(np.uint8)
@@ -426,6 +441,24 @@ class Viewer:
                 self._g1_pts_handle.visible = True
         elif self._g1_pts_handle is not None:
             self._g1_pts_handle.visible = False
+
+    def _draw_sdf(self, frame: int) -> None:
+        """Object SDF near-surface band shell, coloured by signed distance, placed at the
+        active stage's object pose (object-local points lifted to world). Persistent handle,
+        updated in place; no-op when no SDF / object pose is available."""
+        from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
+        pose = None if self.object_sdf_pts is None else self._object_pose(self._stage_dd.value)
+        if self._tog_sdf.value and pose is not None:
+            pts = transform_points_local_to_world(
+                pose[frame, 3:7], pose[frame, :3], self.object_sdf_pts).astype(np.float32)
+            if self._sdf_handle is None:
+                self._sdf_handle = self.server.scene.add_point_cloud(
+                    "/interaction/sdf", pts, self.object_sdf_cols, point_size=0.008)
+            else:
+                self._sdf_handle.points = pts
+                self._sdf_handle.visible = True
+        elif self._sdf_handle is not None:
+            self._sdf_handle.visible = False
 
     def _draw_stage_skeleton(self, prefix: str, pos: np.ndarray, bones, *, ghost: bool) -> None:
         """A non-source stage (mapped bodies or solved robot links) as a skeleton:
@@ -495,6 +528,7 @@ class Viewer:
         self._draw_smplx_mesh(frame)
         self._draw_object(frame)
         self._draw_g1_points(frame)
+        self._draw_sdf(frame)
         g_stage = self._ghost_stage_dd.value
         if g_stage != "Off":
             g_method = self._methods[self._ghost_method_dd.value]
