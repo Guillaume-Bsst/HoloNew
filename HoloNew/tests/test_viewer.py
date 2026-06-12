@@ -46,3 +46,21 @@ def test_viewer_stores_original_motion(robot_urdf):
     assert v.original_joints.shape == (4, 52, 3)
     assert v.original_quats is None and v.human_body is None
     v.close()
+
+def test_original_stage_renders_with_toggles(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)),
+                  stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj)
+    v.bind_methods([m])
+    for cb in (v._tog_body_bones, v._tog_finger_bones,
+               v._tog_body_joints, v._tog_finger_joints):
+        assert cb.value in (True, False)
+    v._stage_dd.value = "Original"; v._redraw(0)
+    v._tog_finger_bones.value = False; v._redraw(0)
+    v._stage_dd.value = "Mapped"; v._redraw(0)
+    v.close()

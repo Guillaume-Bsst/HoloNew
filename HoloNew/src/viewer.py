@@ -15,6 +15,7 @@ import viser
 from viser.extras import ViserUrdf
 import yourdfpy
 
+from . import skeleton
 from .stages import ROBOT_STAGE, method_labels, stages_for_method
 
 
@@ -131,6 +132,18 @@ class Viewer:
             self._stage_dd = self.server.gui.add_dropdown(
                 "Stage", options=stages_for_method(first), initial_value=ROBOT_STAGE)
 
+        with self.server.gui.add_folder("Skeleton"):
+            self._tog_body_bones = self.server.gui.add_checkbox("Body bones", True)
+            self._tog_finger_bones = self.server.gui.add_checkbox("Finger bones", True)
+            self._tog_body_joints = self.server.gui.add_checkbox("Body joints", True)
+            self._tog_finger_joints = self.server.gui.add_checkbox("Finger joints", False)
+
+        for _cb in (self._tog_body_bones, self._tog_finger_bones,
+                    self._tog_body_joints, self._tog_finger_joints):
+            @_cb.on_update
+            def _(_evt):
+                self._redraw(int(self._slider.value))
+
         @self._method_dd.on_update
         def _(_evt):
             self._stage_dd.options = stages_for_method(self._method_dd.value)
@@ -149,27 +162,68 @@ class Viewer:
         for h in self.robots.values():
             h.urdf.show_visual = False
 
+    def _original_frame(self, frame: int) -> np.ndarray:
+        return self.original_joints[frame].astype(np.float32)
+
+    def _draw_skeleton(self, prefix: str, pos: np.ndarray, *, ghost: bool) -> None:
+        """52-joint source skeleton: body/finger bones + joints, toggle-gated."""
+        body_col = skeleton.COLOR_GHOST_BODY if ghost else skeleton.COLOR_BODY
+        finger_col = skeleton.COLOR_GHOST_FINGER if ghost else skeleton.COLOR_FINGER
+        lw = 1.5 if ghost else 3.5
+
+        segs, seg_cols = [], []
+        if self._tog_body_bones.value:
+            segs += [[pos[a], pos[b]] for a, b in skeleton.BODY_BONES]
+            seg_cols += [body_col] * len(skeleton.BODY_BONES)
+        if self._tog_finger_bones.value:
+            segs += [[pos[a], pos[b]] for a, b in skeleton.FINGER_BONES]
+            seg_cols += [finger_col] * len(skeleton.FINGER_BONES)
+        if segs:
+            arr = np.asarray(segs, dtype=np.float32)
+            cols = np.repeat(np.asarray(seg_cols, np.uint8)[:, None, :], 2, axis=1)
+            h = self.server.scene.add_line_segments(
+                f"{prefix}/bones", arr, cols, line_width=lw)
+            self._dynamic_handles.append(h)
+
+        j_idx, j_cols = [], []
+        if self._tog_body_joints.value:
+            j_idx += skeleton.BODY_JOINT_INDICES
+            j_cols += [body_col] * len(skeleton.BODY_JOINT_INDICES)
+        if self._tog_finger_joints.value:
+            j_idx += skeleton.FINGER_JOINT_INDICES
+            j_cols += [finger_col] * len(skeleton.FINGER_JOINT_INDICES)
+        if j_idx:
+            h = self.server.scene.add_point_cloud(
+                f"{prefix}/joints", pos[j_idx].astype(np.float32),
+                np.asarray(j_cols, np.uint8), point_size=0.025)
+            self._dynamic_handles.append(h)
+
+    def _draw_stage_points(self, prefix: str, pos: np.ndarray, *, ghost: bool) -> None:
+        """Mapped/preprocessing stages: joint points only (no bone topology)."""
+        if not self._tog_body_joints.value:
+            return
+        col = skeleton.COLOR_GHOST_STAGE if ghost else skeleton.COLOR_STAGE
+        h = self.server.scene.add_point_cloud(
+            f"{prefix}/joints", pos.astype(np.float32), col, point_size=0.025)
+        self._dynamic_handles.append(h)
+
+    def _clear_dynamic(self) -> None:
+        for h in self._dynamic_handles:
+            h.remove()
+        self._dynamic_handles = []
+
     def _redraw(self, frame: int) -> None:
         method = self._methods[self._method_dd.value]
         stage = self._stage_dd.value
-        # Clear the skeleton layer each redraw.
-        self._clear_skeleton()
+        self._clear_dynamic()
         self._hide_all_robots()
         if stage == ROBOT_STAGE:
             self.robots[method.robot_key].urdf.show_visual = True
             self.draw_q(method.qpos[frame], stage=method.robot_key)
+        elif stage == "Original" and self.original_joints is not None:
+            self._draw_skeleton("/active", self._original_frame(frame), ghost=False)
         else:
-            pts = method.stages[stage][frame].astype(np.float32)
-            self._skeleton = self.draw_keypoints(
-                pts, name="stage_skeleton", rgba=(1.0, 0.4, 0.0, 1.0))
-
-    def _clear_skeleton(self) -> None:
-        # draw_keypoints batches over points, so an empty array would error;
-        # remove the previously drawn skeleton handle instead.
-        handle = getattr(self, "_skeleton", None)
-        if handle is not None:
-            handle.remove()
-            self._skeleton = None
+            self._draw_stage_points("/active", method.stages[stage][frame], ghost=False)
 
     def close(self) -> None:
         self.server.stop()
