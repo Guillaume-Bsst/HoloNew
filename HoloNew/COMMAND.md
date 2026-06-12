@@ -72,11 +72,12 @@ Runs holosoma native + GMR-SOCP v1 + GMR-SOCP v2 headless on one sequence, then
 opens a viser viewer with **Method** and **Stage** dropdowns (per-method
 preprocessing stages: Original → Mapped → Scaled → Offset → Ground).
 
+The task defaults to `object_interaction` (so the manipulated object shows); pass
+`--task-type robot_only` / `climbing` to override.
+
 ```bash
-# All three optimizers (default)
-python examples/view_stages.py \
-  --data_path demo_data/OMOMO_new --task-type robot_only \
-  --task-name sub3_largebox_003 --data_format smplh
+# All three optimizers, default task (object_interaction), default sequence
+python examples/view_stages.py
 # Viewer at http://localhost:8080 — Enter in the terminal to exit.
 ```
 
@@ -85,14 +86,10 @@ Use `--methods` to solve only a subset instead of all three. Choices:
 
 ```bash
 # Only GMR-SOCP v1
-python examples/view_stages.py --task-type robot_only \
-  --task-name sub3_largebox_003 --data_format smplh \
-  --methods gmr_socp_v1
+python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp_v1
 
 # holosoma + GMR-SOCP v2 only
-python examples/view_stages.py --task-type robot_only \
-  --task-name sub3_largebox_003 --data_format smplh \
-  --methods holosoma gmr_socp_v2
+python examples/view_stages.py --task-name sub3_largebox_003 --methods holosoma gmr_socp_v2
 ```
 
 Takes the same `RetargetingConfig` flags as `robot_retarget.py`, plus `--methods`
@@ -126,8 +123,7 @@ floor (median sole), like test_pipe. Two data sources:
   `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO`
 
 ```bash
-python examples/view_stages.py --task-type robot_only \
-  --task-name sub3_largebox_003 --data_format smplh --methods gmr_socp_v1 \
+python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp_v1 \
   --omomo_dir /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO
 ```
 
