@@ -138,7 +138,22 @@ def view(cfg: ViewStagesConfig) -> None:
     object_mesh_verts = object_mesh_faces = object_points_local = None
     object_pose_raw = object_pose_scaled = None
     object_sdf_pts = object_sdf_cols = None
+    object_sdf_floor_pts = object_sdf_floor_cols = None
     if data_format == "smplh":
+        # Analytic floor SDF band: a thin sheet stack over the floor extent at z layers in
+        # [-margin, margin], coloured by signed z distance (drawn by the "SDF Floor" toggle).
+        from HoloNew.src.test_socp.contact.probes import make_floor_grid
+        _cx = float(raw_joints[:, 0, 0].mean())
+        _cy = float(raw_joints[:, 0, 1].mean())
+        _base = make_floor_grid(center_xy=(_cx, _cy), density=80.0)
+        _layers = []
+        for _z in np.linspace(-CONTACT_MARGIN_M, CONTACT_MARGIN_M, 3):
+            _l = _base.copy()
+            _l[:, 2] = _z
+            _layers.append(_l)
+        object_sdf_floor_pts = np.concatenate(_layers).astype(np.float32)
+        object_sdf_floor_cols = signed_distance_colors(object_sdf_floor_pts[:, 2], CONTACT_MARGIN_M)
+
         parts = cfg.task_name.split("_")
         obj_file = Path("models") / parts[1] / f"{parts[1]}.obj" if len(parts) >= 2 else None
         try:
@@ -224,8 +239,22 @@ def view(cfg: ViewStagesConfig) -> None:
         g1 = robot_link_poses(robot_mjcf, g1_links, res.qpos)[0]
         sb = {name: gmr_bones for name in ("Mapped", "Scaled", "Offset", "Floor")}
         sb[ROBOT_STAGE] = gmr_bones
-        return MethodViz(label, key, res.qpos, stages, stage_bones=sb,
-                         robot_skeleton=rs, stage_quats=sq, robot_quats=rq, g1_points=g1)
+        mv = MethodViz(label, key, res.qpos, stages, stage_bones=sb,
+                       robot_skeleton=rs, stage_quats=sq, robot_quats=rq, g1_points=g1)
+        # TEST-SOCP exposes the per-frame interaction data (probes at the Grounded pose,
+        # their object/floor signed distances + object witness, and the correspondence
+        # transported onto the solved robot). Map it onto the MethodViz for the viewer.
+        if res.human_probe_pts is not None:
+            mv.human_probe_pts = res.human_probe_pts
+            mv.human_obj_dist = res.human_obj_dist
+            mv.human_flr_dist = res.human_flr_dist
+            mv.human_witness = res.human_witness
+            mv.human_dist = np.minimum(res.human_obj_dist, res.human_flr_dist)
+        if res.g1_transport_pts is not None:
+            mv.g1_transport_pts = res.g1_transport_pts
+            mv.g1_dist = res.human_obj_dist[:, res.human_idx]      # each G1 reads its human's object dist
+            mv.g1_witness = res.human_witness[:, res.human_idx]    # and its human's object witness
+        return mv
 
     builders = {
         "holosoma": build_holosoma,
@@ -257,6 +286,8 @@ def view(cfg: ViewStagesConfig) -> None:
         object_scaled_stages=object_scaled_stages,
         object_sdf_pts=object_sdf_pts,
         object_sdf_cols=object_sdf_cols,
+        object_sdf_floor_pts=object_sdf_floor_pts,
+        object_sdf_floor_cols=object_sdf_floor_cols,
         human_body=human_body,
     )
     viewer.bind_methods(methods)
