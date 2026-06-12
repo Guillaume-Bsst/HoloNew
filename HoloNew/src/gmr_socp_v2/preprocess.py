@@ -81,6 +81,7 @@ def compute_stages(
     quats_wxyz: np.ndarray,
     human_height: float = HUMAN_HEIGHT_ASSUMPTION,
     anchor_root_xy: bool = True,
+    root_xy_scale: float = 1.0,
 ) -> dict[str, dict[str, np.ndarray]]:
     """positions (T,52,3), quats_wxyz (T,52,4) ->
     {stage: {'pos': (T,B,3), 'quat': (T,B,4)}} for stages mapped/scaled/offset/ground.
@@ -90,10 +91,12 @@ def compute_stages(
     (the lowest mapped-body z over the WHOLE sequence, on the offset-stage targets) is
     subtracted from every frame so the sequence's lowest body rests on the floor.
 
-    When `anchor_root_xy` is True, each stage is translated in XY so its pelvis
-    coincides with the raw pelvis (GMR scales the absolute root toward the origin; this
-    restores the raw root XY while keeping the Z floor-drop). Set False for the literal
-    GMR-scaled positions.
+    When `anchor_root_xy` is True, each stage is rigidly translated in XY so its
+    pelvis sits at ``raw_pelvis_xy * root_xy_scale`` (GMR scales the absolute root
+    toward the origin; this restores the raw root XY while keeping the Z floor-drop).
+    With the default ``root_xy_scale=1.0`` the raw root XY is preserved; pass the
+    holosoma scale factor to pull the root toward the world centre like holosoma.
+    Set `anchor_root_xy` False for the literal GMR-scaled positions.
     """
     T = positions.shape[0]
     ratio = human_height / HUMAN_HEIGHT_ASSUMPTION
@@ -126,7 +129,7 @@ def compute_stages(
 
     if anchor_root_xy:
         pelvis_bi = names.index(HUMAN_ROOT_NAME)
-        raw_pelvis_xy = positions[:, HUMAN_BODY_TO_IDX[HUMAN_ROOT_NAME], :2]  # (T, 2)
+        raw_pelvis_xy = positions[:, HUMAN_BODY_TO_IDX[HUMAN_ROOT_NAME], :2] * root_xy_scale  # (T, 2)
         for s in stage_names:
             stage_pelvis_xy = out[s]["pos"][:, pelvis_bi, :2]                # (T, 2)
             shift = (raw_pelvis_xy - stage_pelvis_xy)[:, None, :]            # (T, 1, 2)

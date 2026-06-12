@@ -508,6 +508,7 @@ class GmrSocpRetargeterV1:
             build_retargeter_kwargs_from_config,
             create_task_constants,
         )
+        from HoloNew.src.holosoma.preprocess import calculate_scale_factor
         from .preprocess import compute_stages
         from .tables import HUMAN_ROOT_NAME, MAPPED_BODY_NAMES
         from .targets import load_pt_joints, load_pt_quaternions
@@ -554,11 +555,14 @@ class GmrSocpRetargeterV1:
         rt.human_quat = human_quat    # (T, 52, 4) wxyz
         rt.q_init_full = q_init_full  # (nq,) — base will be set from ground below
 
-        # GMR-faithful targets: feed compute_stages the RAW joint positions (test_pipe
-        # convention, with the root XY preserved) rather than holosoma's globally-scaled
-        # joints, then track the 'ground' stage. This matches GMR/mink; the holosoma
-        # global scale was the sole cause of the ~0.4 m base offset vs mink.
-        rt.gmr_stages = compute_stages(raw_joints, human_quat, anchor_root_xy=True)
+        # Pull the root toward the world centre by holosoma's scale factor
+        # (ROBOT_HEIGHT / human_height) so the GMR base XY matches holosoma's
+        # globally-scaled placement. compute_stages applies this as a rigid XY
+        # translation, preserving GMR's body proportions and the Z floor-drop.
+        smpl_scale = calculate_scale_factor(cfg.task_name, constants.ROBOT_HEIGHT)
+        rt.gmr_stages = compute_stages(
+            raw_joints, human_quat, anchor_root_xy=True, root_xy_scale=smpl_scale
+        )
         rt.gmr_ground = rt.gmr_stages["ground"]
         ground = rt.gmr_ground
         _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)

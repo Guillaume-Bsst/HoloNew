@@ -56,16 +56,27 @@ def preprocess_motion_data(
     human_joints = human_joints * scale
 
     if object_poses is not None:
-        object_poses[:, -3:-1] = object_poses[:, -3:-1] * scale
-        object_z0 = object_poses[0, -1]
-        dz_scale = (object_poses[:, -1] - object_z0) * scale
-        object_poses[:, -1] = object_z0 + dz_scale
+        object_poses[:] = scale_object_poses_to_center(object_poses, scale)
 
         object_moving_frame_idx = extract_object_first_moving_frame(object_poses)
 
         return human_joints, object_poses, object_moving_frame_idx
 
     return human_joints
+
+
+def scale_object_poses_to_center(object_poses, scale):
+    """Pull object poses toward the world centre, mirroring preprocess_motion_data.
+
+    object_poses layout: [..., x, y, z] (last three entries). XY is scaled toward
+    the origin by ``scale``; Z keeps its frame-0 height and scales only the deviation
+    from it. Returns a new array; the input is left unchanged.
+    """
+    out = object_poses.copy()
+    out[:, -3:-1] = out[:, -3:-1] * scale
+    object_z0 = out[0, -1]
+    out[:, -1] = object_z0 + (out[:, -1] - object_z0) * scale
+    return out
 
 
 def compute_holosoma_stages(raw_joints, scale, toe_indices, mapped_indices, mat_height=0.1):
