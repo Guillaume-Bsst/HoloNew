@@ -70,10 +70,9 @@ class MethodViz:
     human_dist: np.ndarray | None = None        # (T, N)    signed distance (min(object, floor))
     g1_transport_pts: np.ndarray | None = None  # (T, M, 3) transported points on the robot
     g1_dist: np.ndarray | None = None           # (T, M)    each G1 point's human-source distance
-    human_witness: np.ndarray | None = None     # (T, N, 3) object-local witness for human probes
-    contact_fields: dict | None = None          # bundled channels: object_human / floor_human
-    object_probe_pts: np.ndarray | None = None  # (M_o, 3) object-LOCAL object-probe positions
-    floor_probe_pts: np.ndarray | None = None   # (M_f, 3) world floor-probe positions
+    human_witness: np.ndarray | None = None     # (T, N, 3) object-local witness per human probe
+    human_obj_dist: np.ndarray | None = None    # (T, N)    signed distance to the object (SDF)
+    human_flr_dist: np.ndarray | None = None    # (T, N)    signed distance to the floor (analytic)
     g1_witness: np.ndarray | None = None        # (T, M, 3) object-local witness per G1 point
 
 
@@ -521,24 +520,38 @@ class Viewer:
             "_g1_transport_handle", "/test/g1_transport",
             method.g1_transport_pts[frame] if show_g1 else None,
             method.g1_dist[frame] if show_g1 else None, show_g1)
-        cf = method.contact_fields if method is not None else None
-        # object_human probes: any stage, placed at the active object pose. The probes are
-        # object-LOCAL, so an object pose is required to lift them to world.
-        f_obj = cf.get("object_human") if cf else None
+        # Object / floor "contact" footprints (SDF mode, like test_pipe's witness_cloud):
+        # the witness points of the human channels for the ACTIVE probes — the contact
+        # footprint on the object / floor. Gated to the Grounded stage (they belong with
+        # the Grounded human probes the witnesses came from).
         pose = self._object_pose(stage) if method is not None else None
-        show_o = (self._tog_object_contact.value and f_obj is not None
-                  and method.object_probe_pts is not None and pose is not None)
-        opts = (transform_points_local_to_world(pose[frame, 3:7], pose[frame, :3],
-                                                method.object_probe_pts) if show_o else None)
-        self._draw_signed_cloud("_object_contact_handle", "/test/object_contact",
-                                opts, f_obj.distance[frame] if show_o else None, show_o)
-        # floor_human probes: any stage, already world.
-        f_flr = cf.get("floor_human") if cf else None
-        show_f = (self._tog_floor_contact.value and f_flr is not None
-                  and method.floor_probe_pts is not None)
-        self._draw_signed_cloud("_floor_contact_handle", "/test/floor_contact",
-                                method.floor_probe_pts if show_f else None,
-                                f_flr.distance[frame] if show_f else None, show_f)
+        # Object footprint: human_object witness (object-local), lifted by the object pose.
+        show_o = (method is not None and self._tog_object_contact.value and stage == "Grounded"
+                  and method.human_witness is not None and method.human_obj_dist is not None
+                  and pose is not None)
+        if show_o:
+            d = method.human_obj_dist[frame]
+            a = d < CONTACT_MARGIN_M
+            wit = transform_points_local_to_world(
+                pose[frame, 3:7], pose[frame, :3], method.human_witness[frame][a])
+            self._draw_signed_cloud("_object_contact_handle", "/test/object_contact",
+                                    wit, d[a], bool(a.any()))
+        else:
+            self._draw_signed_cloud("_object_contact_handle", "/test/object_contact",
+                                    None, None, False)
+        # Floor footprint: the active probes projected onto z=0 (world).
+        show_f = (method is not None and self._tog_floor_contact.value and stage == "Grounded"
+                  and method.human_probe_pts is not None and method.human_flr_dist is not None)
+        if show_f:
+            d = method.human_flr_dist[frame]
+            a = d < CONTACT_MARGIN_M
+            fw = method.human_probe_pts[frame][a].copy()
+            fw[:, 2] = 0.0
+            self._draw_signed_cloud("_floor_contact_handle", "/test/floor_contact",
+                                    fw, d[a], bool(a.any()))
+        else:
+            self._draw_signed_cloud("_floor_contact_handle", "/test/floor_contact",
+                                    None, None, False)
 
     def _draw_segments(self, name, a, b, dist):
         segs = np.stack([a, b], axis=1).astype(np.float32)            # (K, 2, 3)

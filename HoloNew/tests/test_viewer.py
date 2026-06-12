@@ -241,27 +241,30 @@ def test_interaction_toggles_and_gating(robot_urdf):
     v.close()
 
 
-def test_object_floor_channels_any_stage(robot_urdf):
+def test_object_floor_footprints_grounded_stage(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
-    from HoloNew.src.test_socp.contact.contact_field import ContactField
     oj = np.zeros((3, 52, 3), dtype=np.float32)
-
-    def _ch(n):
-        return ContactField(distance=np.zeros((3, n)), direction=np.zeros((3, n, 3)),
-                            witness=np.zeros((3, n, 3)), active=np.zeros((3, n), bool))
-    fields = {"object_human": _ch(7), "floor_human": _ch(5)}
+    N = 6
+    probes = np.zeros((3, N, 3), dtype=np.float32)
+    wit = np.zeros((3, N, 3), dtype=np.float32)
+    obj_d = np.zeros((3, N), dtype=np.float32)   # all probes active (0 < margin)
+    flr_d = np.zeros((3, N), dtype=np.float32)
     m = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((3, 36)),
-                  stages={"Original": oj}, contact_fields=fields,
-                  object_probe_pts=np.zeros((7, 3)), floor_probe_pts=np.zeros((5, 3)))
-    # Object probes are object-local, so an object pose is required to lift them.
+                  stages={"Original": oj, "Grounded": oj}, human_probe_pts=probes,
+                  human_witness=wit, human_obj_dist=obj_d, human_flr_dist=flr_d)
     pose = np.zeros((3, 7), dtype=np.float32)
-    pose[:, 3] = 1.0   # identity quaternion (wxyz)
+    pose[:, 3] = 1.0   # identity quaternion (wxyz), needed to lift the object-local witness
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
                stage_keys=("test_socp",), original_joints=oj, object_pose_raw=pose)
     v.bind_methods([m])
     assert hasattr(v, "_tog_object_contact") and hasattr(v, "_tog_floor_contact")
     v._tog_object_contact.value = True
-    v._stage_dd.value = "Robot"; v._redraw(0)            # any stage (lifted by the object pose)
+    v._tog_floor_contact.value = True
+    # Gated to Grounded: hidden on Robot, shown on Grounded.
+    v._stage_dd.value = "Robot"; v._redraw(0)
+    assert v._object_contact_handle is None or v._object_contact_handle.visible is False
+    v._stage_dd.value = "Grounded"; v._redraw(0)
     assert v._object_contact_handle is not None and v._object_contact_handle.visible
+    assert v._floor_contact_handle is not None and v._floor_contact_handle.visible
     v.close()
