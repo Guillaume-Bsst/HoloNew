@@ -1,48 +1,85 @@
-"""Standalone viser app to visualize the human->G1 OT correspondence (data only).
+"""Standalone viser app to visualize the human->G1 OT correspondence.
 
-Shows the G1 surface points colored by body segment (always available from the
-bundled correspondence). If a SMPL-X model dir is available, also draws the human
-rest surface colored consistently. Does not run any solve.
+Identical rendering to the test_pipe transport viz: builds the correspondence live
+(human point cloud + sampled G1 surface + OT coupling), then draws the human and
+G1 clouds side by side. With ``--color transfer`` (default) a continuous field
+over the human is painted onto the G1 through the correspondence, so the transport
+is visible; ``--color segment`` uses one hue per body segment. Match lines connect
+each G1 point to its human source. Needs the SMPL-X model dir (defaults to
+SMPLX_MODEL_DIR_DEFAULT).
 """
 from __future__ import annotations
 
-from pathlib import Path
+import argparse
 
 import numpy as np
 import viser
 import yourdfpy
-from viser.extras import ViserUrdf
 
-from HoloNew.src.test_socp.correspondence.build_correspondence import load_correspondence
-from HoloNew.src.test_socp.correspondence.constants import G1_29DOF_URDF, SMPLX_MODEL_DIR_DEFAULT
+from HoloNew.src.test_socp.correspondence.constants import (
+    G1_29DOF_URDF,
+    HUMAN_GRID_DENSITY,
+    SMPLX_MODEL_DIR_DEFAULT,
+)
+from HoloNew.src.test_socp.correspondence.g1_surface import sample_g1_surface
+from HoloNew.src.test_socp.correspondence.human_body import HumanBody
+from HoloNew.src.test_socp.correspondence.human_source import build_human_source
+from HoloNew.src.test_socp.correspondence.ot_couple import couple
 from HoloNew.src.test_socp.correspondence.segments import SEGMENTS
-from HoloNew.src.test_socp.correspondence.viz import add_colored_points, segment_colors
-
-
-def _bundled_corr() -> Path:
-    return Path(__file__).resolve().parent.parent / "assets" / "correspondence" / "corr_neutral.npz"
+from HoloNew.src.test_socp.correspondence.viz import continuous_colors, segment_colors
 
 
 def main() -> None:
-    corr = load_correspondence(_bundled_corr())
-    urdf = yourdfpy.URDF.load(G1_29DOF_URDF, load_meshes=True, build_scene_graph=True)
-    urdf.update_cfg(corr.g1_rest_cfg)
+    ap = argparse.ArgumentParser(description="Visualise the human->G1 OT correspondence.")
+    ap.add_argument("--model-dir", default=SMPLX_MODEL_DIR_DEFAULT)
+    ap.add_argument("--gender", default="neutral")
+    ap.add_argument("--urdf", default=str(G1_29DOF_URDF))
+    ap.add_argument("--human-density", type=float, default=HUMAN_GRID_DENSITY)
+    ap.add_argument("--g1-density", type=float, default=3000.0)
+    ap.add_argument("--reg", type=float, default=0.005)
+    ap.add_argument("--lines", type=int, default=300, help="match lines to draw")
+    ap.add_argument("--color", choices=("segment", "transfer"), default="transfer",
+                    help="segment: one hue per segment; transfer: continuous human "
+                         "field painted onto the G1 via the correspondence")
+    args = ap.parse_args()
+
+    body = HumanBody(args.model_dir, None, args.gender)
+    src = build_human_source(body, args.human_density)
+    urdf = yourdfpy.URDF.load(args.urdf, load_meshes=True, build_scene_graph=True)
+    tgt = sample_g1_surface(urdf, args.g1_density)
+    human_idx = couple(src, tgt, reg=args.reg)   # (M,) human point driving each G1 point
+
+    # build_human_source already rotated the cloud into the G1 world frame (Z-up).
+    human = src.points                            # (N,3) full human cloud
+    g1 = tgt.points_world                         # (M,3) G1 surface cloud
+
+    # Offset the human cloud sideways so both are visible side by side.
+    shift = np.array([1.0, 0.0, 0.0], np.float32)
+    if args.color == "segment":
+        h_colors = segment_colors(src.seg, len(SEGMENTS))
+        g_colors = segment_colors(tgt.seg, len(SEGMENTS))
+    else:
+        field = continuous_colors(human)          # smooth human field, per human point
+        h_colors = field                          # human shown with its own field
+        g_colors = field[human_idx]               # each G1 point reads its human's colour
 
     server = viser.ViserServer()
     server.scene.set_up_direction("+z")
-    ViserUrdf(server, urdf_or_path=urdf, root_node_name="/g1")
+    server.scene.add_point_cloud(
+        "/human", points=(human + shift).astype(np.float32), colors=h_colors, point_size=0.006)
+    # The real G1 cloud, coloured either by its own segment or by the human field it reads.
+    server.scene.add_point_cloud(
+        "/g1", points=g1.astype(np.float32), colors=g_colors, point_size=0.006)
 
-    # Reconstruct world positions for each G1 correspondence point using FK.
-    pts = np.zeros((corr.link_idx.shape[0], 3), np.float32)
-    for li, link in enumerate(corr.link_names):
-        T = np.asarray(urdf.get_transform(link))
-        sel = corr.link_idx == li
-        pts[sel] = corr.offset_local[sel] @ T[:3, :3].T + T[:3, 3]
+    rng = np.random.default_rng(0)
+    sel = rng.choice(len(human_idx), size=min(args.lines, len(human_idx)), replace=False)
+    for k, j in enumerate(sel):
+        server.scene.add_spline_catmull_rom(
+            f"/match/{k}",
+            positions=np.stack([g1[j], human[human_idx[j]] + shift]).astype(np.float32),
+            color=tuple(int(c) for c in g_colors[j]), line_width=1.0)
 
-    colors = segment_colors(corr.seg, len(SEGMENTS))
-    add_colored_points(server, "/g1_corr_points", pts, colors, point_size=0.005)
-
-    print("Correspondence viewer at http://localhost:8080 — Ctrl+C to exit")
+    print("Correspondence viewer at http://localhost:8080 — Enter to exit")
     input("Enter to exit ...")
 
 
