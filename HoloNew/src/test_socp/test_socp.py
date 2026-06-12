@@ -488,21 +488,52 @@ class TestSocpRetargeter:
         out = []
         pelvis_grounded = self.gmr_grounded[:, 0]   # (T, 3) grounded SMPL-X pelvis per frame
 
+        probe_pts, probe_obj, probe_flr, probe_wit, g1_pts = [], [], [], [], []
+        urdf = None
+        if self.smplx_ground_probe is not None and self.correspondence is not None:
+            import yourdfpy
+            urdf = yourdfpy.URDF.load(self.task_constants.ROBOT_URDF_FILE,
+                                      load_meshes=False, build_scene_graph=True)
+
         for t in tqdm(range(T), desc="TEST-SOCP"):
             # Online SMPL-X -> object-SDF query for this frame (causal: reads only t).
             # Available as smplx_field for the step; also recorded for inspection.
             if self.smplx_ground_probe is not None:
-                smplx_field = self.smplx_ground_probe(t, self.human_quat[t], pelvis_grounded[t])
-                self.smplx_sdf_fields.append(smplx_field)
+                from HoloNew.src.test_socp.contact.backends.floor import floor_field
+                pf = self.smplx_ground_probe(t, self.human_quat[t], pelvis_grounded[t])
+                self.smplx_sdf_fields.append(pf.field)
+                probe_pts.append(pf.points)
+                probe_obj.append(pf.field.distance.copy())
+                probe_wit.append(pf.field.witness.copy())
+                probe_flr.append(floor_field(pf.points, self.smplx_ground_probe.margin).distance.copy())
             # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
             tg2 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE2)
             q, _ = self.iterate(q, q, q, tg1, n_iter=(50 if t == 0 else 10))
             q, _ = self.iterate(q, q, q, tg2, n_iter=(50 if t == 0 else 10))
+            if urdf is not None:
+                from HoloNew.src.test_socp.correspondence.transport import (
+                    link_world_transforms, transported_points)
+                Tw = link_world_transforms(urdf, q, self.correspondence.link_names)
+                g1_pts.append(transported_points(
+                    Tw, self.correspondence.link_idx,
+                    self.correspondence.offset_local, self.correspondence.link_names))
             out.append(np.copy(q))
 
-        return RetargetResult(qpos=np.array(out), stages={}, cost=0.0)
+        res = RetargetResult(qpos=np.array(out), stages={}, cost=0.0)
+        if probe_pts:
+            res.human_probe_pts = np.stack(probe_pts)
+            res.human_obj_dist = np.stack(probe_obj)
+            res.human_flr_dist = np.stack(probe_flr)
+            res.human_witness = np.stack(probe_wit)
+            res.obj_pose = getattr(self, "_obj_poses", None)
+            res.contact_fields = self.contact_fields
+            res.object_sdf = self.object_sdf
+            if g1_pts:
+                res.g1_transport_pts = np.stack(g1_pts)
+                res.human_idx = self.correspondence.human_idx
+        return res
 
     # ------------------------------------------------------------------
     # Class method factory
@@ -632,10 +663,17 @@ class TestSocpRetargeter:
         if rt.object_sdf is not None:
             from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
             from HoloNew.src.test_socp.contact.smplx_field import build_smplx_ground_probe
+            from HoloNew.src.test_socp.correspondence.human_body import PointCloudCache
             from HoloNew.src.utils import load_intermimic_data
             _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
+            corr_cache = None
+            if rt.correspondence is not None:
+                corr_cache = PointCloudCache(tri_idx=rt.correspondence.tri_idx,
+                                             bary=rt.correspondence.bary)
             rt.smplx_ground_probe = build_smplx_ground_probe(
                 cfg.task_name, OMOMO_DIR_DEFAULT, SMPLX_MODEL_DIR_DEFAULT,
-                rt.object_sdf, obj_poses[:T], CONTACT_MARGIN_M, HUMAN_GRID_DENSITY)
+                rt.object_sdf, obj_poses[:T], CONTACT_MARGIN_M, HUMAN_GRID_DENSITY,
+                cache=corr_cache)
+            rt._obj_poses = obj_poses[:T]
 
         return rt
