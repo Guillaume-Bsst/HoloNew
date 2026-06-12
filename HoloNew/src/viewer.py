@@ -7,6 +7,8 @@ trailing [-7:] dynamic-object pose.
 """
 from __future__ import annotations
 
+import threading
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -123,10 +125,15 @@ class Viewer:
         # selects a subset); otherwise selecting an unsolved method KeyErrors.
         bound_labels = [m.label for m in methods]
         T = min(len(m.qpos) for m in methods)
+        self._n_frames = T
+        self._playing = False
+        self._prog_update = False
 
         with self.server.gui.add_folder("Playback"):
             self._slider = self.server.gui.add_slider(
                 "Frame", min=0, max=max(0, T - 1), step=1, initial_value=0)
+            self._play_btn = self.server.gui.add_button("Play / Pause")
+            self._fps_in = self.server.gui.add_number("FPS", initial_value=30, min=1, max=240, step=1)
         with self.server.gui.add_folder("Display"):
             first = methods[0].label
             self._method_dd = self.server.gui.add_dropdown(
@@ -181,16 +188,47 @@ class Viewer:
             self._redraw(int(self._slider.value))
 
         @self._slider.on_update
-        def _(_evt): self._redraw(int(self._slider.value))
+        def _(_evt):
+            if not self._prog_update:
+                self._playing = False   # user scrubbing pauses playback
+            self._redraw(int(self._slider.value))
 
         @self._stage_dd.on_update
         def _(_evt): self._redraw(int(self._slider.value))
 
+        @self._play_btn.on_click
+        def _(_evt):
+            self._playing = not self._playing
+
         self._redraw(0)
+        threading.Thread(target=self._player_loop, daemon=True).start()
 
     def _hide_all_robots(self) -> None:
         for h in self.robots.values():
             h.urdf.show_visual = False
+
+    def _advance_frame(self) -> int:
+        """Advance the Frame slider by one (wrapping); returns the new frame.
+
+        The programmatic slider write is guarded so its on_update does not pause
+        playback; the on_update still redraws the new frame.
+        """
+        frame = (int(self._slider.value) + 1) % self._n_frames
+        self._prog_update = True
+        self._slider.value = frame
+        self._prog_update = False
+        return frame
+
+    def _player_loop(self) -> None:
+        """Background playback: step frames at the chosen FPS while playing."""
+        if self._n_frames <= 1:
+            return
+        while True:
+            if self._playing:
+                self._advance_frame()
+                time.sleep(1.0 / max(1, int(self._fps_in.value)))
+            else:
+                time.sleep(0.02)
 
     def _original_frame(self, frame: int) -> np.ndarray:
         return self.original_joints[frame].astype(np.float32)

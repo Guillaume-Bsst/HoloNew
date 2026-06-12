@@ -102,3 +102,21 @@ def test_ghost_overlays_skeleton_stage(robot_urdf):
     v._ghost_stage_dd.value = "Off"
     v._redraw(0)
     v.close()
+
+
+def test_playback_controls_and_advance(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((4, 52, 3), dtype=np.float32)
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((4, 36)), stages={"Original": oj})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj)
+    v.bind_methods([m])
+    assert hasattr(v, "_play_btn") and hasattr(v, "_fps_in")
+    assert v._playing is False
+    # _advance_frame wraps from the last frame back to 0
+    v._slider.value = v._n_frames - 1
+    assert v._advance_frame() == 0
+    assert int(v._slider.value) == 0
+    v.close()
