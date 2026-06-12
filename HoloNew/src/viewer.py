@@ -17,12 +17,6 @@ import yourdfpy
 
 from .stages import ROBOT_STAGE, method_labels, stages_for_method
 
-try:  # Old registry API (removed in Task 1); kept optional until Task 5 drops the old path.
-    from .stages import STAGE_SPECS, spec_for_label, stage_labels
-except ImportError:  # pragma: no cover - old API no longer exported
-    STAGE_SPECS = ()
-    spec_for_label = stage_labels = None
-
 
 @dataclass
 class RobotHandle:
@@ -73,7 +67,6 @@ class Viewer:
 
         # Add grid
         self.server.scene.add_grid("/world/grid", width=8, height=8, position=(0.0, 0.0, 0.0))
-        self._result = None
 
     def _add_robot(self, key: str) -> RobotHandle:
         root = f"/world/robot_{key}"
@@ -111,37 +104,6 @@ class Viewer:
             batched_wxyzs=np.tile(np.array([1, 0, 0, 0]), (p.shape[0], 1)),
             batched_colors=color, opacity=opacity)
 
-    def bind(self, result, extra_qpos: dict | None = None) -> None:
-        """Attach a RetargetResult and build slider + stage dropdown from the registry.
-
-        Args:
-            result: RetargetResult from the native SOCP retargeter.
-            extra_qpos: Optional mapping of stage_key -> (T, 7+dof) array for
-                additional robot trajectories (e.g. GMR-SOCP variants).
-        """
-        self._result = result
-        self._extra_qpos = extra_qpos or {}
-
-        # Compute safe frame range: minimum T across native + all extra trajectories.
-        t_values = [result.qpos.shape[0]]
-        t_values.extend(len(v) for v in self._extra_qpos.values())
-        T = min(t_values)
-
-        with self.server.gui.add_folder("Playback"):
-            self._slider = self.server.gui.add_slider(
-                "Frame", min=0, max=max(0, T - 1), step=1, initial_value=0)
-        with self.server.gui.add_folder("Display"):
-            self._stage_dd = self.server.gui.add_dropdown(
-                "Stage", options=stage_labels(), initial_value="SOCP")
-
-        @self._slider.on_update
-        def _(_evt): self._redraw(int(self._slider.value))
-
-        @self._stage_dd.on_update
-        def _(_evt): self._redraw(int(self._slider.value))
-
-        self._redraw(0)
-
     def bind_methods(self, methods: list) -> None:
         """Bind a list of MethodViz and build Frame + Method + Stage dropdowns."""
         self._methods = {m.label: m for m in methods}
@@ -176,13 +138,6 @@ class Viewer:
             h.urdf.show_visual = False
 
     def _redraw(self, frame: int) -> None:
-        # Dispatch: bind_methods() installs the per-method API; the legacy
-        # bind() path keeps the registry-based redraw (removed in Task 5).
-        if hasattr(self, "_methods"):
-            return self._redraw_methods(frame)
-        return self._redraw_registry(frame)
-
-    def _redraw_methods(self, frame: int) -> None:
         method = self._methods[self._method_dd.value]
         stage = self._stage_dd.value
         # Clear the skeleton layer each redraw.
@@ -203,20 +158,6 @@ class Viewer:
         if handle is not None:
             handle.remove()
             self._skeleton = None
-
-    def _redraw_registry(self, frame: int) -> None:
-        spec = spec_for_label(self._stage_dd.value)
-        if spec.produces_qpos:
-            if spec.key == "socp":
-                self.draw_q(self._result.qpos[frame], stage=spec.key)
-            elif spec.key in self._extra_qpos:
-                self.draw_q(self._extra_qpos[spec.key][frame], stage=spec.key)
-            return
-        if spec.key is None:
-            # 'Original' has no stored array in RetargetResult; nothing to draw yet.
-            return
-        if spec.key in self._result.stages:
-            self.draw_keypoints(self._result.stages[spec.key][frame], name=f"stage_{spec.key}")
 
     def close(self) -> None:
         self.server.stop()
