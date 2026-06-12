@@ -556,8 +556,9 @@ class GmrSocpRetargeterV1:
         # convention, with the root XY preserved) rather than holosoma's globally-scaled
         # joints, then track the 'ground' stage. This matches GMR/mink; the holosoma
         # global scale was the sole cause of the ~0.4 m base offset vs mink.
-        ground = compute_stages(raw_joints, human_quat, anchor_root_xy=True)["ground"]
-        rt.gmr_ground = ground
+        rt.gmr_stages = compute_stages(raw_joints, human_quat, anchor_root_xy=True)
+        rt.gmr_ground = rt.gmr_stages["ground"]
+        ground = rt.gmr_ground
         _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
         rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
         rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
