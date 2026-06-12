@@ -23,9 +23,7 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 # Import with type ignore for mypy compatibility
-from mujoco_utils import (  # type: ignore[import-not-found,no-redef]  # noqa: E402
-    _world_mesh_from_geom,
-)
+from HoloNew.src.holosoma.mujoco_utils import _world_mesh_from_geom  # noqa: E402
 from utils import (  # type: ignore[import-not-found,no-redef]  # noqa: E402
     calculate_laplacian_coordinates,
     calculate_laplacian_matrix,
@@ -34,7 +32,7 @@ from utils import (  # type: ignore[import-not-found,no-redef]  # noqa: E402
     transform_points_local_to_world,
     transform_points_world_to_local,
 )
-from viser_utils import create_motion_control_sliders  # type: ignore[import-not-found,no-redef]  # noqa: E402
+from HoloNew.src.holosoma.viser_utils import create_motion_control_sliders  # noqa: E402
 
 
 class InteractionMeshRetargeter:
