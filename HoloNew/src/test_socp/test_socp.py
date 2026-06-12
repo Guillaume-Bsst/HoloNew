@@ -626,16 +626,16 @@ class TestSocpRetargeter:
             rt.contact_fields = load_contact_fields(_contact_path)
 
         # Online SMPL-X -> object-SDF probe (causal, per frame). Built only when the
-        # object SDF is available: sample the subject SMPL-X surface once, and ground the
-        # .pt object pose by the same z-shift as the human so both share one frame.
+        # object SDF is available: sample the subject SMPL-X surface once. The human is
+        # placed at its Grounded pose in retarget(); the object pose is used as-is (the
+        # raw human floats, the object sits correctly, so only the human is grounded).
         if rt.object_sdf is not None:
             from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
             from HoloNew.src.test_socp.contact.smplx_field import build_smplx_ground_probe
             from HoloNew.src.utils import load_intermimic_data
             _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
-            z0 = float(raw_joints[0, 0, 2] - rt.gmr_grounded[0, 0, 2])   # human ground z-shift
             rt.smplx_ground_probe = build_smplx_ground_probe(
                 cfg.task_name, OMOMO_DIR_DEFAULT, SMPLX_MODEL_DIR_DEFAULT,
-                rt.object_sdf, obj_poses[:T], z0, CONTACT_MARGIN_M, HUMAN_GRID_DENSITY)
+                rt.object_sdf, obj_poses[:T], CONTACT_MARGIN_M, HUMAN_GRID_DENSITY)
 
         return rt

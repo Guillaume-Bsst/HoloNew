@@ -26,7 +26,7 @@ def _probe(T, body, sdf, margin=0.1):
     quat = np.tile([1.0, 0.0, 0.0, 0.0], (T, 1))          # identity wxyz
     trans = np.arange(T * 3, dtype=float).reshape(T, 3) + 5.0
     return SmplxGroundProbe(human_body=body, cache=None, object_sdf=sdf,
-                            obj_quat_grounded=quat, obj_trans_grounded=trans, margin=margin), trans
+                            obj_quat=quat, obj_trans=trans, margin=margin), trans
 
 
 def test_probe_places_then_queries_in_object_local_frame():
