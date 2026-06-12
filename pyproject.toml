@@ -33,6 +33,7 @@ dependencies = [
     "tyro",
     "POT",
     "coal",
+    "joblib",
 ]
 
 [project.optional-dependencies]

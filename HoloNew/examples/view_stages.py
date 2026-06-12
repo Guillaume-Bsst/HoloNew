@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 import tyro
@@ -27,6 +28,7 @@ from HoloNew.examples.robot_retarget import (
 )
 from HoloNew.src.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.correspondence.human_body import HumanBody
+from HoloNew.src.correspondence.human_metadata import load_human_metadata
 from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
 from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
 from HoloNew.src.holosoma.preprocess import compute_holosoma_stages
@@ -42,6 +44,10 @@ Method = Literal["holosoma", "gmr_socp_v1", "gmr_socp_v2"]
 class ViewStagesConfig(RetargetingConfig):
     # Which optimizers to solve and show, in the given order. Defaults to all three.
     methods: tuple[Method, ...] = ("holosoma", "gmr_socp_v1", "gmr_socp_v2")
+    # Original OMOMO dataset root (the one holding
+    # data/{train,test}_diffusion_manip_seq_joints24.p, NOT OMOMO_new). Supplies
+    # the subject's SMPL-X betas + gender for the mesh; omit for the neutral shape.
+    omomo_dir: Path | None = None
 
 
 def view(cfg: ViewStagesConfig) -> None:
@@ -77,10 +83,23 @@ def view(cfg: ViewStagesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("No per-joint quats (%s); SMPL-X mesh disabled.", exc)
 
+    # SMPL-X shape (betas) + gender for this subject, read from the original OMOMO
+    # .p files keyed by sequence name. Without them the mesh uses the neutral mean
+    # shape. The .pt motion (OMOMO_new) does not carry betas, hence the separate dir.
+    betas, gender = None, "neutral"
+    if cfg.omomo_dir is not None:
+        betas, gender = load_human_metadata(cfg.omomo_dir, cfg.task_name)
+        if betas is not None:
+            logger.info("Loaded SMPL-X shape for %s: gender=%s, %d betas",
+                        cfg.task_name, gender, betas.shape[0])
+        else:
+            logger.warning("No SMPL-X shape found for %s in %s; using neutral shape.",
+                           cfg.task_name, cfg.omomo_dir)
+
     human_body = None
     if original_quats is not None:
         try:
-            human_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, None, "neutral")
+            human_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, betas, gender)
         except Exception as exc:  # noqa: BLE001
             logger.warning("SMPL-X unavailable (%s); mesh disabled.", exc)
 
