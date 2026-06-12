@@ -73,6 +73,57 @@ def test_object_handles_are_persistent_not_recreated(robot_urdf):
     v.close()
 
 
+def test_smplx_follows_active_52joint_stage_pelvis(robot_urdf):
+    # The SMPL-X mesh follows the displayed skeleton: on a full 52-joint stage it uses
+    # that stage's pelvis (Original -> raw/in the air, Grounded -> lowered); otherwise raw.
+    oj = np.zeros((3, 52, 3), np.float32)
+    oj[:, 0] = [1.0, 2.0, 3.0]                 # raw pelvis (in the air)
+    grounded = oj.copy()
+    grounded[:, :, 2] -= 3.0                    # lowered onto the floor
+    grounded[:, 0] = [1.0, 2.0, 0.0]
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)),
+                  stages={"Original": oj, "Grounded": grounded,
+                          "Mapped": np.zeros((3, 14, 3))})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj)
+    v.bind_methods([m])
+    v._stage_dd.value = "Original"
+    np.testing.assert_array_equal(v._active_human_pelvis(0), [1.0, 2.0, 3.0])
+    v._stage_dd.value = "Grounded"
+    np.testing.assert_array_equal(v._active_human_pelvis(0), [1.0, 2.0, 0.0])
+    v._stage_dd.value = "Mapped"   # not 52-joint -> falls back to raw pelvis
+    np.testing.assert_array_equal(v._active_human_pelvis(0), [1.0, 2.0, 3.0])
+    v.close()
+
+
+class _FakeBody:
+    faces = np.array([[0, 1, 2]], np.uint32)
+
+    def placed_verts(self, quats, pelvis, frame_idx=None):
+        return (np.zeros((3, 3), np.float32) + pelvis).astype(np.float32)
+
+
+def test_smplx_mesh_only_visible_on_original_and_grounded(robot_urdf):
+    T = 3
+    oj = np.zeros((T, 52, 3), np.float32)
+    grounded = oj.copy(); grounded[:, :, 2] -= 1.0
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((T, 36)),
+                  stages={"Original": oj, "Grounded": grounded,
+                          "Mapped": np.zeros((T, 14, 3))})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj,
+               original_quats=np.zeros((T, 52, 4), np.float32), human_body=_FakeBody())
+    v.bind_methods([m])
+    v._tog_smplx.value = True
+    for stage, visible in (("Original", True), ("Grounded", True), ("Mapped", False), ("Robot", False)):
+        v._stage_dd.value = stage
+        v._redraw(0)
+        assert bool(v._smplx_handle.visible) is visible, stage
+    v.close()
+
+
 def test_object_absent_is_noop(robot_urdf):
     m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)), stages={"Original": np.zeros((3, 5, 3))})

@@ -37,8 +37,11 @@ from HoloNew.src.correspondence.human_metadata import load_human_metadata
 from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import _BODY_NAME_REMAP, GmrSocpRetargeterV1
 from HoloNew.src.gmr_socp_v1.tables import HUMAN_BODY_TO_IDX, IK_MATCH_TABLE1
 from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
-from HoloNew.src.holosoma.preprocess import compute_holosoma_stages, scale_object_poses_to_center
-from HoloNew.src.robot_fk import robot_link_positions
+from HoloNew.src.holosoma.preprocess import (
+    compute_holosoma_stages,
+    scale_object_poses_to_center,
+)
+from HoloNew.src.robot_fk import robot_link_poses
 from HoloNew.src.stages import ROBOT_STAGE
 from HoloNew.src.utils import load_intermimic_data, load_intermimic_quats, load_object_data
 from HoloNew.src.viewer import MethodViz, Viewer
@@ -161,30 +164,42 @@ def view(cfg: ViewStagesConfig) -> None:
     holo_mapped_bones = skeleton.bones_for_subset(mapped)
     robot_bodies = [_BODY_NAME_REMAP.get(f, f) for f in IK_MATCH_TABLE1]
     robot_mjcf = cfg.robot_config.ROBOT_URDF_FILE.replace(".urdf", ".xml")
+    # Holosoma's morphological-graph keypoints: the robot links its Laplacian interaction
+    # mesh matches (task_constants.JOINTS_MAPPING values), read by FK from each solved qpos.
+    g1_links = list(constants.JOINTS_MAPPING.values())
 
     def build_holosoma() -> MethodViz:
         # holosoma: native solved qpos + reproduced preprocessing stages.
         native = run_headless(cfg=cfg)
         hs = compute_holosoma_stages(raw_joints, smpl_scale, toe, mapped)
-        rs = robot_link_positions(robot_mjcf, robot_bodies, native.qpos)
+        rs, rq = robot_link_poses(robot_mjcf, robot_bodies, native.qpos)
+        g1 = robot_link_poses(robot_mjcf, g1_links, native.qpos)[0]
         sb = {"Mapped": holo_mapped_bones, ROBOT_STAGE: gmr_bones}
         return MethodViz("holosoma", "holosoma", native.qpos, hs,
-                         stage_bones=sb, robot_skeleton=rs)
+                         stage_bones=sb, robot_skeleton=rs, robot_quats=rq, g1_points=g1)
 
     def build_gmr(label: str, key: str, cls) -> MethodViz:
         # GMR v1 / v2: solved qpos + full per-stage mapped-body point clouds.
         rt = cls.from_config(cfg)
         res = rt.retarget()
         T = res.qpos.shape[0]
-        stages = {name.capitalize(): rt.gmr_stages[name]["pos"]
+        # GMR's own floor correction is labelled "Floor" so the early input-grounding
+        # stage can use holosoma's "Grounded" name without collision.
+        gmr_labels = {"mapped": "Mapped", "scaled": "Scaled", "offset": "Offset", "ground": "Floor"}
+        stages = {gmr_labels[name]: rt.gmr_stages[name]["pos"]
                   for name in ("mapped", "scaled", "offset", "ground")}
-        # The 52-joint raw source skeleton, trimmed to the solved horizon.
-        stages = {"Original": raw_joints[:T, :, :], **stages}
-        rs = robot_link_positions(robot_mjcf, robot_bodies, res.qpos)
-        sb = {name: gmr_bones for name in ("Mapped", "Scaled", "Offset", "Ground")}
+        # Per-joint orientations of the mapped bodies, so their joint frames can be drawn.
+        sq = {gmr_labels[name]: rt.gmr_stages[name]["quat"]
+              for name in ("mapped", "scaled", "offset", "ground")}
+        # The 52-joint raw source skeleton, then the exact grounded input the GMR chain
+        # consumed (rt.gmr_grounded), so Mapped/Scaled/Offset/Floor stay consistent with it.
+        stages = {"Original": raw_joints[:T, :, :], "Grounded": rt.gmr_grounded[:T], **stages}
+        rs, rq = robot_link_poses(robot_mjcf, robot_bodies, res.qpos)
+        g1 = robot_link_poses(robot_mjcf, g1_links, res.qpos)[0]
+        sb = {name: gmr_bones for name in ("Mapped", "Scaled", "Offset", "Floor")}
         sb[ROBOT_STAGE] = gmr_bones
-        return MethodViz(label, key, res.qpos, stages,
-                         stage_bones=sb, robot_skeleton=rs)
+        return MethodViz(label, key, res.qpos, stages, stage_bones=sb,
+                         robot_skeleton=rs, stage_quats=sq, robot_quats=rq, g1_points=g1)
 
     builders = {
         "holosoma": build_holosoma,
@@ -198,10 +213,10 @@ def view(cfg: ViewStagesConfig) -> None:
         m.stages["Original"] = raw_joints[:T, :, :]
 
     keys = tuple(m.robot_key for m in methods)
-    # Stages whose skeleton lives in the smpl_scale-shrunk, centred world: the object is
-    # shown shrunk + centred there, and at raw size/pose on the others (Original, Grounded
-    # for holosoma; Original, Mapped for GMR — Mapped here is only position-anchored).
-    object_scaled_stages = ("Scaled", "Mapped", "Offset", "Ground", ROBOT_STAGE)
+    # Stages whose skeleton lives in the centred (smpl_scale-translated) world: the object
+    # is shown at its centred pose there, and at its raw pose on the unscaled stages
+    # (Original, Grounded). Native object size on every stage.
+    object_scaled_stages = ("Scaled", "Mapped", "Offset", "Floor", ROBOT_STAGE)
     viewer = Viewer(
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
         object_model_path=None,

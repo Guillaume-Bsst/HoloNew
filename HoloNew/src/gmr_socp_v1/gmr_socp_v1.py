@@ -508,7 +508,7 @@ class GmrSocpRetargeterV1:
             build_retargeter_kwargs_from_config,
             create_task_constants,
         )
-        from HoloNew.src.holosoma.preprocess import calculate_scale_factor
+        from HoloNew.src.holosoma.preprocess import calculate_scale_factor, ground_to_floor
         from .preprocess import compute_stages
         from .tables import HUMAN_ROOT_NAME, MAPPED_BODY_NAMES
         from .targets import load_pt_joints, load_pt_quaternions
@@ -555,13 +555,20 @@ class GmrSocpRetargeterV1:
         rt.human_quat = human_quat    # (T, 52, 4) wxyz
         rt.q_init_full = q_init_full  # (nq,) — base will be set from ground below
 
+        # Ground the raw input onto the floor first (like holosoma) so every downstream
+        # stage lives in the grounded world. GMR's own floor correction (the 'ground'
+        # stage) re-grounds afterwards — a constant z-shift it cancels out — so the solved
+        # targets are unchanged, but the mapped/scaled/offset stages now follow the
+        # grounded input and the 'Grounded' display stage is the real chain input.
+        toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
+        rt.gmr_grounded = ground_to_floor(raw_joints, toe_indices)
         # Pull the root toward the world centre by holosoma's scale factor
         # (ROBOT_HEIGHT / human_height) so the GMR base XY matches holosoma's
         # globally-scaled placement. compute_stages applies this as a rigid XY
         # translation, preserving GMR's body proportions and the Z floor-drop.
         smpl_scale = calculate_scale_factor(cfg.task_name, constants.ROBOT_HEIGHT)
         rt.gmr_stages = compute_stages(
-            raw_joints, human_quat, anchor_root_xy=True, root_xy_scale=smpl_scale
+            rt.gmr_grounded, human_quat, anchor_root_xy=True, root_xy_scale=smpl_scale
         )
         rt.gmr_ground = rt.gmr_stages["ground"]
         ground = rt.gmr_ground

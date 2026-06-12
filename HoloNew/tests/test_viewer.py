@@ -146,3 +146,44 @@ def test_mapped_stage_bones_and_robot_skeleton_with_urdf_toggle(robot_urdf):
     assert v.robots["gmr_socp_v1"].urdf.show_visual is False
     assert len(v._dynamic_handles) == 2
     v.close()
+
+
+def test_joint_frames_axes_toggle(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    quat = np.zeros((3, 14, 4), dtype=np.float32)
+    quat[..., 0] = 1.0   # identity wxyz
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)),
+                  stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))},
+                  stage_bones={"Mapped": [(0, 1)]},
+                  stage_quats={"Mapped": quat})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj)
+    v.bind_methods([m])
+    assert hasattr(v, "_tog_axes") and hasattr(v, "_axis_size")
+    v._stage_dd.value = "Mapped"
+    v._tog_axes.value = False; v._redraw(0); n_off = len(v._dynamic_handles)
+    v._tog_axes.value = True;  v._redraw(0); n_on = len(v._dynamic_handles)
+    assert n_on == n_off + 1   # one extra handle for the joint-frame axes
+    v.close()
+
+
+def test_holosoma_g1_points_toggle(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    g1 = np.zeros((3, 15, 3), dtype=np.float32)
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)), stages={"Original": oj}, g1_points=g1)
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj)
+    v.bind_methods([m])
+    assert hasattr(v, "_tog_g1_pts")
+    assert v._g1_pts_handle is None
+    v._tog_g1_pts.value = True; v._redraw(0)
+    assert v._g1_pts_handle is not None and v._g1_pts_handle.visible
+    v._tog_g1_pts.value = False; v._redraw(0)
+    assert v._g1_pts_handle.visible is False
+    v.close()

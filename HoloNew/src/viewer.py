@@ -20,6 +20,10 @@ import yourdfpy
 from . import skeleton
 from .stages import ROBOT_STAGE, stages_for_method
 
+# Joint-frame axis radius as a fraction of its length, so the RGB triads stay
+# slender at any "Frame size" value (matches test_pipe's add_batched_axes sizing).
+AXIS_RADIUS_FRAC = 0.035
+
 
 @dataclass
 class RobotHandle:
@@ -42,6 +46,13 @@ class MethodViz:
             render as skeletons; 52-joint stages use the built-in SMPLH topology.
         robot_skeleton: Optional ``(T, K, 3)`` solved-robot link world positions
             (drawn on the Robot stage, keyed by ``stage_bones["Robot"]``).
+        stage_quats: Optional ``{stage_label: (T, B, 4)}`` per-joint orientations
+            (wxyz) for stages that carry them (the mapped GMR stages), so their
+            joint frames can be drawn.
+        robot_quats: Optional ``(T, K, 4)`` solved-robot link orientations (wxyz),
+            for the Robot stage joint frames.
+        g1_points: Optional ``(T, K, 3)`` world positions of the G1 morphological-graph
+            keypoints (holosoma's interaction-mesh robot links) at the solved pose.
     """
     label: str
     robot_key: str
@@ -49,6 +60,9 @@ class MethodViz:
     stages: dict = field(default_factory=dict)
     stage_bones: dict = field(default_factory=dict)
     robot_skeleton: np.ndarray | None = None
+    stage_quats: dict = field(default_factory=dict)
+    robot_quats: np.ndarray | None = None
+    g1_points: np.ndarray | None = None
 
 
 class Viewer:
@@ -87,6 +101,7 @@ class Viewer:
         # so the object does not flicker during playback, like the SMPL-X mesh.
         self._object_mesh_handle = None
         self._object_pts_handle = None
+        self._g1_pts_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -167,6 +182,8 @@ class Viewer:
             self._stage_dd = self.server.gui.add_dropdown(
                 "Stage", options=stages_for_method(first), initial_value=ROBOT_STAGE)
             self._tog_urdf = self.server.gui.add_checkbox("Show G1 URDF", True)
+            self._tog_smplx = self.server.gui.add_checkbox("SMPL-X mesh", False)
+            self._tog_object = self.server.gui.add_checkbox("Object mesh", False)
 
         with self.server.gui.add_folder("Skeleton"):
             self._tog_body_bones = self.server.gui.add_checkbox("Body bones", True)
@@ -180,11 +197,21 @@ class Viewer:
             def _(_evt):
                 self._redraw(int(self._slider.value))
 
-        with self.server.gui.add_folder("Meshes"):
-            self._tog_smplx = self.server.gui.add_checkbox("SMPL-X mesh", False)
-            self._tog_object = self.server.gui.add_checkbox("Object mesh", False)
+        with self.server.gui.add_folder("Joint frames"):
+            self._tog_axes = self.server.gui.add_checkbox("Show joint frames", False)
+            self._axis_size = self.server.gui.add_slider(
+                "Frame size", min=0.02, max=0.5, step=0.01, initial_value=0.1)
+        for _cb in (self._tog_axes, self._axis_size):
+            @_cb.on_update
+            def _(_evt):
+                self._redraw(int(self._slider.value))
+
+        with self.server.gui.add_folder("Holosoma"):
+            # Holosoma's interaction mesh: object samples paired with the G1
+            # morphological-graph keypoints (the robot links the Laplacian matches).
             self._tog_object_pts = self.server.gui.add_checkbox("Object points", False)
-        for _cb in (self._tog_smplx, self._tog_object, self._tog_object_pts):
+            self._tog_g1_pts = self.server.gui.add_checkbox("G1 points", False)
+        for _cb in (self._tog_smplx, self._tog_object, self._tog_object_pts, self._tog_g1_pts):
             @_cb.on_update
             def _(_evt):
                 self._redraw(int(self._slider.value))
@@ -297,17 +324,39 @@ class Viewer:
                 np.asarray(j_cols, np.uint8), point_size=0.025)
             self._dynamic_handles.append(h)
 
+    def _active_human_pelvis(self, frame: int) -> np.ndarray:
+        """Root the SMPL-X mesh follows: the active stage's pelvis when that stage is a full
+        52-joint human skeleton (Original -> raw/in the air, Grounded -> lowered, Scaled),
+        else the raw pelvis. Stages differ from Original by a rigid offset, so the mesh
+        tracks the displayed skeleton by translating its root onto this pelvis."""
+        methods = getattr(self, "_methods", None)
+        if methods is not None:
+            method = methods.get(self._method_dd.value)
+            pos = method.stages.get(self._stage_dd.value) if method is not None else None
+            if pos is not None and pos.ndim == 3 and pos.shape[1] == 52:
+                return pos[frame, 0]
+        return self.original_joints[frame, 0]
+
+    # Stages where the full human is shown at human scale, so the SMPL-X mesh aligns.
+    SMPLX_STAGES = ("Original", "Grounded")
+
     def _draw_smplx_mesh(self, frame: int) -> None:
-        """Render the SMPL-X body mesh for the given frame; no-op when data absent."""
+        """Render the SMPL-X body mesh for the given frame; no-op when data absent. Shown
+        only on the human-scale stages (Original, Grounded), where it follows the skeleton
+        by snapping its pelvis onto the active stage's root (see _active_human_pelvis);
+        hidden elsewhere, where a full-size human mesh would not match the stage."""
         show = (self._tog_smplx.value and self.human_body is not None
-                and self.original_quats is not None and self.original_joints is not None)
+                and self.original_quats is not None and self.original_joints is not None
+                and self._stage_dd.value in self.SMPLX_STAGES)
         if not show:
             if self._smplx_handle is not None:
                 self._smplx_handle.visible = False
             return
-        verts = self.human_body.placed_verts(
-            self.original_quats[frame], self.original_joints[frame, 0],
-            frame_idx=frame).astype(np.float32)
+        raw_pelvis = self.original_joints[frame, 0]
+        # placed_verts caches by frame; a stage only shifts the mesh rigidly, so pose once
+        # at the raw pelvis (cache hit on toggles) then translate onto the stage's root.
+        base = self.human_body.placed_verts(self.original_quats[frame], raw_pelvis, frame_idx=frame)
+        verts = (base + (self._active_human_pelvis(frame) - raw_pelvis)).astype(np.float32)
         if self._smplx_handle is None:
             self._smplx_handle = self.server.scene.add_mesh_simple(
                 "/human/mesh", vertices=verts, faces=self.human_body.faces,
@@ -360,6 +409,24 @@ class Viewer:
         elif self._object_pts_handle is not None:
             self._object_pts_handle.visible = False
 
+    def _draw_g1_points(self, frame: int) -> None:
+        """Holosoma's G1 morphological-graph keypoints (the robot links the interaction
+        mesh pairs with the object points) at the active method's solved pose. Persistent
+        handle, updated in place like the object points so it does not flicker."""
+        method = self._methods.get(self._method_dd.value)
+        g1 = None if method is None else method.g1_points
+        if self._tog_g1_pts.value and g1 is not None:
+            pts = g1[frame].astype(np.float32)
+            if self._g1_pts_handle is None:
+                col = np.broadcast_to((0, 200, 0), (len(pts), 3)).astype(np.uint8)
+                self._g1_pts_handle = self.server.scene.add_point_cloud(
+                    "/holosoma/g1_pts", pts, col, point_size=0.02)
+            else:
+                self._g1_pts_handle.points = pts
+                self._g1_pts_handle.visible = True
+        elif self._g1_pts_handle is not None:
+            self._g1_pts_handle.visible = False
+
     def _draw_stage_skeleton(self, prefix: str, pos: np.ndarray, bones, *, ghost: bool) -> None:
         """A non-source stage (mapped bodies or solved robot links) as a skeleton:
         bones (when a topology is given) plus joints, both toggle-gated, in orange."""
@@ -375,14 +442,30 @@ class Viewer:
                 f"{prefix}/joints", pos.astype(np.float32), col, point_size=0.025)
             self._dynamic_handles.append(h)
 
+    def _draw_axes(self, prefix: str, pos: np.ndarray, quat: np.ndarray, *, ghost: bool) -> None:
+        """Per-joint orientation frames (RGB triads) at each joint. ``quat`` is (B, 4)
+        wxyz, ``pos`` is (B, 3). Length comes from the Frame size slider (ghost = half),
+        radius scales with length so the axes stay slender."""
+        length = float(self._axis_size.value) * (0.5 if ghost else 1.0)
+        h = self.server.scene.add_batched_axes(
+            f"{prefix}/axes",
+            batched_wxyzs=np.asarray(quat, dtype=np.float32),
+            batched_positions=np.asarray(pos, dtype=np.float32),
+            axes_length=length, axes_radius=length * AXIS_RADIUS_FRAC)
+        self._dynamic_handles.append(h)
+
     def _draw_stage(self, method, stage: str, prefix: str, frame: int, *, ghost: bool) -> None:
         """Draw a method's stage skeleton: full SMPLH topology for 52-joint stages,
-        else the stage's own bone topology over its mapped joints."""
+        else the stage's own bone topology over its mapped joints (plus joint frames
+        when the stage carries per-joint orientations)."""
         pos = method.stages[stage][frame]
         if pos.shape[0] == 52:
             self._draw_skeleton(prefix, pos.astype(np.float32), ghost=ghost)
         else:
             self._draw_stage_skeleton(prefix, pos, method.stage_bones.get(stage), ghost=ghost)
+            quat = method.stage_quats.get(stage)
+            if self._tog_axes.value and quat is not None:
+                self._draw_axes(prefix, pos, quat[frame], ghost=ghost)
 
     def _clear_dynamic(self) -> None:
         for h in self._dynamic_handles:
@@ -402,12 +485,16 @@ class Viewer:
                 self._draw_stage_skeleton(
                     "/active", method.robot_skeleton[frame],
                     method.stage_bones.get(ROBOT_STAGE), ghost=False)
+                if self._tog_axes.value and method.robot_quats is not None:
+                    self._draw_axes("/active", method.robot_skeleton[frame],
+                                    method.robot_quats[frame], ghost=False)
         elif stage == "Original" and self.original_joints is not None:
             self._draw_skeleton("/active", self._original_frame(frame), ghost=False)
         else:
             self._draw_stage(method, stage, "/active", frame, ghost=False)
         self._draw_smplx_mesh(frame)
         self._draw_object(frame)
+        self._draw_g1_points(frame)
         g_stage = self._ghost_stage_dd.value
         if g_stage != "Off":
             g_method = self._methods[self._ghost_method_dd.value]

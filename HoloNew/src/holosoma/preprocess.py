@@ -88,13 +88,21 @@ def compute_holosoma_stages(raw_joints, scale, toe_indices, mapped_indices, mat_
     """
     raw = np.asarray(raw_joints, dtype=float)
     original = raw.copy()
-
-    grounded = raw.copy()
-    z_min = float(grounded[:, toe_indices, 2].min())
-    if z_min >= mat_height:
-        z_min -= mat_height
-    grounded[:, :, 2] -= z_min
-
+    grounded = ground_to_floor(raw, toe_indices, mat_height)
     scaled = grounded * float(scale)
     mapped = scaled[:, list(mapped_indices)]
     return {"Original": original, "Grounded": grounded, "Scaled": scaled, "Mapped": mapped}
+
+
+def ground_to_floor(joints, toe_indices, mat_height=0.1):
+    """Drop the skeleton uniformly so its lowest toe rests on z=0 (or mat_height above the
+    floor when it is already standing on a mat). Returns a new array; input unchanged.
+
+    Shared by compute_holosoma_stages and the GMR stage viewer so both expose the same
+    'Grounded' stage (the raw input re-grounded onto the floor)."""
+    out = np.asarray(joints, dtype=float).copy()
+    z_min = float(out[:, toe_indices, 2].min())
+    if z_min >= mat_height:
+        z_min -= mat_height
+    out[:, :, 2] -= z_min
+    return out

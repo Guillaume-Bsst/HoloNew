@@ -15,3 +15,7 @@ def test_gmr_exposes_full_stage_dict(modpath, cls):
         assert rt.gmr_stages[k]["pos"].shape[1] == 14   # 14 mapped bodies
     # the solve still uses the ground stage
     assert rt.gmr_ground is rt.gmr_stages["ground"]
+    # GMR now consumes the grounded input: the 52-joint grounded skeleton is exposed
+    # and rests on the floor (lowest point ~0), and it feeds the mapped-body chain.
+    assert rt.gmr_grounded.shape[1:] == (52, 3)
+    assert abs(float(rt.gmr_grounded[:, :, 2].min())) < 0.11   # grounded (<= mat_height)

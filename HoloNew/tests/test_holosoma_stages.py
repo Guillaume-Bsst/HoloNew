@@ -1,5 +1,16 @@
 import numpy as np
-from HoloNew.src.holosoma.preprocess import compute_holosoma_stages
+from HoloNew.src.holosoma.preprocess import compute_holosoma_stages, ground_to_floor
+
+
+def test_ground_to_floor_drops_lowest_toe_to_zero():
+    raw = np.zeros((3, 52, 3), float)
+    raw[:, :, 2] = 2.0
+    raw[:, 3, 2] = 1.4; raw[:, 7, 2] = 1.5   # toes lowest
+    before = raw.copy()
+    out = ground_to_floor(raw, toe_indices=[3, 7], mat_height=0)
+    np.testing.assert_allclose(out[:, 3, 2].min(), 0.0, atol=1e-6)   # lowest toe on floor
+    np.testing.assert_allclose(out[:, :, 2], raw[:, :, 2] - 1.4)     # uniform z drop
+    np.testing.assert_array_equal(raw, before)                       # input untouched
 
 
 def test_holosoma_stages_shapes_and_steps():

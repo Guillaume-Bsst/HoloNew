@@ -14,5 +14,5 @@ def test_stage_lists_end_with_robot():
     hs = stages_for_method("holosoma")
     assert hs == ["Original", "Grounded", "Scaled", "Mapped", ROBOT_STAGE]
     g1 = stages_for_method("GMR-SOCP v1")
-    assert g1 == ["Original", "Mapped", "Scaled", "Offset", "Ground", ROBOT_STAGE]
+    assert g1 == ["Original", "Grounded", "Mapped", "Scaled", "Offset", "Floor", ROBOT_STAGE]
     assert stages_for_method("GMR-SOCP v2") == g1
