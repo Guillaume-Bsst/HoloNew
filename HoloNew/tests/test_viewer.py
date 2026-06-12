@@ -210,3 +210,32 @@ def test_sdf_object_toggle(robot_urdf):
     v._tog_sdf.value = False; v._redraw(0)
     assert v._sdf_handle.visible is False
     v.close()
+
+
+def test_interaction_toggles_and_gating(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    human = np.zeros((3, 6, 3), dtype=np.float32)
+    g1 = np.zeros((3, 4, 3), dtype=np.float32)
+    dist = np.zeros((3, 6), dtype=np.float32)
+    m = MethodViz(label="TEST-SOCP", robot_key="test_socp",
+                  qpos=np.zeros((3, 36)),
+                  stages={"Original": oj, "Grounded": oj},
+                  human_probe_pts=human, human_dist=dist,
+                  g1_transport_pts=g1, g1_dist=dist[:, :4])
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("test_socp",), original_joints=oj)
+    v.bind_methods([m])
+    assert hasattr(v, "_tog_human") and hasattr(v, "_tog_g1_transport")
+    # Human contact gated to the Grounded stage.
+    v._tog_human.value = True
+    v._stage_dd.value = "Robot"; v._redraw(0)
+    assert v._human_handle is None or v._human_handle.visible is False
+    v._stage_dd.value = "Grounded"; v._redraw(0)
+    assert v._human_handle is not None and v._human_handle.visible
+    # G1 transport gated to the Robot stage.
+    v._tog_g1_transport.value = True
+    v._stage_dd.value = "Robot"; v._redraw(0)
+    assert v._g1_transport_handle is not None and v._g1_transport_handle.visible
+    v.close()

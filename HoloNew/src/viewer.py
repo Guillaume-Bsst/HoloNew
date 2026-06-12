@@ -19,6 +19,8 @@ import yourdfpy
 
 from . import skeleton
 from .stages import ROBOT_STAGE, stages_for_method
+from HoloNew.src.test_socp.contact.viz import signed_distance_colors
+from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M
 
 # Joint-frame axis radius as a fraction of its length, so the RGB triads stay
 # slender at any "Frame size" value (matches test_pipe's add_batched_axes sizing).
@@ -63,6 +65,10 @@ class MethodViz:
     stage_quats: dict = field(default_factory=dict)
     robot_quats: np.ndarray | None = None
     g1_points: np.ndarray | None = None
+    human_probe_pts: np.ndarray | None = None   # (T, N, 3) Grounded-pose SMPL-X probes
+    human_dist: np.ndarray | None = None        # (T, N)    signed distance (min(object, floor))
+    g1_transport_pts: np.ndarray | None = None  # (T, M, 3) transported points on the robot
+    g1_dist: np.ndarray | None = None           # (T, M)    each G1 point's human-source distance
 
 
 class Viewer:
@@ -109,6 +115,8 @@ class Viewer:
         self._object_pts_handle = None
         self._g1_pts_handle = None
         self._sdf_handle = None
+        self._human_handle = None
+        self._g1_transport_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -226,9 +234,15 @@ class Viewer:
         with self.server.gui.add_folder("Test"):
             # test_pipe frame: object SDF near-surface band shell, coloured by signed distance.
             self._tog_sdf = self.server.gui.add_checkbox("SDF Object", False)
-        @self._tog_sdf.on_update
-        def _(_evt):
-            self._redraw(int(self._slider.value))
+            self._tog_sdf_floor = self.server.gui.add_checkbox("SDF Floor", False)
+            self._tog_human = self.server.gui.add_checkbox("Human contact", False)
+            self._tog_g1_transport = self.server.gui.add_checkbox("G1 transport", False)
+            self._tog_directions = self.server.gui.add_checkbox("Directions", False)
+        for _cb in (self._tog_sdf, self._tog_sdf_floor, self._tog_human,
+                    self._tog_g1_transport, self._tog_directions):
+            @_cb.on_update
+            def _(_evt):
+                self._redraw(int(self._slider.value))
 
         def _ghost_stages(label: str) -> list:
             return ["Off"] + [s for s in stages_for_method(label) if s != ROBOT_STAGE]
@@ -460,6 +474,40 @@ class Viewer:
         elif self._sdf_handle is not None:
             self._sdf_handle.visible = False
 
+    def _draw_signed_cloud(self, handle_attr, name, pts, dist, show):
+        """Persistent signed-distance point cloud, updated in place; hidden when show=False."""
+        h = getattr(self, handle_attr)
+        if not show:
+            if h is not None:
+                h.visible = False
+            return
+        cols = signed_distance_colors(dist, CONTACT_MARGIN_M)
+        if h is None:
+            h = self.server.scene.add_point_cloud(
+                name, points=pts.astype(np.float32), colors=cols, point_size=0.01)
+            setattr(self, handle_attr, h)
+        else:
+            h.points = pts.astype(np.float32)
+            h.colors = cols
+            h.visible = True
+
+    def _draw_interaction(self, frame: int) -> None:
+        """TEST-SOCP overlays: human contact (Grounded stage) + G1 transport (Robot stage)."""
+        method = self._methods.get(self._method_dd.value)
+        stage = self._stage_dd.value
+        show_human = (method is not None and self._tog_human.value
+                      and method.human_probe_pts is not None and stage == "Grounded")
+        self._draw_signed_cloud(
+            "_human_handle", "/test/human",
+            method.human_probe_pts[frame] if show_human else None,
+            method.human_dist[frame] if show_human else None, show_human)
+        show_g1 = (method is not None and self._tog_g1_transport.value
+                   and method.g1_transport_pts is not None and stage == ROBOT_STAGE)
+        self._draw_signed_cloud(
+            "_g1_transport_handle", "/test/g1_transport",
+            method.g1_transport_pts[frame] if show_g1 else None,
+            method.g1_dist[frame] if show_g1 else None, show_g1)
+
     def _draw_stage_skeleton(self, prefix: str, pos: np.ndarray, bones, *, ghost: bool) -> None:
         """A non-source stage (mapped bodies or solved robot links) as a skeleton:
         bones (when a topology is given) plus joints, both toggle-gated, in orange."""
@@ -529,6 +577,7 @@ class Viewer:
         self._draw_object(frame)
         self._draw_g1_points(frame)
         self._draw_sdf(frame)
+        self._draw_interaction(frame)
         g_stage = self._ghost_stage_dd.value
         if g_stage != "Off":
             g_method = self._methods[self._ghost_method_dd.value]
