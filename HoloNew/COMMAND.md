@@ -97,6 +97,15 @@ python examples/view_stages.py --task-type robot_only \
 
 Takes the same `RetargetingConfig` flags as `robot_retarget.py`, plus `--methods`.
 
+The viewer also exposes (GUI folders, right panel):
+
+- **Skeleton** — toggle body/finger **bones** and **joints** of the 52-joint
+  source skeleton (shown on the `Original` stage).
+- **Meshes** — overlay the posed **SMPL-X mesh** (needs the SMPL-X model dir) and
+  the **object mesh**, on any stage.
+- **Ghost** — pick a second `(Method, Stage)` to overlay faded for comparison
+  (`Off` to disable). The ghost covers skeleton stages, not the robot.
+
 ---
 
 ## 3. Contact field viewer — `view_contact.py`
