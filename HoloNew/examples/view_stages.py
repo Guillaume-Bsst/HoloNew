@@ -10,6 +10,7 @@ that optimizer instead of all three.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Literal
 
@@ -24,10 +25,15 @@ from HoloNew.examples.robot_retarget import (
     load_motion_data,
     run_headless,
 )
+from HoloNew.src.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
+from HoloNew.src.correspondence.human_body import HumanBody
 from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
 from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
 from HoloNew.src.holosoma.preprocess import compute_holosoma_stages
+from HoloNew.src.utils import load_intermimic_quats
 from HoloNew.src.viewer import MethodViz, Viewer
+
+logger = logging.getLogger(__name__)
 
 Method = Literal["holosoma", "gmr_socp_v1", "gmr_socp_v2"]
 
@@ -61,6 +67,23 @@ def view(cfg: ViewStagesConfig) -> None:
     raw_joints, _object_poses, smpl_scale = load_motion_data(
         cfg.task_type, data_format, cfg.data_path, cfg.task_name, constants, cfg.motion_data_config
     )
+
+    # Per-joint quaternions only exist for the smplh .pt format; the SMPL-X mesh
+    # needs them. Everything else degrades gracefully to skeleton-only.
+    original_quats = None
+    if data_format == "smplh":
+        try:
+            original_quats = load_intermimic_quats(str(cfg.data_path / f"{cfg.task_name}.pt"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No per-joint quats (%s); SMPL-X mesh disabled.", exc)
+
+    human_body = None
+    if original_quats is not None:
+        try:
+            human_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, None, "neutral")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SMPL-X unavailable (%s); mesh disabled.", exc)
+
     toe = [constants.DEMO_JOINTS.index(name) for name in cfg.motion_data_config.toe_names]
     # JOINTS_MAPPING is a dict {human_joint_name -> robot_link_name}; the mapped
     # indices select the human-side joints out of the 52-joint DEMO_JOINTS array.
@@ -90,6 +113,10 @@ def view(cfg: ViewStagesConfig) -> None:
     }
     methods = [builders[name]() for name in cfg.methods]
 
+    T = min(m.qpos.shape[0] for m in methods)
+    for m in methods:
+        m.stages["Original"] = raw_joints[:T, :, :]
+
     keys = tuple(m.robot_key for m in methods)
     # TODO: pass the object URDF + has_dynamic_object for object_interaction /
     # climbing tasks so the object appears in the viewer (robot_only has none).
@@ -97,6 +124,10 @@ def view(cfg: ViewStagesConfig) -> None:
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
         object_model_path=None,
         stage_keys=keys,
+        original_joints=raw_joints[:T, :, :],
+        original_quats=None if original_quats is None else original_quats[:T],
+        object_poses=None,
+        human_body=human_body,
     )
     viewer.bind_methods(methods)
     input("Stage viewer at http://localhost:8080 — Enter to exit ...")
