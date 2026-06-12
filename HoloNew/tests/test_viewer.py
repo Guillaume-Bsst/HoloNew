@@ -36,3 +36,13 @@ def test_bind_methods_builds_method_and_stage(robot_urdf):
     v._method_dd.value = "GMR-SOCP v1"; v._stage_dd.value = "Mapped"; v._redraw(0)
     v._stage_dd.value = "Robot"; v._redraw(0)
     v.close()
+
+def test_viewer_stores_original_motion(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer
+    oj = np.zeros((4, 52, 3), dtype=np.float32)
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               original_joints=oj)
+    assert v.original_joints.shape == (4, 52, 3)
+    assert v.original_quats is None and v.human_body is None
+    v.close()

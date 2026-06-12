@@ -44,10 +44,22 @@ class MethodViz:
 class Viewer:
     def __init__(self, robot_model_path: str, object_model_path: str | None,
                  stage_keys: tuple[str, ...] = ("socp",),
-                 has_dynamic_object: bool = False) -> None:
+                 has_dynamic_object: bool = False,
+                 original_joints: np.ndarray | None = None,
+                 original_quats: np.ndarray | None = None,
+                 object_poses: np.ndarray | None = None,
+                 human_body: object | None = None) -> None:
         self.robot_model_path = robot_model_path
         self.object_model_path = object_model_path
         self.has_dynamic_object = has_dynamic_object
+        # Original source motion, shared by every method's "Original" stage.
+        self.original_joints = original_joints
+        self.original_quats = original_quats
+        self.object_poses = object_poses
+        self.human_body = human_body
+        self._smplx_handle = None
+        self._object_handle = None
+        self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
         # Ensure a world frame exists (absolute path)
