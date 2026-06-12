@@ -6,10 +6,11 @@ IK), so the results are NOT identical — this test QUANTIFIES the difference ra
 than asserting equality. It runs HoloNew GMR-SOCP v1 live and compares it to a
 frozen mink reference.
 
-Observed on sub3_largebox_003 (for reference, the asserts below are looser):
-    base-pos RMSE ~0.40 m   base-quat mean|dot| ~0.995   joints mean|diff| ~0.19 rad
-The base-position gap mostly reflects different pre-IK grounding/scaling between
-the two pipelines; orientations track closely.
+HoloNew's GMR path uses test_pipe's `compute_stages` preprocessing (root XY preserved
++ morphological limb scaling + grounding), so the base now matches mink to solver-noise:
+    base-pos RMSE ~0.03 m   base-quat mean|dot| ~0.998   joints mean|diff| ~0.16 rad
+The residual ~0.16 rad joint difference is the genuine solver/model gap (conic SOCP vs
+mink velocity IK, plus the G1 toe->ankle body remap), not a preprocessing artifact.
 
 Reference: tests/golden/gmr_mink_qpos.npz -> qpos from test_pipe's
 `compute_gmr_stage`, run in the `tpretargeting` conda env. Regenerate:
@@ -54,7 +55,8 @@ def test_gmr_socp_is_close_to_mink():
     print(f"\nGMR-SOCP vs mink: base-pos RMSE={base_pos_rmse:.3f} m | "
           f"base-quat mean|dot|={base_quat_dot:.3f} | joints mean|diff|={joints_mean:.3f} rad")
 
-    # Loose sanity bounds: same solution family, not bit-identical.
-    assert base_quat_dot > 0.95, base_quat_dot          # orientations broadly aligned
-    assert base_pos_rmse < 1.0, base_pos_rmse           # base within ~1 m
-    assert joints_mean < 0.6, joints_mean               # mean joint diff < ~34 deg
+    # After aligning the preprocessing to GMR's, the base tracks mink to solver noise
+    # (~3 cm); the residual joint gap is the genuine solver/model difference.
+    assert base_quat_dot > 0.99, base_quat_dot          # orientations closely aligned
+    assert base_pos_rmse < 0.1, base_pos_rmse           # base within ~10 cm of mink
+    assert joints_mean < 0.3, joints_mean               # mean joint diff < ~17 deg

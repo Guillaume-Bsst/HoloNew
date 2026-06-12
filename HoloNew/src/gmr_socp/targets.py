@@ -11,12 +11,43 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from .tables import HUMAN_BODY_TO_IDX
+from .tables import HUMAN_BODY_TO_IDX, MAPPED_BODY_NAMES
 
 
 def _wxyz_to_R(q_wxyz: np.ndarray) -> np.ndarray:
     w, x, y, z = q_wxyz
     return Rotation.from_quat([x, y, z, w]).as_matrix()
+
+
+def ground_frame_targets(ground_pos_t: np.ndarray, ground_quat_t: np.ndarray, table: dict):
+    """Build robot-frame targets from a GMR 'ground' stage frame.
+
+    ground_pos_t (B,3) / ground_quat_t (B,4) wxyz are in MAPPED_BODY_NAMES order, with
+    the table1 pos/rot offsets, morphological scaling and grounding ALREADY baked in by
+    preprocess.compute_stages. Only the WEIGHTS are read from ``table`` (its offset
+    columns are intentionally ignored — GMR applies table1 offsets for both passes and
+    varies only the weights). Pass IK_MATCH_TABLE1 for pass 1, IK_MATCH_TABLE2 for pass 2.
+
+    Returns dict: robot_frame -> (p_target(3,), R_target(3,3), pos_weight, rot_weight).
+    """
+    out = {}
+    for frame, (human, pos_w, rot_w, _pos_off, _rot_off) in table.items():
+        bi = MAPPED_BODY_NAMES.index(human)
+        R_target = _wxyz_to_R(ground_quat_t[bi])
+        out[frame] = (np.asarray(ground_pos_t[bi], float), R_target, float(pos_w), float(rot_w))
+    return out
+
+
+def load_pt_joints(pt_path: str | Path) -> np.ndarray:
+    """Load per-joint world positions (T, 52, 3) from an OMOMO .pt file.
+
+    .pt layout (InterAct interact2mimic.py — raw tensor (T, 591)): joint positions live
+    at the flat slice [162 : 162 + 52*3]. These are the RAW positions (test_pipe's load_pt
+    convention) that GMR's compute_stages expects, NOT holosoma's globally-scaled joints.
+    """
+    import torch
+    data = torch.load(pt_path, map_location="cpu", weights_only=False).detach().numpy()
+    return data[:, 162 : 162 + 52 * 3].reshape(-1, 52, 3).astype(np.float32)
 
 
 def build_frame_targets(joint_pos: np.ndarray, joint_quat_wxyz: np.ndarray, table: dict):

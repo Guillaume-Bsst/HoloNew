@@ -459,23 +459,27 @@ class GmrSocpRetargeterV1:
     def retarget(self):
         """Run the full two-pass GMR solve over all frames.
 
-        Requires from_config to have been called first (sets self.human_pos,
-        self.human_quat, self.q_init_full).
+        Requires from_config to have been called first (sets self.gmr_ground,
+        self.q_init_full).
 
         Returns:
             RetargetResult with qpos (T, 7+DOF) trajectory.
         """
         from HoloNew.src.retarget_result import RetargetResult
         from .tables import IK_MATCH_TABLE1, IK_MATCH_TABLE2
-        from .targets import build_frame_targets
+        from .targets import ground_frame_targets
 
-        T = self.human_pos.shape[0]
+        gpos = self.gmr_ground["pos"]
+        gquat = self.gmr_ground["quat"]
+        T = gpos.shape[0]
         q = np.copy(self.q_init_full)
         out = []
 
         for t in range(T):
-            tg1 = build_frame_targets(self.human_pos[t], self.human_quat[t], IK_MATCH_TABLE1)
-            tg2 = build_frame_targets(self.human_pos[t], self.human_quat[t], IK_MATCH_TABLE2)
+            # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
+            # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
+            tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
+            tg2 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE2)
             q, _ = self.iterate(q, q, q, tg1, n_iter=(50 if t == 0 else 10))
             q, _ = self.iterate(q, q, q, tg2, n_iter=(50 if t == 0 else 10))
             out.append(np.copy(q))
@@ -581,8 +585,22 @@ class GmrSocpRetargeterV1:
         human_joints = human_joints[:T]
         human_quat = human_quat[:T]
 
-        rt.human_pos = human_joints   # (T, J, 3)
+        rt.human_pos = human_joints   # (T, J, 3) holosoma-preprocessed (kept for reference)
         rt.human_quat = human_quat    # (T, 52, 4) wxyz
         rt.q_init_full = q_init_full  # (nq,)
+
+        # GMR-faithful targets: feed compute_stages the RAW joint positions (test_pipe
+        # convention, with the root XY preserved) rather than holosoma's globally-scaled
+        # joints, then track the 'ground' stage. This matches GMR/mink; the holosoma
+        # global scale was the sole cause of the ~0.4 m base offset vs mink.
+        from .preprocess import compute_stages
+        from .tables import HUMAN_ROOT_NAME, MAPPED_BODY_NAMES
+        from .targets import load_pt_joints
+        raw_joints = load_pt_joints(pt_path)[:T]
+        ground = compute_stages(raw_joints, human_quat, anchor_root_xy=True)["ground"]
+        rt.gmr_ground = ground
+        _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
+        rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
+        rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
 
         return rt
