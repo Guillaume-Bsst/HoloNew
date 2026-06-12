@@ -79,3 +79,22 @@ def test_smplx_toggle_noop_without_body(robot_urdf):
     v._stage_dd.value = "Original"; v._redraw(0)
     assert v._smplx_handle is None
     v.close()
+
+def test_ghost_overlays_skeleton_stage(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    m1 = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                   qpos=np.zeros((3, 36)),
+                   stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj)
+    v.bind_methods([m1])
+    assert v._ghost_stage_dd.value == "Off"
+    assert "Robot" not in v._ghost_stage_dd.options
+    v._ghost_method_dd.value = "GMR-SOCP v1"
+    v._ghost_stage_dd.value = "Mapped"
+    v._redraw(0)   # must not raise
+    v._ghost_stage_dd.value = "Off"
+    v._redraw(0)
+    v.close()

@@ -152,6 +152,26 @@ class Viewer:
             def _(_evt):
                 self._redraw(int(self._slider.value))
 
+        def _ghost_stages(label: str) -> list:
+            return ["Off"] + [s for s in stages_for_method(label) if s != ROBOT_STAGE]
+
+        with self.server.gui.add_folder("Ghost"):
+            first = methods[0].label
+            self._ghost_method_dd = self.server.gui.add_dropdown(
+                "Method", options=method_labels(), initial_value=first)
+            self._ghost_stage_dd = self.server.gui.add_dropdown(
+                "Stage", options=_ghost_stages(first), initial_value="Off")
+
+        @self._ghost_method_dd.on_update
+        def _(_evt):
+            self._ghost_stage_dd.options = _ghost_stages(self._ghost_method_dd.value)
+            self._ghost_stage_dd.value = "Off"
+            self._redraw(int(self._slider.value))
+
+        @self._ghost_stage_dd.on_update
+        def _(_evt):
+            self._redraw(int(self._slider.value))
+
         @self._method_dd.on_update
         def _(_evt):
             self._stage_dd.options = stages_for_method(self._method_dd.value)
@@ -265,6 +285,13 @@ class Viewer:
             self._draw_stage_points("/active", method.stages[stage][frame], ghost=False)
         self._draw_smplx_mesh(frame)
         self._draw_object(frame)
+        g_stage = self._ghost_stage_dd.value
+        if g_stage != "Off":
+            g_method = self._methods[self._ghost_method_dd.value]
+            if g_stage == "Original" and self.original_joints is not None:
+                self._draw_skeleton("/ghost", self._original_frame(frame), ghost=True)
+            elif g_stage in g_method.stages:
+                self._draw_stage_points("/ghost", g_method.stages[g_stage][frame], ghost=True)
 
     def close(self) -> None:
         self.server.stop()
