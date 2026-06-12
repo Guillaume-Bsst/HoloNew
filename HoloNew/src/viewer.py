@@ -37,11 +37,18 @@ class MethodViz:
         robot_key: Robot instance key; selects ``self.robots[robot_key]``.
         qpos: ``(T, 7 + dof)`` solved robot trajectory.
         stages: Mapping of ``{stage_label: (T, B, 3)}`` skeleton point clouds.
+        stage_bones: Optional ``{stage_label: [(i, j), ...]}`` bone index pairs
+            for the non-52-joint (mapped) stages and the robot stage, so they
+            render as skeletons; 52-joint stages use the built-in SMPLH topology.
+        robot_skeleton: Optional ``(T, K, 3)`` solved-robot link world positions
+            (drawn on the Robot stage, keyed by ``stage_bones["Robot"]``).
     """
     label: str
     robot_key: str
     qpos: np.ndarray
     stages: dict = field(default_factory=dict)
+    stage_bones: dict = field(default_factory=dict)
+    robot_skeleton: np.ndarray | None = None
 
 
 class Viewer:
@@ -140,6 +147,7 @@ class Viewer:
                 "Method", options=bound_labels, initial_value=first)
             self._stage_dd = self.server.gui.add_dropdown(
                 "Stage", options=stages_for_method(first), initial_value=ROBOT_STAGE)
+            self._tog_urdf = self.server.gui.add_checkbox("Show G1 URDF", True)
 
         with self.server.gui.add_folder("Skeleton"):
             self._tog_body_bones = self.server.gui.add_checkbox("Body bones", True)
@@ -194,6 +202,9 @@ class Viewer:
             self._redraw(int(self._slider.value))
 
         @self._stage_dd.on_update
+        def _(_evt): self._redraw(int(self._slider.value))
+
+        @self._tog_urdf.on_update
         def _(_evt): self._redraw(int(self._slider.value))
 
         @self._play_btn.on_click
@@ -297,14 +308,29 @@ class Viewer:
         self.object_base.position = self.object_poses[frame, :3]
         self.object_base.wxyz = self.object_poses[frame, 3:7]
 
-    def _draw_stage_points(self, prefix: str, pos: np.ndarray, *, ghost: bool) -> None:
-        """Mapped/preprocessing stages: joint points only (no bone topology)."""
-        if not self._tog_body_joints.value:
-            return
+    def _draw_stage_skeleton(self, prefix: str, pos: np.ndarray, bones, *, ghost: bool) -> None:
+        """A non-source stage (mapped bodies or solved robot links) as a skeleton:
+        bones (when a topology is given) plus joints, both toggle-gated, in orange."""
         col = skeleton.COLOR_GHOST_STAGE if ghost else skeleton.COLOR_STAGE
-        h = self.server.scene.add_point_cloud(
-            f"{prefix}/joints", pos.astype(np.float32), col, point_size=0.025)
-        self._dynamic_handles.append(h)
+        lw = 1.5 if ghost else 3.5
+        if bones and self._tog_body_bones.value:
+            segs = np.asarray([[pos[a], pos[b]] for a, b in bones], dtype=np.float32)
+            cols = np.broadcast_to(col, (len(bones), 2, 3)).astype(np.uint8)
+            h = self.server.scene.add_line_segments(f"{prefix}/bones", segs, cols, line_width=lw)
+            self._dynamic_handles.append(h)
+        if self._tog_body_joints.value:
+            h = self.server.scene.add_point_cloud(
+                f"{prefix}/joints", pos.astype(np.float32), col, point_size=0.025)
+            self._dynamic_handles.append(h)
+
+    def _draw_stage(self, method, stage: str, prefix: str, frame: int, *, ghost: bool) -> None:
+        """Draw a method's stage skeleton: full SMPLH topology for 52-joint stages,
+        else the stage's own bone topology over its mapped joints."""
+        pos = method.stages[stage][frame]
+        if pos.shape[0] == 52:
+            self._draw_skeleton(prefix, pos.astype(np.float32), ghost=ghost)
+        else:
+            self._draw_stage_skeleton(prefix, pos, method.stage_bones.get(stage), ghost=ghost)
 
     def _clear_dynamic(self) -> None:
         for h in self._dynamic_handles:
@@ -317,12 +343,17 @@ class Viewer:
         self._clear_dynamic()
         self._hide_all_robots()
         if stage == ROBOT_STAGE:
-            self.robots[method.robot_key].urdf.show_visual = True
-            self.draw_q(method.qpos[frame], stage=method.robot_key)
+            if self._tog_urdf.value:
+                self.robots[method.robot_key].urdf.show_visual = True
+                self.draw_q(method.qpos[frame], stage=method.robot_key)
+            if method.robot_skeleton is not None:
+                self._draw_stage_skeleton(
+                    "/active", method.robot_skeleton[frame],
+                    method.stage_bones.get(ROBOT_STAGE), ghost=False)
         elif stage == "Original" and self.original_joints is not None:
             self._draw_skeleton("/active", self._original_frame(frame), ghost=False)
         else:
-            self._draw_stage_points("/active", method.stages[stage][frame], ghost=False)
+            self._draw_stage(method, stage, "/active", frame, ghost=False)
         self._draw_smplx_mesh(frame)
         self._draw_object(frame)
         g_stage = self._ghost_stage_dd.value
@@ -331,7 +362,7 @@ class Viewer:
             if g_stage == "Original" and self.original_joints is not None:
                 self._draw_skeleton("/ghost", self._original_frame(frame), ghost=True)
             elif g_stage in g_method.stages:
-                self._draw_stage_points("/ghost", g_method.stages[g_stage][frame], ghost=True)
+                self._draw_stage(g_method, g_stage, "/ghost", frame, ghost=True)
 
     def close(self) -> None:
         self.server.stop()

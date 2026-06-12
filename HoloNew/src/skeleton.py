@@ -37,3 +37,29 @@ COLOR_GHOST_BODY = np.array([150, 180, 220], dtype=np.uint8)
 COLOR_GHOST_FINGER = np.array([185, 205, 235], dtype=np.uint8)
 COLOR_STAGE = np.array([230, 140, 30], dtype=np.uint8)
 COLOR_GHOST_STAGE = np.array([240, 200, 150], dtype=np.uint8)
+
+# Child -> parent in the 52-joint SMPLH tree, read off the bone lists (each bone
+# is a (parent, child) pair). Used to connect an arbitrary joint subset into a
+# skeleton: a mapped stage keeps only some joints, so each is linked to its
+# nearest *present* ancestor.
+_PARENT: dict[int, int] = {child: parent for parent, child in BODY_BONES + FINGER_BONES}
+
+
+def bones_for_subset(indices: list[int]) -> list[tuple[int, int]]:
+    """Bone pairs (as positions into ``indices``) connecting each selected joint
+    to its nearest present ancestor in the 52-joint SMPLH tree.
+
+    ``indices`` are 52-joint indices in the stage's own joint order; the returned
+    pairs index into that stage array, so a mapped/preprocessing stage renders as
+    a skeleton without carrying any topology of its own. The root (no ancestor in
+    the subset, e.g. the pelvis) contributes no bone.
+    """
+    pos = {idx: i for i, idx in enumerate(indices)}
+    bones: list[tuple[int, int]] = []
+    for idx in indices:
+        ancestor = _PARENT.get(idx)
+        while ancestor is not None and ancestor not in pos:
+            ancestor = _PARENT.get(ancestor)
+        if ancestor is not None:
+            bones.append((pos[ancestor], pos[idx]))
+    return bones

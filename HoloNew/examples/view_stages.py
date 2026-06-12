@@ -22,17 +22,22 @@ from HoloNew.config_types.robot import RobotConfig
 from HoloNew.examples.robot_retarget import (
     DEFAULT_DATA_FORMATS,
     RetargetingConfig,
+    convert_object_poses_to_mujoco_order,
     create_task_constants,
     load_motion_data,
     run_headless,
 )
+from HoloNew.src import skeleton
 from HoloNew.src.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.correspondence.human_body import HumanBody
 from HoloNew.src.correspondence.human_metadata import load_human_metadata
-from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
+from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import _BODY_NAME_REMAP, GmrSocpRetargeterV1
+from HoloNew.src.gmr_socp_v1.tables import HUMAN_BODY_TO_IDX, IK_MATCH_TABLE1
 from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
-from HoloNew.src.holosoma.preprocess import compute_holosoma_stages
-from HoloNew.src.utils import load_intermimic_quats
+from HoloNew.src.holosoma.preprocess import compute_holosoma_stages, scale_object_poses_to_center
+from HoloNew.src.robot_fk import robot_link_positions
+from HoloNew.src.stages import ROBOT_STAGE
+from HoloNew.src.utils import load_intermimic_data, load_intermimic_quats
 from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
@@ -103,16 +108,47 @@ def view(cfg: ViewStagesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("SMPL-X unavailable (%s); mesh disabled.", exc)
 
+    # Object motion (from the .pt) pulled toward the world centre by the same
+    # holosoma scale factor as the robot, so object and robot stay aligned. The
+    # .pt pose is [qw,qx,qy,qz,x,y,z]; the viewer wants MuJoCo order. The object
+    # name is the second token of the sequence (e.g. sub3_largebox_003 -> largebox).
+    object_model_path, object_poses = None, None
+    if data_format == "smplh":
+        parts = cfg.task_name.split("_")
+        obj_urdf = Path("models") / parts[1] / f"{parts[1]}.urdf" if len(parts) >= 2 else None
+        try:
+            _, obj_poses = load_intermimic_data(str(cfg.data_path / f"{cfg.task_name}.pt"))
+            if obj_urdf is not None and obj_urdf.exists():
+                obj_poses = scale_object_poses_to_center(obj_poses, smpl_scale)
+                object_poses = convert_object_poses_to_mujoco_order(obj_poses)
+                object_model_path = str(obj_urdf)
+            else:
+                logger.warning("No object URDF at %s; object mesh disabled.", obj_urdf)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Object unavailable (%s); object mesh disabled.", exc)
+
     toe = [constants.DEMO_JOINTS.index(name) for name in cfg.motion_data_config.toe_names]
     # JOINTS_MAPPING is a dict {human_joint_name -> robot_link_name}; the mapped
     # indices select the human-side joints out of the 52-joint DEMO_JOINTS array.
     mapped = [constants.DEMO_JOINTS.index(name) for name in constants.JOINTS_MAPPING]
 
+    # Bone topologies + the solved-robot link set, shared by every method. The
+    # mapped GMR stages and the holosoma Mapped stage carry different joint sets,
+    # so each gets its own bones; the robot stage reads g1 link world positions
+    # (FK from qpos) drawn with the GMR mapped-body topology.
+    gmr_bones = skeleton.bones_for_subset(list(HUMAN_BODY_TO_IDX.values()))
+    holo_mapped_bones = skeleton.bones_for_subset(mapped)
+    robot_bodies = [_BODY_NAME_REMAP.get(f, f) for f in IK_MATCH_TABLE1]
+    robot_mjcf = cfg.robot_config.ROBOT_URDF_FILE.replace(".urdf", ".xml")
+
     def build_holosoma() -> MethodViz:
         # holosoma: native solved qpos + reproduced preprocessing stages.
         native = run_headless(cfg=cfg)
         hs = compute_holosoma_stages(raw_joints, smpl_scale, toe, mapped)
-        return MethodViz("holosoma", "holosoma", native.qpos, hs)
+        rs = robot_link_positions(robot_mjcf, robot_bodies, native.qpos)
+        sb = {"Mapped": holo_mapped_bones, ROBOT_STAGE: gmr_bones}
+        return MethodViz("holosoma", "holosoma", native.qpos, hs,
+                         stage_bones=sb, robot_skeleton=rs)
 
     def build_gmr(label: str, key: str, cls) -> MethodViz:
         # GMR v1 / v2: solved qpos + full per-stage mapped-body point clouds.
@@ -123,7 +159,11 @@ def view(cfg: ViewStagesConfig) -> None:
                   for name in ("mapped", "scaled", "offset", "ground")}
         # The 52-joint raw source skeleton, trimmed to the solved horizon.
         stages = {"Original": raw_joints[:T, :, :], **stages}
-        return MethodViz(label, key, res.qpos, stages)
+        rs = robot_link_positions(robot_mjcf, robot_bodies, res.qpos)
+        sb = {name: gmr_bones for name in ("Mapped", "Scaled", "Offset", "Ground")}
+        sb[ROBOT_STAGE] = gmr_bones
+        return MethodViz(label, key, res.qpos, stages,
+                         stage_bones=sb, robot_skeleton=rs)
 
     builders = {
         "holosoma": build_holosoma,
@@ -137,15 +177,13 @@ def view(cfg: ViewStagesConfig) -> None:
         m.stages["Original"] = raw_joints[:T, :, :]
 
     keys = tuple(m.robot_key for m in methods)
-    # TODO: pass the object URDF + has_dynamic_object for object_interaction /
-    # climbing tasks so the object appears in the viewer (robot_only has none).
     viewer = Viewer(
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
-        object_model_path=None,
+        object_model_path=object_model_path,
         stage_keys=keys,
         original_joints=raw_joints[:T, :, :],
         original_quats=None if original_quats is None else original_quats[:T],
-        object_poses=None,
+        object_poses=None if object_poses is None else object_poses[:T],
         human_body=human_body,
     )
     viewer.bind_methods(methods)

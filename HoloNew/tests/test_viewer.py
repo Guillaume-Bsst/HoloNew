@@ -120,3 +120,29 @@ def test_playback_controls_and_advance(robot_urdf):
     assert v._advance_frame() == 0
     assert int(v._slider.value) == 0
     v.close()
+
+
+def test_mapped_stage_bones_and_robot_skeleton_with_urdf_toggle(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    rs = np.zeros((3, 14, 3), dtype=np.float32)
+    bones = [(0, 1), (1, 2)]
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)),
+                  stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))},
+                  stage_bones={"Mapped": bones, "Robot": bones},
+                  robot_skeleton=rs)
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj)
+    v.bind_methods([m])
+    assert v._tog_urdf.value is True
+    # A mapped stage now draws bones + joints (2 handles), not just points.
+    v._stage_dd.value = "Mapped"; v._redraw(0)
+    assert len(v._dynamic_handles) == 2
+    # Robot stage: hiding the URDF leaves the mesh invisible but the solved-robot
+    # skeleton (bones + joints) is drawn underneath.
+    v._stage_dd.value = "Robot"; v._tog_urdf.value = False; v._redraw(0)
+    assert v.robots["gmr_socp_v1"].urdf.show_visual is False
+    assert len(v._dynamic_handles) == 2
+    v.close()
