@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import tyro
 
 from HoloNew.config_types.data_type import MotionDataConfig
@@ -37,7 +38,8 @@ from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
 from HoloNew.src.holosoma.preprocess import compute_holosoma_stages, scale_object_poses_to_center
 from HoloNew.src.robot_fk import robot_link_positions
 from HoloNew.src.stages import ROBOT_STAGE
-from HoloNew.src.utils import load_intermimic_data, load_intermimic_quats
+from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
+from HoloNew.src.utils import load_intermimic_data, load_intermimic_quats, load_object_data
 from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
@@ -108,24 +110,48 @@ def view(cfg: ViewStagesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("SMPL-X unavailable (%s); mesh disabled.", exc)
 
+    # Re-ground the human like test_pipe: the raw capture floats a few cm above the
+    # floor, so drop every joint by the median lowest SMPL-X sole height. This puts
+    # the posed mesh and the Original skeleton on the ground instead of floating.
+    if human_body is not None and original_quats is not None:
+        try:
+            offset = human_body.floor_offset(original_quats, raw_joints)
+            raw_joints = raw_joints.copy()
+            raw_joints[:, :, 2] -= offset
+            logger.info("Re-grounded human by %.2f cm (median sole).", offset * 100)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Human re-grounding skipped (%s).", exc)
+
     # Object motion (from the .pt) pulled toward the world centre by the same
     # holosoma scale factor as the robot, so object and robot stay aligned. The
     # .pt pose is [qw,qx,qy,qz,x,y,z]; the viewer wants MuJoCo order. The object
     # name is the second token of the sequence (e.g. sub3_largebox_003 -> largebox).
     object_model_path, object_poses = None, None
+    object_points, object_points_demo = None, None
     if data_format == "smplh":
         parts = cfg.task_name.split("_")
-        obj_urdf = Path("models") / parts[1] / f"{parts[1]}.urdf" if len(parts) >= 2 else None
+        obj_dir = Path("models") / parts[1] if len(parts) >= 2 else None
         try:
             _, obj_poses = load_intermimic_data(str(cfg.data_path / f"{cfg.task_name}.pt"))
+            obj_urdf = obj_dir / f"{parts[1]}.urdf" if obj_dir is not None else None
             if obj_urdf is not None and obj_urdf.exists():
                 obj_poses = scale_object_poses_to_center(obj_poses, smpl_scale)
                 object_poses = convert_object_poses_to_mujoco_order(obj_poses)
                 object_model_path = str(obj_urdf)
+                # Object interaction samples, placed per frame exactly like the classic
+                # holosoma viewer: local points from load_object_data lifted to world by
+                # transform_points_local_to_world. *_demo are the smpl_scale source points
+                # the solve tracks; the others are the full-mesh target points.
+                local_pts, local_pts_demo = load_object_data(
+                    str(obj_dir / f"{parts[1]}.obj"), smpl_scale=smpl_scale, sample_count=100)
+                object_points = np.stack(
+                    [transform_points_local_to_world(p[3:7], p[:3], local_pts) for p in object_poses])
+                object_points_demo = np.stack(
+                    [transform_points_local_to_world(p[3:7], p[:3], local_pts_demo) for p in object_poses])
             else:
-                logger.warning("No object URDF at %s; object mesh disabled.", obj_urdf)
+                logger.warning("No object URDF at %s; object disabled.", obj_urdf)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("Object unavailable (%s); object mesh disabled.", exc)
+            logger.warning("Object unavailable (%s); object disabled.", exc)
 
     toe = [constants.DEMO_JOINTS.index(name) for name in cfg.motion_data_config.toe_names]
     # JOINTS_MAPPING is a dict {human_joint_name -> robot_link_name}; the mapped
@@ -184,6 +210,8 @@ def view(cfg: ViewStagesConfig) -> None:
         original_joints=raw_joints[:T, :, :],
         original_quats=None if original_quats is None else original_quats[:T],
         object_poses=None if object_poses is None else object_poses[:T],
+        object_points=None if object_points is None else object_points[:T],
+        object_points_demo=None if object_points_demo is None else object_points_demo[:T],
         human_body=human_body,
     )
     viewer.bind_methods(methods)
