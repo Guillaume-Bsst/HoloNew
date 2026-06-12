@@ -66,3 +66,26 @@ def preprocess_motion_data(
         return human_joints, object_poses, object_moving_frame_idx
 
     return human_joints
+
+
+def compute_holosoma_stages(raw_joints, scale, toe_indices, mapped_indices, mat_height=0.1):
+    """Holosoma preprocessing as per-stage skeleton arrays (no mutation).
+
+    Mirrors preprocess_motion_data: ground (drop lowest toe z to 0, less mat_height if
+    on a mat) then scale (multiply all joints), then select the mapped joints. Returns
+    {Original (T,52,3), Grounded (T,52,3), Scaled (T,52,3), Mapped (T,len(mapped),3)}.
+    """
+    import numpy as np
+
+    raw = np.asarray(raw_joints, dtype=float)
+    original = raw.copy()
+
+    grounded = raw.copy()
+    z_min = float(grounded[:, toe_indices, 2].min())
+    if z_min >= mat_height:
+        z_min -= mat_height
+    grounded[:, :, 2] -= z_min
+
+    scaled = grounded * float(scale)
+    mapped = scaled[:, list(mapped_indices)]
+    return {"Original": original, "Grounded": grounded, "Scaled": scaled, "Mapped": mapped}
