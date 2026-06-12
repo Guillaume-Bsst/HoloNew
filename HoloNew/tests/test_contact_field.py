@@ -1,6 +1,6 @@
 import numpy as np
-from HoloNew.src.gmr_socp_v2.contact.contact_field import ContactField
-from HoloNew.src.gmr_socp_v2.contact.backends.floor import floor_field
+from HoloNew.src.test_socp.contact.contact_field import ContactField
+from HoloNew.src.test_socp.contact.backends.floor import floor_field
 
 def test_floor_field_signs_and_active():
     pts = np.array([[0, 0, -0.01], [0, 0, 0.02], [0, 0, 1.0]], float)

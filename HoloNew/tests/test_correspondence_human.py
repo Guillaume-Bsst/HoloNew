@@ -1,15 +1,15 @@
 import os
 import numpy as np
 import pytest
-from HoloNew.src.gmr_socp_v2.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
+from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 
 needs_smplx = pytest.mark.skipif(not os.path.isdir(SMPLX_MODEL_DIR_DEFAULT),
                                  reason="SMPL-X model dir not present")
 
 @needs_smplx
 def test_human_source_builds():
-    from HoloNew.src.gmr_socp_v2.correspondence.human_body import HumanBody
-    from HoloNew.src.gmr_socp_v2.correspondence.human_source import build_human_source
+    from HoloNew.src.test_socp.correspondence.human_body import HumanBody
+    from HoloNew.src.test_socp.correspondence.human_source import build_human_source
     body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, None, "neutral")
     src = build_human_source(body, density=500.0)   # low density = fast
     N = src.points.shape[0]

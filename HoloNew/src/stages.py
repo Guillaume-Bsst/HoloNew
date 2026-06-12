@@ -19,8 +19,8 @@ class MethodSpec:
 
 METHODS: tuple[MethodSpec, ...] = (
     MethodSpec("holosoma", "holosoma", ("Original", "Grounded", "Scaled", "Mapped")),
-    MethodSpec("GMR-SOCP", "gmr_socp_v1", ("Original", "Grounded", "Mapped", "Scaled", "Offset", "Floor")),
-    MethodSpec("TEST-SOCP", "gmr_socp_v2", ("Original", "Grounded", "Mapped", "Scaled", "Offset", "Floor")),
+    MethodSpec("GMR-SOCP", "gmr_socp", ("Original", "Grounded", "Mapped", "Scaled", "Offset", "Floor")),
+    MethodSpec("TEST-SOCP", "test_socp", ("Original", "Grounded", "Mapped", "Scaled", "Offset", "Floor")),
 )
 
 _BY_LABEL = {m.label: m for m in METHODS}

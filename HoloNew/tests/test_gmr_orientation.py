@@ -1,4 +1,4 @@
-"""Empirical convergence test for GMR-SOCP v1 orientation tracking (Task 4).
+"""Empirical convergence test for GMR-SOCP orientation tracking (Task 4).
 
 Verifies that a pure orientation target causes the angular error to reduce
 by at least 50% over 15 solver iterations.  The specific rotation convention
@@ -12,9 +12,9 @@ from scipy.spatial.transform import Rotation
 
 def test_orientation_error_decreases():
     from HoloNew.config_types.retargeting import RetargetingConfig
-    from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
+    from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
 
-    rt = GmrSocpRetargeterV1.from_config(
+    rt = GmrSocpRetargeter.from_config(
         RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh")
     )
 

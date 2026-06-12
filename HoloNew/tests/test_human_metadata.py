@@ -1,7 +1,7 @@
 import joblib
 import numpy as np
 
-from HoloNew.src.gmr_socp_v2.correspondence.human_metadata import load_human_metadata
+from HoloNew.src.test_socp.correspondence.human_metadata import load_human_metadata
 
 
 def _write_p(path, entries):

@@ -9,11 +9,11 @@ def demo_cfg():
     return RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh")
 
 
-from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
-from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
+from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
+from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
 
-@pytest.mark.parametrize("cls", [GmrSocpRetargeterV1, GmrSocpRetargeterV2])
+@pytest.mark.parametrize("cls", [GmrSocpRetargeter, TestSocpRetargeter])
 def test_gmr_runs_and_tracks_pelvis(demo_cfg, cls):
     rt = cls.from_config(demo_cfg)
     result = rt.retarget()

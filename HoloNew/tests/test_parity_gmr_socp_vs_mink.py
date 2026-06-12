@@ -3,7 +3,7 @@
 The two solve the same GMR body-tracking problem with different optimizers
 (HoloNew = conic SOCP reusing holosoma's framework; test_pipe = mink differential
 IK), so the results are NOT identical — this test QUANTIFIES the difference rather
-than asserting equality. It runs HoloNew GMR-SOCP v1 live and compares it to a
+than asserting equality. It runs HoloNew GMR-SOCP live and compares it to a
 frozen mink reference.
 
 HoloNew's GMR path uses test_pipe's `compute_stages` preprocessing (root XY preserved
@@ -35,10 +35,10 @@ _MINK = Path(__file__).parent / "golden" / "gmr_mink_qpos.npz"
 @pytest.mark.skipif(not _MINK.exists(), reason="mink GMR reference not present")
 def test_gmr_socp_is_close_to_mink():
     from HoloNew.examples.robot_retarget import RetargetingConfig
-    from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
+    from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
 
     mink = np.load(_MINK)["qpos"]
-    rt = GmrSocpRetargeterV1.from_config(
+    rt = GmrSocpRetargeter.from_config(
         RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
     holonew = rt.retarget().qpos
 

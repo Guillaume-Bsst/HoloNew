@@ -223,8 +223,8 @@ class Viewer:
             def _(_evt):
                 self._redraw(int(self._slider.value))
 
-        with self.server.gui.add_folder("Interaction"):
-            # Object SDF near-surface band shell, coloured by signed distance.
+        with self.server.gui.add_folder("Test"):
+            # test_pipe frame: object SDF near-surface band shell, coloured by signed distance.
             self._tog_sdf = self.server.gui.add_checkbox("SDF Object", False)
         @self._tog_sdf.on_update
         def _(_evt):

@@ -7,8 +7,8 @@ def test_method_labels():
 
 def test_robot_keys():
     assert robot_key_for_method("holosoma") == "holosoma"
-    assert robot_key_for_method("GMR-SOCP") == "gmr_socp_v1"
-    assert robot_key_for_method("TEST-SOCP") == "gmr_socp_v2"
+    assert robot_key_for_method("GMR-SOCP") == "gmr_socp"
+    assert robot_key_for_method("TEST-SOCP") == "test_socp"
 
 def test_stage_lists_end_with_robot():
     hs = stages_for_method("holosoma")

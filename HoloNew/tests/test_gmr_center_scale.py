@@ -5,7 +5,7 @@ import importlib
 import numpy as np
 import pytest
 
-MODS = ["HoloNew.src.gmr_socp_v1.preprocess", "HoloNew.src.gmr_socp_v2.preprocess"]
+MODS = ["HoloNew.src.gmr_socp.preprocess", "HoloNew.src.test_socp.preprocess"]
 
 
 def _synthetic(mod):

@@ -1,5 +1,5 @@
 import numpy as np
-from HoloNew.src.gmr_socp_v2.contact.viz import signed_distance_colors
+from HoloNew.src.test_socp.contact.viz import signed_distance_colors
 
 
 def test_signed_distance_colors_diverging_endpoints():

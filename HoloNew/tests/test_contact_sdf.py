@@ -1,6 +1,6 @@
 import numpy as np
 import trimesh
-from HoloNew.src.gmr_socp_v2.contact.backends.sdf import (
+from HoloNew.src.test_socp.contact.backends.sdf import (
     build_object_field, sdf_surface_field, save_object_sdf, load_object_sdf,
 )
 

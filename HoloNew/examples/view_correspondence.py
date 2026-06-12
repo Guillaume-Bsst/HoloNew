@@ -13,10 +13,10 @@ import viser
 import yourdfpy
 from viser.extras import ViserUrdf
 
-from HoloNew.src.gmr_socp_v2.correspondence.build_correspondence import load_correspondence
-from HoloNew.src.gmr_socp_v2.correspondence.constants import G1_29DOF_URDF, SMPLX_MODEL_DIR_DEFAULT
-from HoloNew.src.gmr_socp_v2.correspondence.segments import SEGMENTS
-from HoloNew.src.gmr_socp_v2.correspondence.viz import add_colored_points, segment_colors
+from HoloNew.src.test_socp.correspondence.build_correspondence import load_correspondence
+from HoloNew.src.test_socp.correspondence.constants import G1_29DOF_URDF, SMPLX_MODEL_DIR_DEFAULT
+from HoloNew.src.test_socp.correspondence.segments import SEGMENTS
+from HoloNew.src.test_socp.correspondence.viz import add_colored_points, segment_colors
 
 
 def _bundled_corr() -> Path:

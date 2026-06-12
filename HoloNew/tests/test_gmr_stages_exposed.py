@@ -2,8 +2,8 @@ import pytest
 from HoloNew.examples.robot_retarget import RetargetingConfig
 
 @pytest.mark.parametrize("modpath,cls", [
-    ("HoloNew.src.gmr_socp_v1.gmr_socp_v1", "GmrSocpRetargeterV1"),
-    ("HoloNew.src.gmr_socp_v2.gmr_socp_v2", "GmrSocpRetargeterV2"),
+    ("HoloNew.src.gmr_socp.gmr_socp", "GmrSocpRetargeter"),
+    ("HoloNew.src.test_socp.test_socp", "TestSocpRetargeter"),
 ])
 def test_gmr_exposes_full_stage_dict(modpath, cls):
     import importlib

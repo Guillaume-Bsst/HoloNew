@@ -1,4 +1,4 @@
-"""GMR-SOCP retargeter v1 — position + orientation tracking objective.
+"""GMR-SOCP retargeter v2 — identical copy of v1, to be evolved later.
 
 Derived from src/holosoma/interaction_mesh_retargeter.py (InteractionMeshRetargeter).
 Strips all visualization, self-collision, foot-lock, and interaction-mesh
@@ -9,6 +9,7 @@ Both position and orientation tracking are included in this version.
 """
 from __future__ import annotations
 
+from pathlib import Path
 from types import ModuleType
 
 import cvxpy as cp
@@ -29,8 +30,8 @@ _BODY_NAME_REMAP: dict[str, str] = {
 }
 
 
-class GmrSocpRetargeterV1:
-    """Position + orientation tracking GMR-SOCP retargeter (v1).
+class TestSocpRetargeter:
+    """Position + orientation tracking SOCP retargeter (the TEST-SOCP experiment).
 
     Solves a two-pass linearised IK problem using a trust-region SOCP.
     The objective is a sum of weighted squared-error terms (one per robot
@@ -42,6 +43,9 @@ class GmrSocpRetargeterV1:
     where ``w_p`` weights the translational term and ``w_r`` the rotational
     term.  Either weight may be zero to disable that term.
     """
+
+    # Not a pytest test class despite the "Test" prefix (TEST-SOCP solver).
+    __test__ = False
 
     def __init__(
         self,
@@ -75,7 +79,7 @@ class GmrSocpRetargeterV1:
         # Load MuJoCo model (robot_only uses the plain .xml, no object)
         robot_xml_path = task_constants.ROBOT_URDF_FILE.replace(".urdf", ".xml")
         self.robot_model = mujoco.MjModel.from_xml_path(robot_xml_path)
-        print(f"[GmrSocpV1] Loading robot model from: {robot_xml_path}")
+        print(f"[TestSocp] Loading robot model from: {robot_xml_path}")
         self.robot_data = mujoco.MjData(self.robot_model)
 
         if self.robot_data.qpos.shape[0] > 7 + task_constants.ROBOT_DOF:
@@ -113,6 +117,15 @@ class GmrSocpRetargeterV1:
                 task_constants.MANUAL_UB.values()
             )
 
+        # Correspondence table (loaded by from_config from the bundled artifact).
+        # None until from_config populates it; not used in the solve yet.
+        self.correspondence = None
+
+        # Contact assets (loaded by from_config from the bundled artifacts).
+        # None until from_config populates them; not used in the solve yet.
+        self.object_sdf = None
+        self.contact_fields = None
+
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
         available_bodies = {self.robot_model.body(i).name for i in range(self.robot_model.nbody)}
@@ -122,11 +135,11 @@ class GmrSocpRetargeterV1:
             bid = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, actual)
             if bid == -1:
                 raise ValueError(
-                    f"[GmrSocpV1] Body '{actual}' (mapped from table key '{frame}') "
+                    f"[TestSocp] Body '{actual}' (mapped from table key '{frame}') "
                     f"not found in model. Available: {sorted(available_bodies)}"
                 )
             if actual != frame:
-                print(f"[GmrSocpV1] Remapped body: '{frame}' -> '{actual}'")
+                print(f"[TestSocp] Remapped body: '{frame}' -> '{actual}'")
             self.robot_link_names[frame] = actual
 
     # ------------------------------------------------------------------
@@ -373,10 +386,10 @@ class GmrSocpRetargeterV1:
             q_locked: Full configuration with the floating-base part locked.
             q_a_n_last: Actuated-DoF slice at the current iterate (length nq_a).
             q_t_last: Full configuration from the previous time-step (for API
-                compatibility; unused in v1 which has no smoothness cost).
+                compatibility; unused in v2 which has no smoothness cost).
             frame_targets: {frame: (p_target(3,), R_target(3,3), w_p, w_r)}
                 as returned by build_frame_targets.
-            init_t: True on the very first frame (unused in v1, kept for compat).
+            init_t: True on the very first frame (unused in v2, kept for compat).
 
         Returns:
             (q_star, cost): updated full config and objective value.
@@ -470,7 +483,7 @@ class GmrSocpRetargeterV1:
         q = np.copy(self.q_init_full)
         out = []
 
-        for t in tqdm(range(T), desc="GMR-SOCP"):
+        for t in tqdm(range(T), desc="TEST-SOCP"):
             # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
@@ -486,8 +499,8 @@ class GmrSocpRetargeterV1:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, cfg) -> "GmrSocpRetargeterV1":
-        """Build a GmrSocpRetargeterV1 and populate its motion inputs.
+    def from_config(cls, cfg) -> "TestSocpRetargeter":
+        """Build a TestSocpRetargeter and populate its motion inputs.
 
         Loads motion data directly from the .pt file without going through
         holosoma's preprocess_motion_data or initialize_robot_pose, since the
@@ -499,7 +512,7 @@ class GmrSocpRetargeterV1:
                 data_format must be "smplh" or None).
 
         Returns:
-            Configured GmrSocpRetargeterV1 ready to call .retarget().
+            Configured TestSocpRetargeter ready to call .retarget().
         """
         from HoloNew.config_types.data_type import MotionDataConfig
         from HoloNew.config_types.robot import RobotConfig
@@ -575,5 +588,31 @@ class GmrSocpRetargeterV1:
         _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
         rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
         rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
+
+        # Load the bundled human->G1 correspondence table (data only,
+        # NOT used in the solve yet — will be wired in a later task).
+        from pathlib import Path
+        from HoloNew.src.test_socp.correspondence.build_correspondence import load_correspondence, build_table
+        from HoloNew.src.test_socp.correspondence.constants import (
+            G1_29DOF_URDF, SMPLX_MODEL_DIR_DEFAULT, HUMAN_GRID_DENSITY, G1_DENSITY, OT_REG,
+        )
+        _bundled = Path(__file__).resolve().parent.parent.parent / "assets" / "correspondence" / "corr_neutral.npz"
+        if _bundled.exists():
+            rt.correspondence = load_correspondence(_bundled)
+        elif Path(SMPLX_MODEL_DIR_DEFAULT).is_dir():
+            rt.correspondence = build_table(SMPLX_MODEL_DIR_DEFAULT, "neutral", None,
+                                            G1_29DOF_URDF, HUMAN_GRID_DENSITY, G1_DENSITY, OT_REG)
+
+        # Load bundled contact assets (data only — NOT used in the solve yet;
+        # will be wired into the objective in a later task).
+        from HoloNew.src.test_socp.contact.backends.sdf import load_object_sdf
+        from HoloNew.src.test_socp.contact.contact_io import load_contact_fields
+        _contact_assets = Path(__file__).resolve().parent.parent.parent / "assets" / "contact"
+        _sdf_path = _contact_assets / "largebox_sdf.npz"
+        _contact_path = _contact_assets / f"contact_{cfg.task_name}.npz"
+        if _sdf_path.exists():
+            rt.object_sdf = load_object_sdf(_sdf_path)
+        if _contact_path.exists():
+            rt.contact_fields = load_contact_fields(_contact_path)
 
         return rt

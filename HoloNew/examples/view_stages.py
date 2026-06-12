@@ -5,7 +5,7 @@ builds a ``MethodViz`` carrying the solved robot trajectory plus the named
 skeleton stages of that method's preprocessing pipeline, then binds them to the
 viewer's Method/Stage dropdowns.
 
-Use ``--methods`` to pick a subset, e.g. ``--methods gmr_socp_v1`` to solve only
+Use ``--methods`` to pick a subset, e.g. ``--methods gmr_socp`` to solve only
 that optimizer instead of all three.
 """
 from __future__ import annotations
@@ -30,20 +30,20 @@ from HoloNew.examples.robot_retarget import (
     run_headless,
 )
 from HoloNew.src import skeleton
-from HoloNew.src.gmr_socp_v2.contact.backends.sdf import (
+from HoloNew.src.test_socp.contact.backends.sdf import (
     band_points,
     build_object_field,
     load_object_sdf,
     save_object_sdf,
 )
-from HoloNew.src.gmr_socp_v2.contact.constants import CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION, OMOMO_DIR_DEFAULT
-from HoloNew.src.gmr_socp_v2.contact.viz import signed_distance_colors
-from HoloNew.src.gmr_socp_v2.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
-from HoloNew.src.gmr_socp_v2.correspondence.human_body import HumanBody
-from HoloNew.src.gmr_socp_v2.correspondence.human_metadata import load_human_metadata
-from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import _BODY_NAME_REMAP, GmrSocpRetargeterV1
-from HoloNew.src.gmr_socp_v1.tables import HUMAN_BODY_TO_IDX, IK_MATCH_TABLE1
-from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
+from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION, OMOMO_DIR_DEFAULT
+from HoloNew.src.test_socp.contact.viz import signed_distance_colors
+from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
+from HoloNew.src.test_socp.correspondence.human_body import HumanBody
+from HoloNew.src.test_socp.correspondence.human_metadata import load_human_metadata
+from HoloNew.src.gmr_socp.gmr_socp import _BODY_NAME_REMAP, GmrSocpRetargeter
+from HoloNew.src.gmr_socp.tables import HUMAN_BODY_TO_IDX, IK_MATCH_TABLE1
+from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 from HoloNew.src.holosoma.preprocess import (
     compute_holosoma_stages,
     scale_object_poses_to_center,
@@ -55,13 +55,13 @@ from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
 
-Method = Literal["holosoma", "gmr_socp_v1", "gmr_socp_v2"]
+Method = Literal["holosoma", "gmr_socp", "test_socp"]
 
 
 @dataclass
 class ViewStagesConfig(RetargetingConfig):
     # Which optimizers to solve and show, in the given order. Defaults to all three.
-    methods: tuple[Method, ...] = ("holosoma", "gmr_socp_v1", "gmr_socp_v2")
+    methods: tuple[Method, ...] = ("holosoma", "gmr_socp", "test_socp")
     # Original OMOMO dataset root (the one holding
     # data/{train,test}_diffusion_manip_seq_joints24.p, NOT OMOMO_new). Supplies
     # the subject's SMPL-X betas + gender for the mesh. Defaults to OMOMO_DIR_DEFAULT
@@ -229,8 +229,8 @@ def view(cfg: ViewStagesConfig) -> None:
 
     builders = {
         "holosoma": build_holosoma,
-        "gmr_socp_v1": lambda: build_gmr("GMR-SOCP", "gmr_socp_v1", GmrSocpRetargeterV1),
-        "gmr_socp_v2": lambda: build_gmr("TEST-SOCP", "gmr_socp_v2", GmrSocpRetargeterV2),
+        "gmr_socp": lambda: build_gmr("GMR-SOCP", "gmr_socp", GmrSocpRetargeter),
+        "test_socp": lambda: build_gmr("TEST-SOCP", "test_socp", TestSocpRetargeter),
     }
     methods = [builders[name]() for name in cfg.methods]
 

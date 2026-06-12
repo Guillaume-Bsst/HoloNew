@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from HoloNew.src.gmr_socp_v2.correspondence.human_body import HumanBody
+from HoloNew.src.test_socp.correspondence.human_body import HumanBody
 from .backends.coal import build_bvh, refit_bvh, surface_field_kdtree
 from .backends.floor import floor_field
 from .backends.sdf import sdf_surface_field

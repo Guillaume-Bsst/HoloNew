@@ -1,8 +1,8 @@
 import os
 import numpy as np
 import pytest
-from HoloNew.src.gmr_socp_v2.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT, G1_29DOF_URDF
-from HoloNew.src.gmr_socp_v2.correspondence.build_correspondence import (
+from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT, G1_29DOF_URDF
+from HoloNew.src.test_socp.correspondence.build_correspondence import (
     CorrespondenceTable, save_correspondence, load_correspondence,
 )
 
@@ -25,7 +25,7 @@ needs_smplx = pytest.mark.skipif(not os.path.isdir(SMPLX_MODEL_DIR_DEFAULT),
 
 @needs_smplx
 def test_build_table_neutral():
-    from HoloNew.src.gmr_socp_v2.correspondence.build_correspondence import build_table
+    from HoloNew.src.test_socp.correspondence.build_correspondence import build_table
     t = build_table(SMPLX_MODEL_DIR_DEFAULT, "neutral", None, G1_29DOF_URDF,
                     human_density=500.0, g1_density=300.0, reg=0.005)
     M = t.link_idx.shape[0]

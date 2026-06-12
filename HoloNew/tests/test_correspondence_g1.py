@@ -1,7 +1,7 @@
 import numpy as np
 import yourdfpy
-from HoloNew.src.gmr_socp_v2.correspondence.constants import G1_29DOF_URDF
-from HoloNew.src.gmr_socp_v2.correspondence.g1_surface import sample_g1_surface, build_rest_cfg
+from HoloNew.src.test_socp.correspondence.constants import G1_29DOF_URDF
+from HoloNew.src.test_socp.correspondence.g1_surface import sample_g1_surface, build_rest_cfg
 
 def test_g1_surface_samples_valid_links():
     urdf = yourdfpy.URDF.load(G1_29DOF_URDF, load_meshes=True, build_scene_graph=True)

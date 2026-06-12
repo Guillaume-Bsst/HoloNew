@@ -30,8 +30,8 @@ The solvers live under `src/`:
 | Solver | Folder | Description |
 |--------|--------|-------------|
 | Holosoma native SOCP | `src/holosoma/` | Original interaction-mesh retargeter |
-| GMR-SOCP v1 | `src/gmr_socp_v1/` | Autonomous GMR-SOCP solver, mink-aligned preprocessing |
-| GMR-SOCP v2 | `src/gmr_socp_v2/` | Second GMR-SOCP variant |
+| GMR-SOCP | `src/gmr_socp/` | Autonomous GMR-SOCP solver, mink-aligned preprocessing |
+| TEST-SOCP | `src/test_socp/` | Second GMR-SOCP variant |
 
 ### Holosoma native — standalone CLI
 
@@ -45,7 +45,7 @@ python examples/robot_retarget.py \
 
 (Full task-type / dataset matrix is in [README.md](README.md).)
 
-### GMR-SOCP v1 / v2
+### GMR-SOCP / TEST-SOCP
 
 The GMR solvers are driven through the **stage viewer**, which runs all three
 methods on the same sequence and lets you compare them (see §2). To exercise them
@@ -60,15 +60,15 @@ pytest tests/test_gmr_socp.py tests/test_gmr_tables.py \
 
 ```python
 # Minimal API usage
-from HoloNew.src.gmr_socp_v1.gmr_socp_v1 import GmrSocpRetargeterV1
-from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
+from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
+from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 ```
 
 ---
 
 ## 2. Stage visualization — `view_stages.py`
 
-Runs holosoma native + GMR-SOCP v1 + GMR-SOCP v2 headless on one sequence, then
+Runs holosoma native + GMR-SOCP + TEST-SOCP headless on one sequence, then
 opens a viser viewer with **Method** and **Stage** dropdowns (per-method
 preprocessing stages: Original → Mapped → Scaled → Offset → Ground).
 
@@ -82,14 +82,14 @@ python examples/view_stages.py
 ```
 
 Use `--methods` to solve only a subset instead of all three. Choices:
-`holosoma`, `gmr_socp_v1`, `gmr_socp_v2` (space-separated, order preserved).
+`holosoma`, `gmr_socp`, `test_socp` (space-separated, order preserved).
 
 ```bash
-# Only GMR-SOCP v1
-python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp_v1
+# Only GMR-SOCP
+python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp
 
-# holosoma + GMR-SOCP v2 only
-python examples/view_stages.py --task-name sub3_largebox_003 --methods holosoma gmr_socp_v2
+# holosoma + TEST-SOCP only
+python examples/view_stages.py --task-name sub3_largebox_003 --methods holosoma test_socp
 ```
 
 Takes the same `RetargetingConfig` flags as `robot_retarget.py`, plus `--methods`
@@ -128,7 +128,7 @@ to the neutral shape.
 
 ```bash
 # betas load automatically — no extra flag needed
-python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp_v1
+python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp
 ```
 
 ---
@@ -164,7 +164,7 @@ python examples/view_correspondence.py
 Requires a local SMPL-X models directory (not bundled).
 
 ```bash
-python -m HoloNew.src.gmr_socp_v2.correspondence.build_correspondence \
+python -m HoloNew.src.test_socp.correspondence.build_correspondence \
   --model-dir /path/to/models/smplx \
   --gender neutral \
   --out assets/correspondence/corr_neutral.npz
@@ -177,7 +177,7 @@ Prints axial-monotonicity / neighbour-preservation / coverage per body segment
 (no ground-truth pairing needed).
 
 ```bash
-python -m HoloNew.src.gmr_socp_v2.correspondence.quality \
+python -m HoloNew.src.test_socp.correspondence.quality \
   --model-dir /path/to/models/smplx --gender neutral
 # Optional: --g1-density 50000, --reg 0.005
 ```

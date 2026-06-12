@@ -1,6 +1,6 @@
 import numpy as np
-from HoloNew.src.gmr_socp_v2.contact.object_input import parse_obj_name
-from HoloNew.src.gmr_socp_v2.contact.probes import make_floor_grid, make_object_grid
+from HoloNew.src.test_socp.contact.object_input import parse_obj_name
+from HoloNew.src.test_socp.contact.probes import make_floor_grid, make_object_grid
 
 
 def test_parse_obj_name():
@@ -15,7 +15,7 @@ def test_make_floor_grid():
 
 def test_coal_build_bvh_smoke():
     import trimesh
-    from HoloNew.src.gmr_socp_v2.contact.backends.coal import build_bvh
+    from HoloNew.src.test_socp.contact.backends.coal import build_bvh
     box = trimesh.creation.box(extents=(1, 1, 1))
     bvh = build_bvh(np.asarray(box.vertices), np.asarray(box.faces))
     assert bvh is not None

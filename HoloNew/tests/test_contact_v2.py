@@ -1,4 +1,4 @@
-"""Task 8: verify that GmrSocpRetargeterV2.from_config loads the bundled
+"""Task 8: verify that TestSocpRetargeter.from_config loads the bundled
 object SDF and demo contact field into the retargeter.
 
 No coal / SMPL-X required — uses only the precomputed .npz artefacts
@@ -9,10 +9,10 @@ from __future__ import annotations
 
 def test_v2_loads_bundled_contact():
     from HoloNew.examples.robot_retarget import RetargetingConfig
-    from HoloNew.src.gmr_socp_v2.gmr_socp_v2 import GmrSocpRetargeterV2
-    from HoloNew.src.gmr_socp_v2.contact.contact_field import ContactField
+    from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+    from HoloNew.src.test_socp.contact.contact_field import ContactField
 
-    rt = GmrSocpRetargeterV2.from_config(
+    rt = TestSocpRetargeter.from_config(
         RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh")
     )
     assert rt.object_sdf is not None
