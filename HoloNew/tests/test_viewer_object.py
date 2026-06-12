@@ -48,6 +48,31 @@ def test_redraw_with_object_runs_for_each_stage(robot_urdf):
     v.close()
 
 
+def test_object_handles_are_persistent_not_recreated(robot_urdf):
+    # The object must not flicker: its mesh/points handles are created once and updated
+    # in place across redraws, never appended to the per-frame _dynamic_handles.
+    kw = _obj_kwargs()
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)),
+                  stages={"Original": np.zeros((3, 5, 3)), "Scaled": np.zeros((3, 5, 3))})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), **kw)
+    v.bind_methods([m])
+    v._tog_object.value = True
+    v._tog_object_pts.value = True
+    v._stage_dd.value = "Scaled"
+    v._redraw(0)
+    mesh_h, pts_h = v._object_mesh_handle, v._object_pts_handle
+    assert mesh_h is not None and pts_h is not None
+    v._redraw(1)   # same handles reused (identity), not recreated
+    assert v._object_mesh_handle is mesh_h
+    assert v._object_pts_handle is pts_h
+    # And they live outside the per-frame _dynamic_handles, so _clear_dynamic never
+    # removes them (identity check; `in` would do elementwise numpy comparison).
+    assert not any(h is mesh_h or h is pts_h for h in v._dynamic_handles)
+    v.close()
+
+
 def test_object_absent_is_noop(robot_urdf):
     m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)), stages={"Original": np.zeros((3, 5, 3))})

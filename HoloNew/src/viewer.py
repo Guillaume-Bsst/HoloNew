@@ -83,6 +83,10 @@ class Viewer:
         self.object_scaled_stages = frozenset(object_scaled_stages)
         self.human_body = human_body
         self._smplx_handle = None
+        # Persistent object handles, updated in place each frame (never removed/recreated)
+        # so the object does not flicker during playback, like the SMPL-X mesh.
+        self._object_mesh_handle = None
+        self._object_pts_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -323,27 +327,38 @@ class Viewer:
     def _draw_object(self, frame: int) -> None:
         """Native-size mesh + surface samples of the object for the given frame, placed
         with the active stage's pose (centred on a scaled stage, raw otherwise). The mesh
-        ("Object mesh") and points ("Object points") are independently toggled."""
-        if self.object_mesh_verts is None or self.object_pose_raw is None:
-            return
+        ("Object mesh") and points ("Object points") are independently toggled.
+
+        Both use persistent handles updated in place (not the per-frame add/remove of
+        _dynamic_handles) so the object does not flicker during playback."""
+        pose = None if self.object_mesh_verts is None else self._object_pose(self._stage_dd.value)
         from HoloNew.src.holosoma.interaction_mesh import transform_points_local_to_world
 
-        pose = self._object_pose(self._stage_dd.value)
-        if pose is None:
-            return
-        quat, trans = pose[frame, 3:7], pose[frame, :3]
-        if self._tog_object.value:
-            verts = transform_points_local_to_world(quat, trans, self.object_mesh_verts)
-            h = self.server.scene.add_mesh_simple(
-                "/object/mesh", verts.astype(np.float32), self.object_mesh_faces,
-                color=(180, 180, 190), opacity=0.6)
-            self._dynamic_handles.append(h)
-        if self._tog_object_pts.value and self.object_points_local is not None:
-            pts = transform_points_local_to_world(quat, trans, self.object_points_local)
-            col = np.broadcast_to((255, 140, 0), (len(pts), 3)).astype(np.uint8)
-            h = self.server.scene.add_point_cloud(
-                "/object/pts", pts.astype(np.float32), col, point_size=0.012)
-            self._dynamic_handles.append(h)
+        if pose is not None and self._tog_object.value:
+            verts = transform_points_local_to_world(
+                pose[frame, 3:7], pose[frame, :3], self.object_mesh_verts).astype(np.float32)
+            if self._object_mesh_handle is None:
+                self._object_mesh_handle = self.server.scene.add_mesh_simple(
+                    "/object/mesh", vertices=verts, faces=self.object_mesh_faces,
+                    color=(180, 180, 190), opacity=0.6)
+            else:
+                self._object_mesh_handle.vertices = verts
+                self._object_mesh_handle.visible = True
+        elif self._object_mesh_handle is not None:
+            self._object_mesh_handle.visible = False
+
+        if pose is not None and self._tog_object_pts.value and self.object_points_local is not None:
+            pts = transform_points_local_to_world(
+                pose[frame, 3:7], pose[frame, :3], self.object_points_local).astype(np.float32)
+            if self._object_pts_handle is None:
+                col = np.broadcast_to((255, 140, 0), (len(pts), 3)).astype(np.uint8)
+                self._object_pts_handle = self.server.scene.add_point_cloud(
+                    "/object/pts", pts, col, point_size=0.012)
+            else:
+                self._object_pts_handle.points = pts
+                self._object_pts_handle.visible = True
+        elif self._object_pts_handle is not None:
+            self._object_pts_handle.visible = False
 
     def _draw_stage_skeleton(self, prefix: str, pos: np.ndarray, bones, *, ghost: bool) -> None:
         """A non-source stage (mapped bodies or solved robot links) as a skeleton:
