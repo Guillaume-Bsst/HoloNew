@@ -7,7 +7,7 @@ trailing [-7:] dynamic-object pose.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import trimesh
@@ -15,7 +15,13 @@ import viser
 from viser.extras import ViserUrdf
 import yourdfpy
 
-from .stages import STAGE_SPECS, spec_for_label, stage_labels
+from .stages import ROBOT_STAGE, method_labels, stages_for_method
+
+try:  # Old registry API (removed in Task 1); kept optional until Task 5 drops the old path.
+    from .stages import STAGE_SPECS, spec_for_label, stage_labels
+except ImportError:  # pragma: no cover - old API no longer exported
+    STAGE_SPECS = ()
+    spec_for_label = stage_labels = None
 
 
 @dataclass
@@ -23,6 +29,22 @@ class RobotHandle:
     urdf: ViserUrdf
     base: object   # viser frame handle
     dof: int
+
+
+@dataclass
+class MethodViz:
+    """A method's robot trajectory plus its named skeleton stages.
+
+    Args:
+        label: Method dropdown label (must be one of ``method_labels()``).
+        robot_key: Robot instance key; selects ``self.robots[robot_key]``.
+        qpos: ``(T, 7 + dof)`` solved robot trajectory.
+        stages: Mapping of ``{stage_label: (T, B, 3)}`` skeleton point clouds.
+    """
+    label: str
+    robot_key: str
+    qpos: "np.ndarray"
+    stages: dict = field(default_factory=dict)
 
 
 class Viewer:
@@ -120,7 +142,69 @@ class Viewer:
 
         self._redraw(0)
 
+    def bind_methods(self, methods: list) -> None:
+        """Bind a list of MethodViz and build Frame + Method + Stage dropdowns."""
+        self._methods = {m.label: m for m in methods}
+        T = min(len(m.qpos) for m in methods)
+
+        with self.server.gui.add_folder("Playback"):
+            self._slider = self.server.gui.add_slider(
+                "Frame", min=0, max=max(0, T - 1), step=1, initial_value=0)
+        with self.server.gui.add_folder("Display"):
+            first = methods[0].label
+            self._method_dd = self.server.gui.add_dropdown(
+                "Method", options=method_labels(), initial_value=first)
+            self._stage_dd = self.server.gui.add_dropdown(
+                "Stage", options=stages_for_method(first), initial_value=ROBOT_STAGE)
+
+        @self._method_dd.on_update
+        def _(_evt):
+            self._stage_dd.options = stages_for_method(self._method_dd.value)
+            self._stage_dd.value = ROBOT_STAGE
+            self._redraw(int(self._slider.value))
+
+        @self._slider.on_update
+        def _(_evt): self._redraw(int(self._slider.value))
+
+        @self._stage_dd.on_update
+        def _(_evt): self._redraw(int(self._slider.value))
+
+        self._redraw(0)
+
+    def _hide_all_robots(self) -> None:
+        for h in self.robots.values():
+            h.urdf.show_visual = False
+
     def _redraw(self, frame: int) -> None:
+        # Dispatch: bind_methods() installs the per-method API; the legacy
+        # bind() path keeps the registry-based redraw (removed in Task 5).
+        if hasattr(self, "_methods"):
+            return self._redraw_methods(frame)
+        return self._redraw_registry(frame)
+
+    def _redraw_methods(self, frame: int) -> None:
+        method = self._methods[self._method_dd.value]
+        stage = self._stage_dd.value
+        # Clear the skeleton layer each redraw.
+        self._clear_skeleton()
+        self._hide_all_robots()
+        if stage == ROBOT_STAGE:
+            self.robots[method.robot_key].urdf.show_visual = True
+            self.draw_q(method.qpos[frame], stage=method.robot_key)
+        else:
+            pts = method.stages[stage][frame].astype(np.float32)
+            self._skeleton = self.draw_keypoints(
+                pts, name="stage_skeleton", rgba=(1.0, 0.4, 0.0, 1.0))
+
+    def _clear_skeleton(self) -> None:
+        # draw_keypoints batches over points, so an empty array would error;
+        # remove the previously drawn skeleton handle instead.
+        handle = getattr(self, "_skeleton", None)
+        if handle is not None:
+            handle.remove()
+            self._skeleton = None
+
+    def _redraw_registry(self, frame: int) -> None:
         spec = spec_for_label(self._stage_dd.value)
         if spec.produces_qpos:
             if spec.key == "socp":
