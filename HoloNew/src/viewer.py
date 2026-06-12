@@ -144,6 +144,14 @@ class Viewer:
             def _(_evt):
                 self._redraw(int(self._slider.value))
 
+        with self.server.gui.add_folder("Meshes"):
+            self._tog_smplx = self.server.gui.add_checkbox("SMPL-X mesh", False)
+            self._tog_object = self.server.gui.add_checkbox("Object mesh", False)
+        for _cb in (self._tog_smplx, self._tog_object):
+            @_cb.on_update
+            def _(_evt):
+                self._redraw(int(self._slider.value))
+
         @self._method_dd.on_update
         def _(_evt):
             self._stage_dd.options = stages_for_method(self._method_dd.value)
@@ -198,6 +206,37 @@ class Viewer:
                 np.asarray(j_cols, np.uint8), point_size=0.025)
             self._dynamic_handles.append(h)
 
+    def _draw_smplx_mesh(self, frame: int) -> None:
+        """Render the SMPL-X body mesh for the given frame; no-op when data absent."""
+        show = (self._tog_smplx.value and self.human_body is not None
+                and self.original_quats is not None and self.original_joints is not None)
+        if not show:
+            if self._smplx_handle is not None:
+                self._smplx_handle.visible = False
+            return
+        verts = self.human_body.placed_verts(
+            self.original_quats[frame], self.original_joints[frame, 0],
+            frame_idx=frame).astype(np.float32)
+        if self._smplx_handle is None:
+            self._smplx_handle = self.server.scene.add_mesh_simple(
+                "/human/mesh", vertices=verts, faces=self.human_body.faces,
+                color=(150, 150, 150), opacity=0.7)
+        else:
+            self._smplx_handle.vertices = verts
+            self._smplx_handle.visible = True
+
+    def _draw_object(self, frame: int) -> None:
+        """Position the static object mesh for the given frame; no-op when data absent."""
+        show = (self._tog_object.value and self.viser_object is not None
+                and self.object_base is not None and self.object_poses is not None)
+        if self.viser_object is not None:
+            self.viser_object.show_visual = bool(show)
+        if not show:
+            return
+        # object_poses layout: [x, y, z, qw, qx, qy, qz] (MuJoCo order).
+        self.object_base.position = self.object_poses[frame, :3]
+        self.object_base.wxyz = self.object_poses[frame, 3:7]
+
     def _draw_stage_points(self, prefix: str, pos: np.ndarray, *, ghost: bool) -> None:
         """Mapped/preprocessing stages: joint points only (no bone topology)."""
         if not self._tog_body_joints.value:
@@ -224,6 +263,8 @@ class Viewer:
             self._draw_skeleton("/active", self._original_frame(frame), ghost=False)
         else:
             self._draw_stage_points("/active", method.stages[stage][frame], ghost=False)
+        self._draw_smplx_mesh(frame)
+        self._draw_object(frame)
 
     def close(self) -> None:
         self.server.stop()

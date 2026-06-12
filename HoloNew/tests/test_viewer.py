@@ -64,3 +64,18 @@ def test_original_stage_renders_with_toggles(robot_urdf):
     v._tog_finger_bones.value = False; v._redraw(0)
     v._stage_dd.value = "Mapped"; v._redraw(0)
     v.close()
+
+def test_smplx_toggle_noop_without_body(robot_urdf):
+    import numpy as np
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 52, 3), dtype=np.float32)
+    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+                  qpos=np.zeros((3, 36)), stages={"Original": oj})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp_v1",), original_joints=oj,
+               original_quats=None, human_body=None)
+    v.bind_methods([m])
+    v._tog_smplx.value = True      # no human_body -> must not raise
+    v._stage_dd.value = "Original"; v._redraw(0)
+    assert v._smplx_handle is None
+    v.close()
