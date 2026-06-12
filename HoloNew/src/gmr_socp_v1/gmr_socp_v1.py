@@ -1,6 +1,6 @@
 """GMR-SOCP retargeter v1 — position + orientation tracking objective.
 
-Derived from src/interaction_mesh_retargeter.py (InteractionMeshRetargeter).
+Derived from src/holosoma/interaction_mesh_retargeter.py (InteractionMeshRetargeter).
 Strips all visualization, self-collision, foot-lock, and interaction-mesh
 machinery and replaces the Laplacian objective with a GMR tracking objective
 (one term per robot frame, weighted by the IK table pos_weight and rot_weight).

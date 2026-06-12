@@ -11,7 +11,7 @@ obj_poses reorder: raw columns [6, 3, 4, 5, 0, 1, 2] → [qw, qx, qy, qz, x, y, 
 
 Joint quaternions: intermimic's upright_start fix is undone by right-multiplying each
   stored xyzw quaternion by Q = [0.5, 0.5, 0.5, 0.5] (xyzw), then converted to wxyz.
-  See HoloNew.src.gmr_socp.targets._undo_upright_start for the original derivation.
+  See HoloNew.src.gmr_socp_v1.targets._undo_upright_start for the original derivation.
 """
 from __future__ import annotations
 
