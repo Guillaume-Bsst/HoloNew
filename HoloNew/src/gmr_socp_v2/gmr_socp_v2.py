@@ -497,8 +497,10 @@ class GmrSocpRetargeterV2:
     def from_config(cls, cfg) -> "GmrSocpRetargeterV2":
         """Build a GmrSocpRetargeterV2 and populate its motion inputs.
 
-        Replicates the input-prep sequence of examples/robot_retarget.py main()
-        for the robot_only / smplh path.
+        Loads motion data directly from the .pt file without going through
+        holosoma's preprocess_motion_data or initialize_robot_pose, since the
+        GMR retarget uses only compute_stages' 'ground' output and the base
+        init is fully overridden by the ground pelvis position and orientation.
 
         Args:
             cfg: RetargetingConfig instance (task_type must be "robot_only",
@@ -507,19 +509,16 @@ class GmrSocpRetargeterV2:
         Returns:
             Configured GmrSocpRetargeterV2 ready to call .retarget().
         """
-        from pathlib import Path as _Path
-
         from HoloNew.config_types.data_type import MotionDataConfig
         from HoloNew.config_types.robot import RobotConfig
         from HoloNew.examples.robot_retarget import (
             DEFAULT_DATA_FORMATS,
             build_retargeter_kwargs_from_config,
             create_task_constants,
-            initialize_robot_pose,
-            load_motion_data,
         )
-        from HoloNew.src.holosoma.preprocess import preprocess_motion_data
-        from .targets import load_pt_quaternions
+        from .preprocess import compute_stages
+        from .tables import HUMAN_ROOT_NAME, MAPPED_BODY_NAMES
+        from .targets import load_pt_joints, load_pt_quaternions
 
         task_type = cfg.task_type
         data_format = cfg.data_format or DEFAULT_DATA_FORMATS[task_type]
@@ -540,66 +539,33 @@ class GmrSocpRetargeterV2:
             task_type=task_type,
         )
 
-        # Load motion data (human_joints, object_poses, smpl_scale)
-        human_joints, object_poses, smpl_scale = load_motion_data(
-            task_type, data_format, cfg.data_path, cfg.task_name,
-            constants, cfg.motion_data_config
-        )
-
-        toe_names = cfg.motion_data_config.toe_names
-
         # Build retargeter kwargs and construct the retargeter
         kwargs = build_retargeter_kwargs_from_config(
             cfg.retargeter, constants, object_urdf_path=None, task_type=task_type
         )
         rt = cls(**kwargs)
 
-        # Preprocess human joints (scale + ground-normalise)
-        human_joints = preprocess_motion_data(
-            human_joints, rt, toe_names, smpl_scale
-        )
-
-        # Initialize robot pose (pelvis translation + orientation)
-        q_init, _q_nominal, object_poses_mj, human_joints, _obj_poses = initialize_robot_pose(
-            task_type=task_type,
-            data_format=data_format,
-            human_joints=human_joints,
-            object_poses=object_poses,
-            constants=constants,
-            retargeter=rt,
-            task_config=cfg.task_config,
-            augmentation=cfg.augmentation,
-            save_dir=(cfg.save_dir or _Path("demo_results/g1/robot_only/omomo")),
-            task_name=cfg.task_name,
-        )
-
-        # Build q_init_full: fill a zero array of length nq with q_init
-        q_init_full = np.zeros(rt.nq)
-        q_init_full[:len(q_init)] = q_init
-
-        # Load per-joint quaternions from the .pt file
+        # Load raw joint positions and per-joint quaternions from the .pt file
         pt_path = cfg.data_path / f"{cfg.task_name}.pt"
-        human_quat = load_pt_quaternions(pt_path)  # (T_q, 52, 4) wxyz
+        raw_joints = load_pt_joints(pt_path)    # (T, 52, 3) raw positions
+        human_quat = load_pt_quaternions(pt_path)  # (T, 52, 4) wxyz
 
-        # Align T between human_joints (T_j, J, 3) and human_quat (T_q, 52, 4)
-        T_j = human_joints.shape[0]
-        T_q = human_quat.shape[0]
-        T = min(T_j, T_q)
-        human_joints = human_joints[:T]
+        # Align T between raw_joints and human_quat (both come from the same
+        # file so they are equal in length, but guard against edge cases)
+        T = min(raw_joints.shape[0], human_quat.shape[0])
+        raw_joints = raw_joints[:T]
         human_quat = human_quat[:T]
 
-        rt.human_pos = human_joints   # (T, J, 3) holosoma-preprocessed (kept for reference)
+        # All joints are zero; base is overridden below from the ground pelvis
+        q_init_full = np.zeros(rt.nq)
+
         rt.human_quat = human_quat    # (T, 52, 4) wxyz
-        rt.q_init_full = q_init_full  # (nq,)
+        rt.q_init_full = q_init_full  # (nq,) — base will be set from ground below
 
         # GMR-faithful targets: feed compute_stages the RAW joint positions (test_pipe
         # convention, with the root XY preserved) rather than holosoma's globally-scaled
         # joints, then track the 'ground' stage. This matches GMR/mink; the holosoma
         # global scale was the sole cause of the ~0.4 m base offset vs mink.
-        from .preprocess import compute_stages
-        from .tables import HUMAN_ROOT_NAME, MAPPED_BODY_NAMES
-        from .targets import load_pt_joints
-        raw_joints = load_pt_joints(pt_path)[:T]
         ground = compute_stages(raw_joints, human_quat, anchor_root_xy=True)["ground"]
         rt.gmr_ground = ground
         _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
