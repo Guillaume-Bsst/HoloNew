@@ -34,7 +34,7 @@ def test_object_pose_selects_scaled_vs_raw(robot_urdf):
 
 def test_redraw_with_object_runs_for_each_stage(robot_urdf):
     kw = _obj_kwargs()
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)),
                   stages={"Original": np.zeros((3, 5, 3)), "Scaled": np.zeros((3, 5, 3))})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
@@ -52,7 +52,7 @@ def test_object_handles_are_persistent_not_recreated(robot_urdf):
     # The object must not flicker: its mesh/points handles are created once and updated
     # in place across redraws, never appended to the per-frame _dynamic_handles.
     kw = _obj_kwargs()
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)),
                   stages={"Original": np.zeros((3, 5, 3)), "Scaled": np.zeros((3, 5, 3))})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
@@ -81,7 +81,7 @@ def test_smplx_follows_active_52joint_stage_pelvis(robot_urdf):
     grounded = oj.copy()
     grounded[:, :, 2] -= 3.0                    # lowered onto the floor
     grounded[:, 0] = [1.0, 2.0, 0.0]
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)),
                   stages={"Original": oj, "Grounded": grounded,
                           "Mapped": np.zeros((3, 14, 3))})
@@ -108,7 +108,7 @@ def test_smplx_mesh_only_visible_on_original_and_grounded(robot_urdf):
     T = 3
     oj = np.zeros((T, 52, 3), np.float32)
     grounded = oj.copy(); grounded[:, :, 2] -= 1.0
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((T, 36)),
                   stages={"Original": oj, "Grounded": grounded,
                           "Mapped": np.zeros((T, 14, 3))})
@@ -126,7 +126,7 @@ def test_smplx_mesh_only_visible_on_original_and_grounded(robot_urdf):
 
 def test_g1_points_only_visible_on_robot_stage(robot_urdf):
     T = 3
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((T, 36)),
                   stages={"Original": np.zeros((T, 52, 3)), "Mapped": np.zeros((T, 14, 3))},
                   g1_points=np.zeros((T, 8, 3), np.float32))
@@ -142,7 +142,7 @@ def test_g1_points_only_visible_on_robot_stage(robot_urdf):
 
 
 def test_object_absent_is_noop(robot_urdf):
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)), stages={"Original": np.zeros((3, 5, 3))})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
                stage_keys=("gmr_socp_v1",))

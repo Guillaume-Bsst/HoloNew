@@ -470,7 +470,7 @@ class GmrSocpRetargeterV1:
         q = np.copy(self.q_init_full)
         out = []
 
-        for t in tqdm(range(T), desc="GMR-SOCP v1"):
+        for t in tqdm(range(T), desc="GMR-SOCP"):
             # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)

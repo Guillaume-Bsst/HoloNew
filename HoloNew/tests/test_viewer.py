@@ -26,14 +26,14 @@ def test_builds_one_robot_per_method(robot_urdf):
 def test_bind_methods_builds_method_and_stage(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)),
                   stages={"Original": np.zeros((3, 5, 3)), "Mapped": np.zeros((3, 5, 3))})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None, stage_keys=("gmr_socp_v1",))
     v.bind_methods([m])
-    assert v._method_dd.value == "GMR-SOCP v1"
+    assert v._method_dd.value == "GMR-SOCP"
     # selecting a skeleton stage and the Robot stage both redraw without error
-    v._method_dd.value = "GMR-SOCP v1"; v._stage_dd.value = "Mapped"; v._redraw(0)
+    v._method_dd.value = "GMR-SOCP"; v._stage_dd.value = "Mapped"; v._redraw(0)
     v._stage_dd.value = "Robot"; v._redraw(0)
     v.close()
 
@@ -51,7 +51,7 @@ def test_original_stage_renders_with_toggles(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
     oj = np.zeros((3, 52, 3), dtype=np.float32)
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)),
                   stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
@@ -69,7 +69,7 @@ def test_smplx_toggle_noop_without_body(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
     oj = np.zeros((3, 52, 3), dtype=np.float32)
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)), stages={"Original": oj})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
                stage_keys=("gmr_socp_v1",), original_joints=oj,
@@ -84,7 +84,7 @@ def test_ghost_overlays_skeleton_stage(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
     oj = np.zeros((3, 52, 3), dtype=np.float32)
-    m1 = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m1 = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                    qpos=np.zeros((3, 36)),
                    stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
@@ -94,8 +94,8 @@ def test_ghost_overlays_skeleton_stage(robot_urdf):
     assert "Robot" not in v._ghost_stage_dd.options
     # Ghost Method offers only bound methods, so an unsolved method cannot be
     # selected (would KeyError in _redraw).
-    assert list(v._ghost_method_dd.options) == ["GMR-SOCP v1"]
-    v._ghost_method_dd.value = "GMR-SOCP v1"
+    assert list(v._ghost_method_dd.options) == ["GMR-SOCP"]
+    v._ghost_method_dd.value = "GMR-SOCP"
     v._ghost_stage_dd.value = "Mapped"
     v._redraw(0)   # must not raise
     assert len(v._dynamic_handles) > 0   # ghost actually drew something
@@ -108,7 +108,7 @@ def test_playback_controls_and_advance(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
     oj = np.zeros((4, 52, 3), dtype=np.float32)
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((4, 36)), stages={"Original": oj})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
                stage_keys=("gmr_socp_v1",), original_joints=oj)
@@ -128,7 +128,7 @@ def test_mapped_stage_bones_and_robot_skeleton_with_urdf_toggle(robot_urdf):
     oj = np.zeros((3, 52, 3), dtype=np.float32)
     rs = np.zeros((3, 14, 3), dtype=np.float32)
     bones = [(0, 1), (1, 2)]
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)),
                   stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))},
                   stage_bones={"Mapped": bones, "Robot": bones},
@@ -154,7 +154,7 @@ def test_joint_frames_axes_toggle(robot_urdf):
     oj = np.zeros((3, 52, 3), dtype=np.float32)
     quat = np.zeros((3, 14, 4), dtype=np.float32)
     quat[..., 0] = 1.0   # identity wxyz
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)),
                   stages={"Original": oj, "Mapped": np.zeros((3, 14, 3))},
                   stage_bones={"Mapped": [(0, 1)]},
@@ -175,7 +175,7 @@ def test_holosoma_g1_points_toggle(robot_urdf):
     from HoloNew.src.viewer import Viewer, MethodViz
     oj = np.zeros((3, 52, 3), dtype=np.float32)
     g1 = np.zeros((3, 15, 3), dtype=np.float32)
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)), stages={"Original": oj}, g1_points=g1)
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
                stage_keys=("gmr_socp_v1",), original_joints=oj)
@@ -197,7 +197,7 @@ def test_sdf_object_toggle(robot_urdf):
     cols = np.zeros((5, 3), dtype=np.uint8)
     pose = np.zeros((3, 7), dtype=np.float32)
     pose[:, 3] = 1.0   # identity quaternion (wxyz)
-    m = MethodViz(label="GMR-SOCP v1", robot_key="gmr_socp_v1",
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp_v1",
                   qpos=np.zeros((3, 36)), stages={"Original": oj})
     v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
                stage_keys=("gmr_socp_v1",), original_joints=oj,

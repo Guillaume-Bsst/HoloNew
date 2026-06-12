@@ -1,6 +1,6 @@
 """Run the selected retargeting methods, then open the per-method stage viewer.
 
-For every requested method (holosoma native SOCP, GMR-SOCP v1, GMR-SOCP v2) this
+For every requested method (holosoma native SOCP, GMR-SOCP, TEST-SOCP) this
 builds a ``MethodViz`` carrying the solved robot trajectory plus the named
 skeleton stages of that method's preprocessing pipeline, then binds them to the
 viewer's Method/Stage dropdowns.
@@ -229,8 +229,8 @@ def view(cfg: ViewStagesConfig) -> None:
 
     builders = {
         "holosoma": build_holosoma,
-        "gmr_socp_v1": lambda: build_gmr("GMR-SOCP v1", "gmr_socp_v1", GmrSocpRetargeterV1),
-        "gmr_socp_v2": lambda: build_gmr("GMR-SOCP v2", "gmr_socp_v2", GmrSocpRetargeterV2),
+        "gmr_socp_v1": lambda: build_gmr("GMR-SOCP", "gmr_socp_v1", GmrSocpRetargeterV1),
+        "gmr_socp_v2": lambda: build_gmr("TEST-SOCP", "gmr_socp_v2", GmrSocpRetargeterV2),
     }
     methods = [builders[name]() for name in cfg.methods]
 
