@@ -524,7 +524,7 @@ class GmrSocpRetargeterV2:
             initialize_robot_pose,
             load_motion_data,
         )
-        from HoloNew.src.utils import preprocess_motion_data
+        from HoloNew.src.holosoma.preprocess import preprocess_motion_data
         from .targets import load_pt_quaternions
 
         task_type = cfg.task_type

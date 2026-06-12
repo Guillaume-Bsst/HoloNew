@@ -30,9 +30,12 @@ from HoloNew.src.holosoma.interaction_mesh_retargeter import (  # noqa: E402
     InteractionMeshRetargeter,  # type: ignore[import-not-found]
 )
 from HoloNew.src.retarget_result import RetargetResult  # noqa: E402
+from HoloNew.src.holosoma.preprocess import (  # noqa: E402
+    calculate_scale_factor,
+    preprocess_motion_data,
+)
 from HoloNew.src.utils import (  # noqa: E402
     augment_object_poses,
-    calculate_scale_factor,
     create_new_scene_xml_file,
     create_scaled_multi_boxes_urdf,
     create_scaled_multi_boxes_xml,
@@ -41,7 +44,6 @@ from HoloNew.src.utils import (  # noqa: E402
     extract_object_first_moving_frame,
     load_intermimic_data,
     load_object_data,
-    preprocess_motion_data,
     transform_from_human_to_world,
     transform_y_up_to_z_up,
 )

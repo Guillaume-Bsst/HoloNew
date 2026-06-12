@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
 import time
-from pathlib import Path
 from types import ModuleType
 
 import cvxpy as cp  # type: ignore[import-not-found]
@@ -17,14 +15,7 @@ from tqdm import tqdm
 from viser.extras import ViserUrdf  # type: ignore[import-not-found]
 
 from HoloNew.config_types.retargeter import FootLockConfig, SelfCollisionConfig
-
-# Add src to path for direct execution (file lives at src/holosoma/, so parent = src/)
-src_path = Path(__file__).parent.parent
-sys.path.insert(0, str(src_path))
-
-# Import with type ignore for mypy compatibility
-from HoloNew.src.holosoma.mujoco_utils import _world_mesh_from_geom  # noqa: E402
-from utils import (  # type: ignore[import-not-found,no-redef]  # noqa: E402
+from HoloNew.src.holosoma.interaction_mesh import (
     calculate_laplacian_coordinates,
     calculate_laplacian_matrix,
     create_interaction_mesh,
@@ -32,7 +23,8 @@ from utils import (  # type: ignore[import-not-found,no-redef]  # noqa: E402
     transform_points_local_to_world,
     transform_points_world_to_local,
 )
-from HoloNew.src.holosoma.viser_utils import create_motion_control_sliders  # noqa: E402
+from HoloNew.src.holosoma.mujoco_utils import _world_mesh_from_geom
+from HoloNew.src.holosoma.viser_utils import create_motion_control_sliders
 
 
 class InteractionMeshRetargeter:

@@ -41,9 +41,9 @@ from HoloNew.examples.robot_retarget import (  # type: ignore[import-not-found] 
 from HoloNew.src.holosoma.interaction_mesh_retargeter import (  # noqa: E402
     InteractionMeshRetargeter,  # type: ignore[import-not-found]
 )
+from HoloNew.src.holosoma.preprocess import preprocess_motion_data  # noqa: E402
 from HoloNew.src.utils import (  # type: ignore[import-not-found]  # noqa: E402
     extract_foot_sticking_sequence_velocity,
-    preprocess_motion_data,
 )
 
 # ----------------------------- Constants -----------------------------

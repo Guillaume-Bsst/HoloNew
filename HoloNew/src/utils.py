@@ -5,7 +5,6 @@ Utility functions for the kinematic retargeting system.
 from __future__ import annotations
 
 import os
-import pickle
 import re
 from pathlib import Path
 
@@ -14,7 +13,6 @@ import smplx  # type: ignore[import-not-found]
 import torch
 import trimesh
 from jinja2 import Template
-from scipy.spatial import Delaunay  # type: ignore[import-untyped]
 from scipy.spatial.transform import Rotation as R  # type: ignore[import-untyped]  # noqa: N817
 
 
@@ -33,15 +31,6 @@ def load_intermimic_data(file_path):
     # Reorder quaternion from [qx, qy, qz, qw] to [qw, qx, qy, qz]
     object_poses = intermimic_data[:, 318:325][:, [6, 3, 4, 5, 0, 1, 2]]
     return human_joints, object_poses
-
-
-def calculate_scale_factor(task_name, robot_height):
-    """Calculate scale factor based on human height."""
-    with open("demo_data/height_dict.pkl", "rb") as f:
-        height_dict = pickle.load(f)
-    sub_name = task_name.split("_")[0]
-    human_height = height_dict[sub_name]
-    return robot_height / human_height
 
 
 def load_object_data(
@@ -205,54 +194,6 @@ def weighted_surface_sampling_by_face_normal(mesh, sample_count, weight_func, se
     return np.array(sampled_points)
 
 
-def preprocess_motion_data(
-    human_joints,
-    retargeter,
-    foot_names,
-    scale=0.714,
-    mat_height=0.1,
-    object_poses=None,
-):
-    """
-    Preprocess human joints and object poses for retargeting.
-
-    Args:
-        human_joints (np.ndarray): Human joint positions.
-        object_poses (np.ndarray): Object poses.
-        retargeter: Retargeting object with smplh_joint2idx attribute.
-        scale (float): Scaling factor.
-        normalize_height (bool): Whether to normalize human joint heights.
-
-    Returns:
-        tuple: (human_joints_scaled, object_poses_scaled, object_moving_frame_idx).
-    """
-    # Normalize human joint heights
-    toe_indices = [
-        retargeter.demo_joints.index(foot_names[0]),
-        retargeter.demo_joints.index(foot_names[1]),
-    ]
-    z_min = human_joints[:, toe_indices, 2].min()
-    if z_min >= mat_height:
-        # On a mat.
-        z_min -= mat_height
-    human_joints[:, :, 2] -= z_min
-
-    # Scale human joints
-    human_joints = human_joints * scale
-
-    if object_poses is not None:
-        object_poses[:, -3:-1] = object_poses[:, -3:-1] * scale
-        object_z0 = object_poses[0, -1]
-        dz_scale = (object_poses[:, -1] - object_z0) * scale
-        object_poses[:, -1] = object_z0 + dz_scale
-
-        object_moving_frame_idx = extract_object_first_moving_frame(object_poses)
-
-        return human_joints, object_poses, object_moving_frame_idx
-
-    return human_joints
-
-
 def extract_object_first_moving_frame(object_poses, vel_threshold=0.0025):
     """Extract the first frame where the object starts moving."""
     object_vel = np.diff(object_poses, axis=0)
@@ -368,134 +309,6 @@ def transform_from_human_to_world(human_initial_root, object_initial_pose, local
     rotation_matrix = np.column_stack([x_axis, y_axis, z_axis])
     quat = R.from_matrix(rotation_matrix).as_quat(scalar_first=True)
     return rotation_matrix @ local_translation, quat
-
-
-def transform_points_world_to_local(quat, trans, points_world):
-    """
-    Transform points from world frame to local frame.
-
-    Args:
-        quat (np.ndarray): Object quaternion [qw, qx, qy, qz] (scalar-last format).
-        trans (np.ndarray): Object translation [x, y, z] in world frame.
-        points_world (np.ndarray): Points in world frame, shape (N, 3).
-
-    Returns:
-        np.ndarray: Points in local frame, shape (N, 3).
-    """
-    transform_matrix = trimesh.transformations.quaternion_matrix(quat)
-    transform_matrix[:3, 3] = trans
-    inverse_transform_matrix = np.linalg.inv(transform_matrix)
-
-    hom_points = np.hstack([points_world, np.ones((points_world.shape[0], 1))])
-    transformed_points_hom = (inverse_transform_matrix @ hom_points.T).T
-    return transformed_points_hom[:, :3]
-
-
-def create_interaction_mesh(vertices: np.ndarray):
-    """
-    Creates a tetrahedral mesh from human and object points using Delaunay triangulation.
-
-    Args:
-        vertices (np.ndarray): (num_vertices, 3) array.
-
-    Returns:
-        tuple: (vertices, tetrahedra) - combined points and generated tetrahedra.
-    """
-    tri = Delaunay(vertices)
-    return vertices, tri.simplices
-
-
-def transform_points_local_to_world(quat, trans, points_local):
-    """Transform points from local frame to world frame."""
-    transform_matrix = trimesh.transformations.quaternion_matrix(quat)
-    transform_matrix[:3, 3] = trans
-    hom_points = np.hstack([points_local, np.ones((points_local.shape[0], 1))])
-    transformed_points_hom = (transform_matrix @ hom_points.T).T
-    return transformed_points_hom[:, :3]
-
-
-def get_adjacency_list(tetrahedra, num_vertices):
-    """Creates an adjacency list from the tetrahedra."""
-    adj = [set() for _ in range(num_vertices)]
-    for tet in tetrahedra:
-        for i in range(4):
-            for j in range(i + 1, 4):
-                u, v = tet[i], tet[j]
-                adj[u].add(v)
-                adj[v].add(u)
-    return [list(s) for s in adj]
-
-
-def calculate_laplacian_coordinates(vertices, adj_list, epsilon=1e-6, uniform_weight=True):
-    """
-    Calculates the Laplacian coordinates for each vertex in the mesh.
-
-    Args:
-        vertices (np.ndarray): (N, 3) array of vertex positions.
-        adj_list (list of lists): Adjacency list for the mesh.
-        epsilon (float): Small value to prevent division by zero.
-        uniform_weight (bool): Whether to use uniform weights.
-
-    Returns:
-        np.ndarray: (N, 3) array of Laplacian coordinates.
-    """
-    laplacian = np.zeros_like(vertices)
-
-    for i in range(len(vertices)):
-        neighbors_indices = adj_list[i]
-        if len(neighbors_indices) > 0:
-            vi = vertices[i]
-            neighbor_positions = vertices[neighbors_indices]
-            distances = np.linalg.norm(vi - neighbor_positions, axis=1)
-
-            if uniform_weight:
-                weights = np.ones_like(distances)
-            else:
-                weights = 1.0 / (1.5 * distances + epsilon)
-
-            sum_of_weights = np.sum(weights)
-            weighted_sum_of_neighbors = np.sum(weights[:, np.newaxis] * neighbor_positions, axis=0)
-            center_of_neighbors = weighted_sum_of_neighbors / sum_of_weights
-            laplacian[i] = vi - center_of_neighbors
-
-    return laplacian
-
-
-def calculate_laplacian_matrix(vertices, adj_list, epsilon=1e-6, uniform_weight=True):
-    """
-    Calculates the Laplacian matrix for the mesh with optional weight schemes.
-
-    Args:
-        vertices (np.ndarray): (N, 3) array of vertex positions.
-        adj_list (list of lists): Adjacency list for the mesh.
-        epsilon (float): Small value to prevent division by zero.
-        uniform_weight (bool): If True, use uniform weights; if False, use distance-based weights.
-
-    Returns:
-        np.ndarray: (N, N) Laplacian matrix.
-    """
-    N = len(vertices)
-    laplacian_matrix = np.zeros((N, N))
-
-    for i in range(N):
-        neighbors_indices = adj_list[i]
-        if len(neighbors_indices) > 0:
-            if uniform_weight:
-                weights = np.ones(len(neighbors_indices)) / len(neighbors_indices)
-            else:
-                vi = vertices[i]
-                neighbor_positions = vertices[neighbors_indices]
-                distances = np.linalg.norm(vi - neighbor_positions, axis=1)
-                weights = 1.0 / (distances + epsilon)
-                sum_weights = np.sum(weights)
-                weights = weights / sum_weights
-
-            laplacian_matrix[i, i] = 1.0
-
-            for j, neighbor_idx in enumerate(neighbors_indices):
-                laplacian_matrix[i, neighbor_idx] = -weights[j]
-
-    return laplacian_matrix
 
 
 def find_standing_pose(q: np.ndarray):

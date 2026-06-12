@@ -30,14 +30,16 @@ from HoloNew.config_types.data_type import (  # noqa: E402
 )
 from HoloNew.config_types.robot import RobotConfig  # noqa: E402
 from HoloNew.src.mujoco_utils import _world_mesh_from_geom  # type: ignore[import-not-found]  # noqa: E402
-from HoloNew.src.utils import (  # type: ignore[import-not-found]  # noqa: E402
+from HoloNew.src.holosoma.interaction_mesh import transform_points_world_to_local  # noqa: E402
+from HoloNew.src.holosoma.preprocess import (  # noqa: E402
     calculate_scale_factor,
+    preprocess_motion_data,
+)
+from HoloNew.src.utils import (  # type: ignore[import-not-found]  # noqa: E402
     create_new_scene_xml_file,
     create_scaled_multi_boxes_xml,
     extract_foot_sticking_sequence_velocity,
     load_intermimic_data,
-    preprocess_motion_data,
-    transform_points_world_to_local,
     transform_y_up_to_z_up,
 )
 
