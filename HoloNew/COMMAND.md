@@ -106,6 +106,18 @@ The viewer also exposes (GUI folders, right panel):
   preprocessing stages, and the solved G1 (link FK) on the `Robot` stage.
 - **Meshes** — overlay the posed **SMPL-X mesh** and the **object mesh**, on any
   stage.
+- **Test** — the TEST-SOCP interaction/contact visuals (only the `test_socp` method
+  produces them), coloured by signed distance (red = penetration → white = contact →
+  blue = far):
+  - **SDF Object** / **SDF Floor** — the object SDF near-surface band shell (any
+    stage) and the analytic floor band.
+  - **Human contact** — SMPL-X surface probes at their object/floor signed distance
+    (gated to the `Grounded` stage).
+  - **Object contact** / **Floor contact** — the contact footprint (witness points of
+    the active human probes on the object / floor), `Grounded` stage.
+  - **G1 transport** — the correspondence points carried onto the solved robot,
+    coloured by their human source's distance (gated to the `Robot` stage).
+  - **Directions** — probe → witness lines (human on `Grounded`, G1 on `Robot`).
 - **Ghost** — pick a second `(Method, Stage)` to overlay faded for comparison
   (`Off` to disable). The ghost covers skeleton stages, not the robot.
 
