@@ -4,10 +4,10 @@ Records the first 3 frames of the solved root (qpos[:3, :7]) and asserts the
 default solve stays numerically stable to 1e-6 as default-off constraint code
 is added.
 
-Baseline re-recorded after Brick 0 pinocchio kinematics migration (tangent-space
-dqa, pin.integrate replacing the MuJoCo finite-difference kinematics).  The
-previous MuJoCo-based values differed by ~2.4e-5; the new values below are the
-deliberate post-migration reference.
+Baseline re-recorded after Brick 2 temporal regularization W^r is enabled by
+default (lambda_r=0.2, sigma_qddot=20.0, sigma_Vdot=20.0 in
+TestSocpRetargeterConfig).  The previous pre-W^r values differed; the new
+values below are the deliberate post-W^r reference.
 """
 import numpy as np
 
@@ -16,15 +16,15 @@ from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
 _G1_QDIM = 36  # G1 base (7) + 29 joints
 
-# Re-baselined after Brick 0 pinocchio kinematics migration.
+# Re-baselined after Brick 2 temporal W^r enabled by default.
 # Recorded with: rt.retarget().qpos[:3, :7] on sub3_largebox_003 (smplh, robot_only).
 BASELINE = np.array([
-    [ 0.63502393,  0.84425846,  0.76797592, -0.70690993, -0.09206585,
-     -0.08866832,  0.69565808],
-    [ 0.63158034,  0.84970298,  0.75353179, -0.70796383, -0.11332746,
-     -0.10957337,  0.68843139],
-    [ 0.62874597,  0.85487409,  0.73782876, -0.70860376, -0.1329542 ,
-     -0.13040042,  0.6805877 ],
+    [ 0.62890295,  0.81629908,  0.79091496, -0.709926  ,  0.00307521,
+     -0.01027691,  0.70419458],
+    [ 0.62318512,  0.78709113,  0.77737864, -0.71326872, -0.02731124,
+     -0.03936471,  0.69925121],
+    [ 0.62056163,  0.76089994,  0.76375037, -0.71567119, -0.05342398,
+     -0.06406978,  0.69343759],
 ])
 
 

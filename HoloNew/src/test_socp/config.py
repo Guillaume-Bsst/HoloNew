@@ -51,9 +51,13 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     sigma_v: float = 0.05
 
     # Temporal regularization (W^r): penalizes tangent-space acceleration across
-    # consecutive frames. Default 0.0 keeps the solve identical to the pre-W^r
-    # baseline. sigma_qddot / sigma_Vdot set the per-DOF noise scale for joints
-    # and base, respectively (same units as the temporal.py build_temporal_term API).
-    lambda_r: float = 0.0
-    sigma_qddot: float = 1.0
-    sigma_Vdot: float = 1.0
+    # consecutive frames. sigma_qddot / sigma_Vdot set the per-DOF noise scale
+    # for joints and base, respectively (same units as temporal.py).
+    #
+    # Defaults tuned 2026-06-13 (Brick 2) on robot_only sub3_largebox_003 (K=30):
+    #   off (lambda_r=0): mean joint jerk=0.003640, pelvis track=0.040 m
+    #   on  (0.2/20/20):  mean joint jerk=0.002990 (−17.9 %), track=0.049 m (+0.009 m)
+    # Jerk is reduced without meaningful tracking degradation (< 0.01 m slack).
+    lambda_r: float = 0.2
+    sigma_qddot: float = 20.0
+    sigma_Vdot: float = 20.0

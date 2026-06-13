@@ -47,13 +47,15 @@ def test_wr_term_matches_numpy():
     np.testing.assert_allclose(float(term.value), gt, rtol=5e-6)
 
 
-def test_wr_inert_by_default_and_runs_when_on():
+def test_wr_default_nonzero_and_solve_stays_finite():
+    """W^r is enabled by default (Brick 2); verify the solve stays finite."""
     import numpy as np
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
-    assert rt.lambda_r == 0.0  # default off
-    rt.lambda_r = 50.0
+    assert rt.lambda_r == TestSocpRetargeterConfig().lambda_r  # matches config default
+    assert rt.lambda_r > 0.0  # W^r is on by default after Brick 2
     res = rt.retarget(max_frames=6)
     assert np.all(np.isfinite(res.qpos))
