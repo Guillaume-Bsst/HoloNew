@@ -130,3 +130,81 @@ class PinModel:
         fid = self._frame_id(body_name)
         J6 = pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED)
         return np.asarray(J6[0:3, :])
+
+    def point_translational_jacobian(
+        self,
+        q_pin: np.ndarray,
+        body_name: str,
+        offset_local: np.ndarray,
+    ) -> np.ndarray:
+        """World-aligned translational Jacobian of a point fixed on a link, pinocchio v order.
+
+        The point is defined in the link's local frame as ``offset_local``.  Its
+        world position is ``p_frame + R @ offset_local`` and its velocity is
+
+            J_point = J_trans - skew(R @ offset_local) @ J_ang
+
+        where J_trans (rows 0:3) and J_ang (rows 3:6) are taken from the
+        LOCAL_WORLD_ALIGNED 6xnv frame Jacobian.  LOCAL_WORLD_ALIGNED expresses
+        both the translational and angular parts in world-aligned axes, so the
+        skew-product correction is directly in the world frame.
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+            body_name: Link name matching a URDF link / pinocchio frame.
+            offset_local: Offset from the frame origin in the local body frame, shape (3,).
+
+        Returns:
+            Translational Jacobian of shape (3, nv) in pinocchio v order.
+        """
+        q = pin.normalize(self.model, q_pin)
+        pin.computeJointJacobians(self.model, self.data, q)
+        pin.updateFramePlacements(self.model, self.data)
+        fid = self._frame_id(body_name)
+        J6 = pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED)
+        # Rotate offset to world frame.
+        R = np.asarray(self.data.oMf[fid].rotation)
+        rp = R @ np.asarray(offset_local, dtype=float)
+        # skew-symmetric matrix of rp so that skew(rp) @ w = rp x w.
+        skew = np.array([
+            [0.0,   -rp[2],  rp[1]],
+            [rp[2],  0.0,   -rp[0]],
+            [-rp[1], rp[0],  0.0],
+        ])
+        return np.asarray(J6[0:3, :]) - skew @ np.asarray(J6[3:6, :])
+
+    # ------------------------------------------------------------------
+    # Center of mass
+    # ------------------------------------------------------------------
+
+    def com(self, q_pin: np.ndarray) -> np.ndarray:
+        """Whole-body center of mass in the world frame.
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+
+        Returns:
+            CoM position of shape (3,).
+        """
+        return np.array(
+            pin.centerOfMass(self.model, self.data, pin.normalize(self.model, q_pin))
+        )
+
+    def com_jacobian(self, q_pin: np.ndarray) -> np.ndarray:
+        """Jacobian of the whole-body CoM with respect to the pinocchio tangent vector.
+
+        Returns J such that d(CoM) = J @ v, where v is the pinocchio tangent
+        vector (nv-dimensional).  The Jacobian is computed internally by
+        ``pin.jacobianCenterOfMass`` which runs its own FK pass.
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+
+        Returns:
+            CoM Jacobian of shape (3, nv) in pinocchio v order.
+        """
+        return np.asarray(
+            pin.jacobianCenterOfMass(
+                self.model, self.data, pin.normalize(self.model, q_pin)
+            )
+        )
