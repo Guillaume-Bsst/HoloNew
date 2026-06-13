@@ -80,3 +80,12 @@ def test_object_name_set_before_model_load_test_socp():
     import numpy as np
     Js, phis = rt._update_jacobians_and_phis_from_q(np.copy(rt.q_init_full))
     assert isinstance(Js, dict) and isinstance(phis, dict)
+
+
+def test_foot_sticking_sequence_built():
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+
+    rt = TestSocpRetargeter.from_config(RetargetingConfig(
+        task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
+    assert isinstance(rt.foot_sticking_sequences, list) and len(rt.foot_sticking_sequences) > 0

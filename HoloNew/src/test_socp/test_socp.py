@@ -313,6 +313,19 @@ class TestSocpRetargeter:
 
         return nhat_BA_W @ Jc
 
+    def _is_foot_locked_in_window(self, foot_link_key: str, frame_idx: int) -> bool:
+        """Check whether a foot link is locked by configured frame windows."""
+        key_lower = foot_link_key.lower()
+        side = None
+        if "left" in key_lower:
+            side = "left"
+        elif "right" in key_lower:
+            side = "right"
+        if side is None:
+            return False
+
+        return any(start <= frame_idx <= end for start, end in self._foot_lock_windows.get(side, ()))
+
     def _compute_self_collision_constraints(self, frame_idx: int):
         """Compute Jacobians and distances for self-collision body pairs.
 
@@ -714,6 +727,53 @@ class TestSocpRetargeter:
                 dqa <= (self.q_a_ub - q_a_n_last),
             ]
 
+        # Foot constraints (sticking + foot lock window Z pinning) — holosoma-style, default off
+        apply_foot_sticking = (self.q_a_init_idx < 12) and self.activate_foot_sticking and foot_sticking is not None
+        apply_foot_lock = (self.q_a_init_idx < 12) and self.foot_lock.enable
+        if apply_foot_sticking or apply_foot_lock:
+            J_WF_dict, p_WF_dict, _ = self._calc_manipulator_jacobians(q, links=self.foot_links, obj_frame=False)
+
+            # Foot sticking: constrain XY to stay near previous frame position
+            if apply_foot_sticking:
+                _, p_WF_t_last_dict, _ = self._calc_manipulator_jacobians(
+                    q_t_last, links=self.foot_links, obj_frame=False
+                )
+                left_key = right_key = None
+                for key in foot_sticking:
+                    if key.lower().startswith("l"):
+                        left_key = key
+                    elif key.lower().startswith("r"):
+                        right_key = key
+                if left_key is None or right_key is None:
+                    raise ValueError("foot_sticking must include one left* and one right* key")
+
+                for key, J_WF in J_WF_dict.items():
+                    apply_left = ("left" in key) and foot_sticking[left_key]
+                    apply_right = ("right" in key) and foot_sticking[right_key]
+                    if apply_left or apply_right:
+                        p_lb = p_WF_t_last_dict[key] - p_WF_dict[key] - self.foot_sticking_tolerance
+                        p_ub = p_lb + 2 * self.foot_sticking_tolerance  # symmetric window
+
+                        Jxy = J_WF[:2, self.q_a_indices]  # (2 x nq_act)
+                        constraints += [
+                            Jxy @ dqa >= p_lb[:2],
+                            Jxy @ dqa <= p_ub[:2],
+                        ]
+
+            # Foot lock windows: pin Z to floor within configured frame ranges
+            if apply_foot_lock:
+                for key, J_WF in J_WF_dict.items():
+                    if not self._is_foot_locked_in_window(key, frame_idx):
+                        continue
+
+                    z_anchor = self.foot_lock.z_floor
+                    z_delta = z_anchor - p_WF_dict[key][2]
+                    Jz = J_WF[2, self.q_a_indices]
+                    constraints += [
+                        Jz @ dqa >= z_delta - self.foot_lock.tolerance,
+                        Jz @ dqa <= z_delta + self.foot_lock.tolerance,
+                    ]
+
         # Self-collision constraints (holosoma-style, default off)
         if self.activate_self_collision and self._self_collision_enabled:
             Js_sc, phis_sc = self._compute_self_collision_constraints(frame_idx)
@@ -789,6 +849,9 @@ class TestSocpRetargeter:
         T = gpos.shape[0]
         q = np.copy(self.q_init_full)
         out = []
+        # q_prev: previous-frame foot anchor for foot-sticking; both passes use the same anchor,
+        # updated once per frame (after both passes). Frame 0 anchors to init config.
+        q_prev = np.copy(self.q_init_full)
         pelvis_grounded = self.gmr_grounded[:, 0]   # (T, 3) grounded SMPL-X pelvis per frame
 
         probe_pts, probe_obj, probe_flr, probe_wit, g1_pts = [], [], [], [], []
@@ -825,10 +888,11 @@ class TestSocpRetargeter:
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
             tg2 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE2)
             _fs = self.foot_sticking_sequences[t] if self.foot_sticking_sequences else None
-            q, _ = self.iterate(q, q, q, tg1, n_iter=(50 if t == 0 else 10),
+            q, _ = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs)
-            q, _ = self.iterate(q, q, q, tg2, n_iter=(50 if t == 0 else 10),
+            q, _ = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs)
+            q_prev = np.copy(q)
             if urdf is not None:
                 Tw = link_world_transforms(urdf, q, self.correspondence.link_names)
                 g1_pts.append(transported_points(
@@ -923,6 +987,14 @@ class TestSocpRetargeter:
         T = min(raw_joints.shape[0], human_quat.shape[0])
         raw_joints = raw_joints[:T]
         human_quat = human_quat[:T]
+
+        # Build per-frame foot sticking sequence from SMPL joint velocities.
+        # Gated by activate_foot_sticking (False by default) in solve; building the
+        # sequence here is harmless and does not affect the default solve path.
+        from HoloNew.src.utils import extract_foot_sticking_sequence_velocity
+        toe_names = cfg.motion_data_config.toe_names
+        rt.foot_sticking_sequences = extract_foot_sticking_sequence_velocity(
+            raw_joints, constants.DEMO_JOINTS, toe_names)
 
         # All joints are zero; base is overridden below from the ground pelvis
         q_init_full = np.zeros(rt.nq)
