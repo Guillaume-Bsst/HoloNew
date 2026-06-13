@@ -211,6 +211,10 @@ class PinModel:
             pin.centerOfMass(self.model, self.data, pin.normalize(self.model, q_pin))
         )
 
+    def integrate(self, q_pin: np.ndarray, v: np.ndarray) -> np.ndarray:
+        """Integrate a tangent step: q_new = q_pin (+) v, keeping quaternions unit."""
+        return pin.integrate(self.model, q_pin, v)
+
     def com_jacobian(self, q_pin: np.ndarray) -> np.ndarray:
         """Jacobian of the whole-body CoM with respect to the pinocchio tangent vector.
 

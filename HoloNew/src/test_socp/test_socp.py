@@ -659,7 +659,11 @@ class TestSocpRetargeter:
 
         Args:
             q_locked: Full configuration with the floating-base part locked.
-            q_a_n_last: Actuated-DoF slice at the current iterate (length nq_a).
+            q_a_n_last: Actuated-DoF qpos seed at the current iterate (length
+                nq_a); used only to reconstruct the full config via
+                ``q[self.q_a_indices] = q_a_n_last``.  The SOCP decision
+                variable ``dqa`` lives in pinocchio tangent space (length
+                nv_a), which differs from nq_a for quaternion joints.
             q_t_last: Full configuration from the previous time-step (for API
                 compatibility; unused in v2 which has no smoothness cost).
             frame_targets: {frame: (p_target(3,), R_target(3,3), w_p, w_r)}
@@ -797,14 +801,9 @@ class TestSocpRetargeter:
         if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
             raise RuntimeError(f"GMR-SOCP solve failed: {prob.status}")
 
-        import pinocchio as pin
         v_full = np.zeros(self.pin.model.nv)
         v_full[self.v_a_indices] = dqa.value
-        q_pin_new = pin.integrate(
-            self.pin.model,
-            self.pin.qpos_mj_to_q_pin(q[:36]),
-            v_full,
-        )
+        q_pin_new = self.pin.integrate(self.pin.qpos_mj_to_q_pin(q[:36]), v_full)
         q_star = np.copy(q)
         q_star[:36] = self.pin.q_pin_to_qpos_mj(q_pin_new)
         # pin.integrate keeps the quaternion unit; no manual renormalisation needed.
