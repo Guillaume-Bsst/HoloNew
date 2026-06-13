@@ -837,10 +837,18 @@ class TestSocpRetargeter:
                                        self.lambda_P, self.sigma_v, self._dt)
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
-        prob.solve(solver=cp.CLARABEL)
-
-        if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-            raise RuntimeError(f"GMR-SOCP solve failed: {prob.status}")
+        try:
+            prob.solve(solver=cp.CLARABEL)
+            _ok = prob.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE)
+        except cp.error.SolverError:
+            _ok = False
+        if not _ok:
+            # CLARABEL occasionally fails on ill-conditioned iterations (e.g. when
+            # the interaction terms engage large relative motions). Fall back to
+            # SCS, a first-order solver that is more robust to conditioning.
+            prob.solve(solver=cp.SCS)
+            if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+                raise RuntimeError(f"TEST-SOCP solve failed: {prob.status}")
 
         v_full = np.zeros(self.pin.model.nv)
         v_full[self.v_a_indices] = dqa.value

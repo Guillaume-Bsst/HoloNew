@@ -143,11 +143,20 @@ meter-residual exactly like X, so we **renormalize it by the field range `L^2`**
 paper's intent (reproduce the source's tangential slide / no-slip) while making
 `lambda_P` directly comparable to `lambda_X` and the solve well-conditioned. The
 per-frame slide is already bounded by the SQP trust region, so the paper's much
-tighter `sigma_v*dt` tolerance is unnecessary. With the `L^2` scale, `lambda_P =
-1.0` is stable (validated over a clip with D/X + ground non-penetration; the
-contact gap stays ~0.011). `sigma_v` is kept in the config for API compatibility
-but no longer affects the scale. The numpy↔cvxpy equivalence test is updated to
-the `L^2` normalization.
+tighter `sigma_v*dt` tolerance is unnecessary. With the `L^2` scale P no longer
+explodes (P=1 solves a 12-frame segment stably, gap ~0.011, and a full clip
+completes finite). **But P is OFF by default for speed.** Its hundreds of
+near-parallel per-point rows still make CLARABEL fail intermittently mid-clip
+(first failure ~frame 32); a solver fallback to SCS (added in
+`solve_single_iteration`) keeps the solve robust (the clip always completes), but
+SCS is slower, so a full clip with P on takes ~9 min vs ~3.5 min for D/X only —
+too slow to be the default. `lambda_P` defaults to `0.0`; enabling it is a
+one-liner. Making P **fast** needs a **per-carrier aggregation** of the
+persistence residual (a few well-conditioned rows per contacting link instead of
+hundreds of near-parallel per-point rows) — a follow-up reformulation. `sigma_v`
+is kept for API compatibility. The numpy↔cvxpy equivalence test uses the `L^2`
+normalization. The solver fallback also hardens D/X against rare ill-conditioned
+iterations.
 
 ## Risks
 
