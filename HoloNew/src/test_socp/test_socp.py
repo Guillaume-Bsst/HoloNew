@@ -66,6 +66,9 @@ class TestSocpRetargeter:
         lambda_X: float = 0.0,
         lambda_P: float = 0.0,
         sigma_v: float = 0.05,
+        lambda_r: float = 0.0,
+        sigma_qddot: float = 1.0,
+        sigma_Vdot: float = 1.0,
         load_object_scene: bool = True,
         **_ignored,
     ):
@@ -213,6 +216,11 @@ class TestSocpRetargeter:
         self.lambda_X = lambda_X
         self.lambda_P = lambda_P
         self.sigma_v = sigma_v
+
+        # Temporal regularization weights (default 0.0 = off; solve is unchanged).
+        self.lambda_r = lambda_r
+        self.sigma_qddot = sigma_qddot
+        self.sigma_Vdot = sigma_Vdot
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -661,6 +669,7 @@ class TestSocpRetargeter:
         frame_idx: int = 0,
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
+        q_t_last2: np.ndarray | None = None,
     ):
         """One linearised IK step with GMR position + orientation objective.
 
@@ -836,6 +845,17 @@ class TestSocpRetargeter:
             obj_terms += build_p_terms(self, q_pin, dqa, frame_idx, obj_pose,
                                        self.lambda_P, self.sigma_v, self._dt)
 
+        # Temporal regularization W^r (default off; only active when lambda_r > 0
+        # and two previous frames are available).
+        if self.lambda_r > 0 and q_t_last is not None and q_t_last2 is not None:
+            from HoloNew.src.test_socp.temporal import build_temporal_term
+            q_pin0 = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin1 = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
+            q_pin2 = self.pin.qpos_mj_to_q_pin(q_t_last2[:36])
+            obj_terms += [build_temporal_term(self, q_pin0, q_pin1, q_pin2, dqa,
+                                              self.lambda_r, self.sigma_qddot,
+                                              self.sigma_Vdot, self._dt)]
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
             prob.solve(solver=cp.CLARABEL)
@@ -868,6 +888,7 @@ class TestSocpRetargeter:
         frame_idx: int = 0,
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
+        q_t_last2: np.ndarray | None = None,
     ):
         """Iterate solve_single_iteration until convergence or n_iter steps."""
         last = np.inf
@@ -876,7 +897,7 @@ class TestSocpRetargeter:
             q_n, cost = self.solve_single_iteration(
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
-                obj_pose=obj_pose,
+                obj_pose=obj_pose, q_t_last2=q_t_last2,
             )
             if np.isclose(cost, last):
                 break
@@ -912,6 +933,9 @@ class TestSocpRetargeter:
         # q_prev: previous-frame foot anchor for foot-sticking; both passes use the same anchor,
         # updated once per frame (after both passes). Frame 0 anchors to init config.
         q_prev = np.copy(self.q_init_full)
+        # q_prev2: frame-before-previous config for temporal W^r acceleration penalty.
+        # Initialized to init config so the first two frames produce ~zero acceleration.
+        q_prev2 = np.copy(self.q_init_full)
         pelvis_grounded = self.gmr_grounded[:, 0]   # (T, 3) grounded SMPL-X pelvis per frame
 
         probe_pts, probe_obj, probe_flr, probe_wit, g1_pts = [], [], [], [], []
@@ -973,9 +997,14 @@ class TestSocpRetargeter:
             _obj_pose = (self._obj_poses_raw[t]
                          if getattr(self, "_obj_poses_raw", None) is not None else None)
             q, _ = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
-                                frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose)
+                                frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
+                                q_t_last2=q_prev2)
             q, _ = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
-                                frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose)
+                                frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
+                                q_t_last2=q_prev2)
+            # Shift two-frame history: q_prev2 <- q_prev (frame t-2 slot) BEFORE
+            # q_prev <- q (frame t-1 slot). Order matters: reverse shift would lose q_prev.
+            q_prev2 = np.copy(q_prev)
             q_prev = np.copy(q)
 
             # Update cross-frame persistence state after the solved frame.
@@ -1082,6 +1111,9 @@ class TestSocpRetargeter:
         kwargs["lambda_X"] = sc.lambda_X
         kwargs["lambda_P"] = sc.lambda_P
         kwargs["sigma_v"] = sc.sigma_v
+        kwargs["lambda_r"] = sc.lambda_r
+        kwargs["sigma_qddot"] = sc.sigma_qddot
+        kwargs["sigma_Vdot"] = sc.sigma_Vdot
         # The interaction costs require the non-penetration constraint to stay
         # stable (the paper's optimization has both: the costs + d_ij >= 0).
         # Without it the D term marches the floating base through the floor.

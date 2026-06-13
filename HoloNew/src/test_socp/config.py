@@ -49,3 +49,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_X: float = 1.0
     lambda_P: float = 0.0
     sigma_v: float = 0.05
+
+    # Temporal regularization (W^r): penalizes tangent-space acceleration across
+    # consecutive frames. Default 0.0 keeps the solve identical to the pre-W^r
+    # baseline. sigma_qddot / sigma_Vdot set the per-DOF noise scale for joints
+    # and base, respectively (same units as the temporal.py build_temporal_term API).
+    lambda_r: float = 0.0
+    sigma_qddot: float = 1.0
+    sigma_Vdot: float = 1.0

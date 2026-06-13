@@ -45,3 +45,15 @@ def test_wr_term_matches_numpy():
     # rtol=5e-6: the term uses the first-order linearisation of pin.difference while the
     # ground truth evaluates it exactly; the O(||dqa||^2) residual sets the floor.
     np.testing.assert_allclose(float(term.value), gt, rtol=5e-6)
+
+
+def test_wr_inert_by_default_and_runs_when_on():
+    import numpy as np
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+    rt = TestSocpRetargeter.from_config(RetargetingConfig(
+        task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
+    assert rt.lambda_r == 0.0  # default off
+    rt.lambda_r = 50.0
+    res = rt.retarget(max_frames=6)
+    assert np.all(np.isfinite(res.qpos))
