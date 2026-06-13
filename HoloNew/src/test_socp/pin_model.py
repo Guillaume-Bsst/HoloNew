@@ -100,6 +100,20 @@ class PinModel:
         self._fk(q_pin)
         return np.array(self.data.oMf[self._frame_id(body_name)].rotation)
 
+    def link_placements(self, q_pin: np.ndarray, link_names) -> dict:
+        """Per-link world placement from a single FK pass.
+
+        Returns a dict mapping each link name to (R (3,3), p (3,)). Computing all
+        placements from one forward-kinematics pass avoids an FK call per point
+        when many control points share few links.
+        """
+        self._fk(q_pin)
+        out = {}
+        for name in link_names:
+            oMf = self.data.oMf[self._frame_id(name)]
+            out[name] = (np.array(oMf.rotation), np.array(oMf.translation))
+        return out
+
     # ------------------------------------------------------------------
     # Jacobians
     # ------------------------------------------------------------------

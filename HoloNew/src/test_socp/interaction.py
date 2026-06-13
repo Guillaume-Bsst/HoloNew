@@ -49,11 +49,14 @@ def robot_control_points(rt, q_pin: np.ndarray) -> np.ndarray:
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
     out = np.zeros((M, 3))
-    for i in range(M):
-        link = corr.link_names[corr.link_idx[i]]
-        pw = rt.pin.body_position(q_pin, link)
-        Rw = rt.pin.body_rotation(q_pin, link)
-        out[i] = pw + Rw @ corr.offset_local[i]
+    # One FK pass for all links; assemble points per link group (vectorized).
+    placements = rt.pin.link_placements(q_pin, corr.link_names)
+    for li, name in enumerate(corr.link_names):
+        mask = corr.link_idx == li
+        if not mask.any():
+            continue
+        Rw, pw = placements[name]
+        out[mask] = pw + corr.offset_local[mask] @ Rw.T
     return out
 
 
