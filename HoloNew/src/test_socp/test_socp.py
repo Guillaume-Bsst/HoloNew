@@ -139,18 +139,6 @@ class TestSocpRetargeter:
             [large_number * np.ones(n_floating_base),
              self.robot_model.jnt_range[[i for i, _ in actuated_joints], 1]]
         )
-        self.q_a_lb = complete_lower[self.q_a_indices]
-        self.q_a_ub = complete_upper[self.q_a_indices]
-
-        if task_constants.MANUAL_LB:
-            self.q_a_lb[np.array(list(task_constants.MANUAL_LB.keys()), dtype=int)] = list(
-                task_constants.MANUAL_LB.values()
-            )
-        if task_constants.MANUAL_UB:
-            self.q_a_ub[np.array(list(task_constants.MANUAL_UB.keys()), dtype=int)] = list(
-                task_constants.MANUAL_UB.values()
-            )
-
         # Tangent-space joint bounds (nv_a,): used by the pinocchio joint limit constraint.
         # Base tangent DOFs (indices 0:6) are effectively unconstrained (trust region limits step).
         # Joints (qpos index k >= 7) map to tangent index k-1 for hinge/slide joints.
@@ -374,7 +362,7 @@ class TestSocpRetargeter:
         (done by ``_update_jacobians_and_phis_from_q`` which runs first).
 
         Returns:
-            Js: dict mapping (geom_a, geom_b) -> relative Jacobian (1 x nq)
+            Js: dict mapping (geom_a, geom_b) -> relative Jacobian (nv,) in pinocchio tangent order
             phis: dict mapping (geom_a, geom_b) -> signed distance
         """
         if not self._self_collision_enabled:
@@ -783,6 +771,8 @@ class TestSocpRetargeter:
 
         # Self-collision constraints (holosoma-style, default off)
         if self.activate_self_collision and self._self_collision_enabled:
+            self.robot_data.qpos[:len(q)] = q
+            mujoco.mj_forward(self.robot_model, self.robot_data)
             Js_sc, phis_sc = self._compute_self_collision_constraints(frame_idx)
             for key, phi in phis_sc.items():
                 Ja_n_full = Js_sc[key]  # (nv,) relative Jacobian
