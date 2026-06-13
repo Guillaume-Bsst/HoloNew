@@ -64,6 +64,41 @@ from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 ```
 
+#### Optional holosoma-style constraints
+
+GMR-SOCP and TEST-SOCP carry holosoma's constraint helpers — object/ground
+non-penetration, self-collision, foot-sticking, and foot-lock — **copied verbatim
+from `src/holosoma/interaction_mesh_retargeter.py`** but **disabled by default**.
+The default solve is bit-identical to the unconstrained baseline.
+
+To opt in, pass the solver-specific config class with the desired flags set:
+
+```python
+from HoloNew.config_types.retargeting import RetargetingConfig
+from HoloNew.src.gmr_socp.config import GmrSocpRetargeterConfig   # or TestSocpRetargeterConfig
+from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
+
+cfg = RetargetingConfig(
+    task_type="robot_only",
+    task_name="sub3_largebox_003",
+    data_format="smplh",
+    retargeter=GmrSocpRetargeterConfig(
+        activate_obj_non_penetration=True,   # ground non-penetration on robot_only
+        activate_foot_sticking=True,         # foot-sticking on g1 (left/right ankle links)
+    ),
+)
+rt = GmrSocpRetargeter.from_config(cfg)
+res = rt.retarget()
+```
+
+Constraint applicability:
+
+| Flag | Works on | Notes |
+|------|----------|-------|
+| `activate_obj_non_penetration` | `robot_only` (ground) and object tasks | Ground non-pen uses the `ground` geom in the g1 xml; object non-pen requires an object task + scene xml |
+| `activate_foot_sticking` | `robot_only` and any task with g1 | Uses g1 `FOOT_STICKING_LINKS` (left/right ankle links) |
+| `activate_self_collision` | Any task | Requires `self_collision=SelfCollisionConfig(enable=True, pairs=[...])` to take effect |
+
 ---
 
 ## 2. Stage visualization — `view_stages.py`
@@ -238,6 +273,9 @@ pytest tests/test_contact_field.py tests/test_contact_sdf.py \
 pytest tests/test_correspondence_build.py tests/test_correspondence_ot.py \
        tests/test_correspondence_g1.py tests/test_correspondence_human.py \
        tests/test_correspondence_segments.py tests/test_correspondence_v2.py -q
+
+# Holosoma-style constraints (default-off parity + ON smoke for GMR/TEST)
+pytest tests/test_holosoma_constraints.py -q
 ```
 
 ---

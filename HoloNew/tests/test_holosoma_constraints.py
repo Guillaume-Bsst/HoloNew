@@ -89,3 +89,42 @@ def test_foot_sticking_sequence_built():
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
     assert isinstance(rt.foot_sticking_sequences, list) and len(rt.foot_sticking_sequences) > 0
+
+
+def test_gmr_socp_constraints_on_smoke():
+    """ON smoke: GMR-SOCP with ground non-penetration + foot-sticking enabled.
+
+    Enables both constraints via GmrSocpRetargeterConfig (the proper opt-in path,
+    not post-construction mutation) on a robot_only g1 task.  The g1 xml contains
+    a ground plane geom, so ground non-penetration fires; g1 FOOT_STICKING_LINKS
+    contain left/right ankle names, so foot-sticking fires.
+
+    Asserts the full retarget() completes without error and returns a sane qpos
+    (correct column count, all finite values).  This proves the enabled constraint
+    path is feasible end-to-end on the demo clip.
+    """
+    import numpy as np
+    from HoloNew.config_types.retargeting import RetargetingConfig
+    from HoloNew.src.gmr_socp.config import GmrSocpRetargeterConfig
+    from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
+
+    cfg = RetargetingConfig(
+        task_type="robot_only",
+        task_name="sub3_largebox_003",
+        data_format="smplh",
+        retargeter=GmrSocpRetargeterConfig(
+            activate_obj_non_penetration=True,
+            activate_foot_sticking=True,
+        ),
+    )
+    rt = GmrSocpRetargeter.from_config(cfg)
+
+    # Confirm the flags were wired through from_config (not silently dropped).
+    assert rt.activate_obj_non_penetration is True
+    assert rt.activate_foot_sticking is True
+
+    res = rt.retarget()
+
+    # Sane output: correct joint dimension and no NaN/Inf anywhere.
+    assert res.qpos.shape[1] >= 36, res.qpos.shape
+    assert np.isfinite(res.qpos).all(), "NaN or Inf in qpos with constraints ON"
