@@ -33,9 +33,15 @@ _K = 30   # see module docstring for rationale
 
 
 def _solve(lr, sq, sV, K=_K):
+    # Isolate W^r: turn pelvis-relative Style OFF (it is now the default) so this
+    # metric measures W^r's effect in the context it was tuned in, independent of
+    # the Style default. W^r weights may benefit from re-tuning in the Style-on
+    # path (a refinement); the combined Style+W^r path is covered by the parity
+    # snapshot + the full-clip finiteness checks.
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh",
-        retargeter=TestSocpRetargeterConfig(lambda_r=lr, sigma_qddot=sq, sigma_Vdot=sV)))
+        retargeter=TestSocpRetargeterConfig(lambda_r=lr, sigma_qddot=sq, sigma_Vdot=sV,
+                                            activate_style=False)))
     res = rt.retarget(max_frames=K)
     # Mean absolute third finite difference of joint angles (columns 7: = actuated joints).
     jerk = float(np.mean(np.abs(np.diff(res.qpos[:, 7:], n=3, axis=0))))
