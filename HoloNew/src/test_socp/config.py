@@ -87,3 +87,14 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_c: float = 0.0
     lambda_c_pos: float = 0.0
     lambda_L: float = 0.0
+
+    # Brick 5 — Movable entities W^o (object motion regularization).
+    # Default OFF (activate_movable=False, lambdas=0): object driven by reference,
+    # solve is bit-exact with previous baseline. Enable to make the object pose a
+    # solved decision variable with W^o regularization toward the reference motion.
+    # Only active on object tasks (obj_pose is not None) from frame_idx >= 2.
+    #   W^o = lambda_o     * ||vdot_obj - vdot_ref||^2  (linear acceleration tracking)
+    #         + lambda_omega * ||omega_obj - omega_ref||^2  (angular velocity tracking)
+    activate_movable: bool = False
+    lambda_o: float = 0.0
+    lambda_omega: float = 0.0

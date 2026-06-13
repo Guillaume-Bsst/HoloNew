@@ -15,6 +15,7 @@ from types import ModuleType
 import cvxpy as cp
 import mujoco
 import numpy as np
+import pinocchio as pin
 from scipy.spatial.transform import Rotation
 
 from HoloNew.config_types.retargeter import FootLockConfig, SelfCollisionConfig
@@ -75,6 +76,9 @@ class TestSocpRetargeter:
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
         lambda_L: float = 0.0,
+        activate_movable: bool = False,
+        lambda_o: float = 0.0,
+        lambda_omega: float = 0.0,
         load_object_scene: bool = True,
         **_ignored,
     ):
@@ -237,6 +241,13 @@ class TestSocpRetargeter:
         self.lambda_c = lambda_c
         self.lambda_c_pos = lambda_c_pos
         self.lambda_L = lambda_L
+
+        # Brick 5 — Movable entities W^o (default off; parity preserved).
+        self.activate_movable = activate_movable
+        self.lambda_o = lambda_o
+        self.lambda_omega = lambda_omega
+        # Solved object pose history: updated by retarget() when movable is on.
+        self._obj_solved_poses: list = []
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -690,6 +701,10 @@ class TestSocpRetargeter:
         c_tm2: np.ndarray | None = None,
         cddot_ref: np.ndarray | None = None,
         c_ref: np.ndarray | None = None,
+        obj_pose_tm1=None,
+        obj_pose_tm2=None,
+        vdot_ref_obj: np.ndarray | None = None,
+        omega_ref_obj: np.ndarray | None = None,
     ):
         """One linearised IK step with GMR position + orientation objective.
 
@@ -955,6 +970,30 @@ class TestSocpRetargeter:
                     self._dt
                 )
 
+        # W^o object motion regularization (Brick 5, default off).
+        # Only fires when all of: movable flag, object pose present, two prior object
+        # poses available, at least one lambda > 0, and frame_idx >= 2.
+        dxi_obj = None
+        if (self.activate_movable
+                and obj_pose is not None
+                and obj_pose_tm1 is not None
+                and obj_pose_tm2 is not None
+                and (self.lambda_o > 0 or self.lambda_omega > 0)
+                and frame_idx >= 2):
+            from HoloNew.src.test_socp.movable import build_wo_term, pose_to_se3
+            dxi_obj = cp.Variable(6, name="dxi_obj")
+            constraints.append(cp.SOC(self.step_size, dxi_obj))
+            T_obj0 = pose_to_se3(obj_pose)
+            T_obj_tm1 = pose_to_se3(obj_pose_tm1)
+            T_obj_tm2 = pose_to_se3(obj_pose_tm2)
+            _vdot_ref = vdot_ref_obj if vdot_ref_obj is not None else np.zeros(3)
+            _omega_ref = omega_ref_obj if omega_ref_obj is not None else np.zeros(3)
+            obj_terms.append(build_wo_term(
+                T_obj0, T_obj_tm1, T_obj_tm2,
+                _vdot_ref, _omega_ref,
+                dxi_obj, self.lambda_o, self.lambda_omega, self._dt,
+            ))
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
             prob.solve(solver=cp.CLARABEL)
@@ -975,7 +1014,17 @@ class TestSocpRetargeter:
         q_star = np.copy(q)
         q_star[:36] = self.pin.q_pin_to_qpos_mj(q_pin_new)
         # pin.integrate keeps the quaternion unit; no manual renormalisation needed.
-        return q_star, float(prob.value)
+
+        # Integrate the solved object tangent step if movable was active this frame.
+        # T_obj_new = exp6(dxi) * T_obj0  (left-compose, world-frame, matches build_wo_term).
+        solved_obj_pose = None
+        if dxi_obj is not None and dxi_obj.value is not None:
+            from HoloNew.src.test_socp.movable import pose_to_se3, se3_to_pose
+            T_obj0 = pose_to_se3(obj_pose)
+            T_obj_new = pin.exp6(dxi_obj.value) * T_obj0
+            solved_obj_pose = se3_to_pose(T_obj_new)
+
+        return q_star, float(prob.value), solved_obj_pose
 
     def iterate(
         self,
@@ -992,22 +1041,29 @@ class TestSocpRetargeter:
         c_tm2: np.ndarray | None = None,
         cddot_ref: np.ndarray | None = None,
         c_ref: np.ndarray | None = None,
+        obj_pose_tm1=None,
+        obj_pose_tm2=None,
+        vdot_ref_obj: np.ndarray | None = None,
+        omega_ref_obj: np.ndarray | None = None,
     ):
         """Iterate solve_single_iteration until convergence or n_iter steps."""
         last = np.inf
         cost = 0.0
+        solved_obj_pose = None
         for _ in range(n_iter):
-            q_n, cost = self.solve_single_iteration(
+            q_n, cost, solved_obj_pose = self.solve_single_iteration(
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
                 obj_pose=obj_pose, q_t_last2=q_t_last2,
                 c_tm1=c_tm1, c_tm2=c_tm2, cddot_ref=cddot_ref,
                 c_ref=c_ref,
+                obj_pose_tm1=obj_pose_tm1, obj_pose_tm2=obj_pose_tm2,
+                vdot_ref_obj=vdot_ref_obj, omega_ref_obj=omega_ref_obj,
             )
             if np.isclose(cost, last):
                 break
             last = cost
-        return q_n, cost
+        return q_n, cost, solved_obj_pose
 
     def retarget(self, max_frames: int | None = None):
         """Run the full two-pass GMR solve over all frames.
@@ -1079,6 +1135,32 @@ class TestSocpRetargeter:
             _c_prev2 = None
         pelvis_grounded = self.gmr_grounded[:, 0]   # (T, 3) grounded SMPL-X pelvis per frame
 
+        # Brick 5 — Movable entities: precompute reference object motion from
+        # _obj_poses_raw using causal SE(3) finite differences, and initialise
+        # the two prior solved object poses.
+        # V_ref[t] = log6(M_{t-1}^{-1} M_t).vector / dt   (6-vector [v; omega])
+        # vdot_ref[t] = (V_ref[t][:3] - V_ref[t-1][:3]) / dt
+        # omega_ref[t] = V_ref[t][3:6]
+        # Frames 0 and 1 get zero references (guard: W^o only fires at frame_idx>=2).
+        _vdot_ref_obj_all: list = [None] * T
+        _omega_ref_obj_all: list = [None] * T
+        _obj_prev = None   # solved object pose at t-1
+        _obj_prev2 = None  # solved object pose at t-2
+        self._obj_solved_poses = []
+        if self.activate_movable and getattr(self, "_obj_poses_raw", None) is not None:
+            from HoloNew.src.test_socp.movable import pose_to_se3
+            _V_ref_obj = [np.zeros(6)] * T
+            for _t in range(1, T):
+                _M_prev = pose_to_se3(self._obj_poses_raw[_t - 1])
+                _M_cur = pose_to_se3(self._obj_poses_raw[_t])
+                _V_ref_obj[_t] = pin.log6(_M_prev.inverse() * _M_cur).vector / self._dt
+            for _t in range(2, T):
+                _vdot_ref_obj_all[_t] = (_V_ref_obj[_t][:3] - _V_ref_obj[_t - 1][:3]) / self._dt
+                _omega_ref_obj_all[_t] = _V_ref_obj[_t][3:6]
+            # Initialise prior solved poses to the reference at frame 0.
+            _obj_prev = self._obj_poses_raw[0].copy()
+            _obj_prev2 = self._obj_poses_raw[0].copy()
+
         probe_pts, probe_obj, probe_flr, probe_wit, g1_pts = [], [], [], [], []
         urdf = None
         if self.smplx_ground_probe is not None:
@@ -1141,16 +1223,31 @@ class TestSocpRetargeter:
             # c_ref: reference CoM = reference pelvis + structural com-pelvis offset.
             # Keeps the W^c_pos anchor on the correct trajectory without height bias.
             _c_ref_t = _c_ref_all[t]
-            q, _ = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
+            # Object history for W^o.
+            _vdot_ref_obj_t = _vdot_ref_obj_all[t]
+            _omega_ref_obj_t = _omega_ref_obj_all[t]
+            q, _, _solved_obj1 = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
-                                c_ref=_c_ref_t)
-            q, _ = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
+                                c_ref=_c_ref_t,
+                                obj_pose_tm1=_obj_prev, obj_pose_tm2=_obj_prev2,
+                                vdot_ref_obj=_vdot_ref_obj_t, omega_ref_obj=_omega_ref_obj_t)
+            q, _, _solved_obj2 = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
-                                c_ref=_c_ref_t)
+                                c_ref=_c_ref_t,
+                                obj_pose_tm1=_obj_prev, obj_pose_tm2=_obj_prev2,
+                                vdot_ref_obj=_vdot_ref_obj_t, omega_ref_obj=_omega_ref_obj_t)
+            # The second pass's solved object pose is the frame-t result (both passes
+            # share the same reference; the second pass integrates from pass-1's result).
+            _frame_solved_obj = _solved_obj2 if _solved_obj2 is not None else _solved_obj1
+            if _frame_solved_obj is None and _obj_pose is not None:
+                # movable is off or frame_idx<2: use reference pose as the "solved" pose.
+                _frame_solved_obj = _obj_pose
+            if _frame_solved_obj is not None:
+                self._obj_solved_poses.append(_frame_solved_obj.copy())
             # Shift two-frame history: q_prev2 <- q_prev (frame t-2 slot) BEFORE
             # q_prev <- q (frame t-1 slot). Order matters: reverse shift would lose q_prev.
             q_prev2 = np.copy(q_prev)
@@ -1162,6 +1259,11 @@ class TestSocpRetargeter:
                 _c_new = self.pin.com(self.pin.qpos_mj_to_q_pin(q[:36]))
                 _c_prev2 = _c_prev   # shift: t-2 slot <- t-1
                 _c_prev = _c_new     # t-1 slot <- newly solved t
+
+            # Update solved object pose history for W^o (shift two-frame window).
+            if self.activate_movable and _frame_solved_obj is not None:
+                _obj_prev2 = _obj_prev
+                _obj_prev = _frame_solved_obj
 
             # Update cross-frame persistence state after the solved frame.
             if self._p_state is not None and _obj_pose is not None:
@@ -1276,6 +1378,9 @@ class TestSocpRetargeter:
         kwargs["lambda_c"] = sc.lambda_c
         kwargs["lambda_c_pos"] = sc.lambda_c_pos
         kwargs["lambda_L"] = sc.lambda_L
+        kwargs["activate_movable"] = sc.activate_movable
+        kwargs["lambda_o"] = sc.lambda_o
+        kwargs["lambda_omega"] = sc.lambda_omega
         # The interaction costs require the non-penetration constraint to stay
         # stable (the paper's optimization has both: the costs + d_ij >= 0).
         # Without it the D term marches the floating base through the floor.

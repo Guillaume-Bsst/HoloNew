@@ -7,6 +7,39 @@ import numpy as np
 import pinocchio as pin
 
 
+def pose_to_se3(pose7: np.ndarray) -> pin.SE3:
+    """Convert a 7-vector [qw, qx, qy, qz, x, y, z] to a pinocchio SE3.
+
+    Pinocchio's Quaternion constructor takes (w, x, y, z) in scalar-first order,
+    which matches the OMOMO dataset convention [qw, qx, qy, qz, x, y, z].
+
+    Args:
+        pose7: array of shape (7,) with [qw, qx, qy, qz, x, y, z].
+
+    Returns:
+        pin.SE3 with the corresponding rotation and translation.
+    """
+    pose7 = np.asarray(pose7, dtype=float)
+    qw, qx, qy, qz = pose7[0], pose7[1], pose7[2], pose7[3]
+    t = pose7[4:7].copy()
+    R = pin.Quaternion(qw, qx, qy, qz).matrix()
+    return pin.SE3(R, t)
+
+
+def se3_to_pose(M: pin.SE3) -> np.ndarray:
+    """Convert a pinocchio SE3 to a 7-vector [qw, qx, qy, qz, x, y, z].
+
+    Args:
+        M: pin.SE3 instance.
+
+    Returns:
+        Array of shape (7,) with [qw, qx, qy, qz, x, y, z].
+    """
+    q = pin.Quaternion(M.rotation)
+    # pin.Quaternion stores (x, y, z, w) internally but exposes .w, .x, .y, .z
+    return np.array([q.w, q.x, q.y, q.z, M.translation[0], M.translation[1], M.translation[2]])
+
+
 def build_wo_term(
     T_obj0,
     T_obj_tm1,
