@@ -251,8 +251,13 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
     # Map global index -> position in active_union for Jacobian lookup.
     idx_to_pos = {int(active_union[k]): k for k in range(len(active_union))}
 
-    terms = []
     I3 = np.eye(3)
+
+    # Collect rows for the two stacked matrices.
+    # D channel: one scalar row per active point  -> A_d (K_d, nv_a), c_d (K_d,)
+    # X channel: three rows per active point      -> B_x (3*K_x, nv_a), r_x (3*K_x,)
+    A_d_rows, c_d_rows = [], []
+    B_x_rows, r_x_rows = [], []
 
     # --- Object channel (object-local frame) ---
     for i in np.where(active_obj)[0]:
@@ -264,17 +269,18 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         d0 = float(fobj.distance[i])
         x0 = np.asarray(fobj.witness[i], dtype=float)     # object-local witness
 
-        # D term: (n0^T Jloc dqa - (d_ref - d0))^2
+        # D: sqrt(lambda_D * w) * n0^T Jloc  vs  sqrt(lambda_D * w) * (d_ref - d0)
         if lambda_D > 0:
-            res_d = n0 @ (Jloc @ dqa) - float(d_obj_ref[i] - d0)
-            terms.append((lambda_D * w) * cp.square(res_d))
+            sw = float(np.sqrt(lambda_D * w))
+            A_d_rows.append(sw * (n0 @ Jloc))             # (nv_a,)
+            c_d_rows.append(sw * float(d_obj_ref[i] - d0))
 
-        # X term: || Pi0 (Jloc dqa) - Pi0 (x_ref - x0) ||^2
+        # X: sqrt(lambda_X * w) * Pi0 Jloc  vs  sqrt(lambda_X * w) * Pi0(x_ref - x0)
         if lambda_X > 0:
+            sw = float(np.sqrt(lambda_X * w))
             Pi0 = I3 - np.outer(n0, n0)
-            rhs_x = Pi0 @ (np.asarray(x_obj_ref[i], dtype=float) - x0)
-            res_x = Pi0 @ (Jloc @ dqa) - rhs_x
-            terms.append((lambda_X * w) * cp.sum_squares(res_x))
+            B_x_rows.append(sw * (Pi0 @ Jloc))            # (3, nv_a)
+            r_x_rows.append(sw * Pi0 @ (np.asarray(x_obj_ref[i], dtype=float) - x0))
 
     # --- Floor channel (world frame) ---
     for i in np.where(active_flr)[0]:
@@ -285,17 +291,29 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         d0 = float(fflr.distance[i])
         x0 = np.asarray(fflr.witness[i], dtype=float)     # world-frame floor witness
 
-        # D term: (n0^T Ji dqa - (d_ref - d0))^2
+        # D: sqrt(lambda_D * w) * n0^T Ji  vs  sqrt(lambda_D * w) * (d_ref - d0)
         if lambda_D > 0:
-            res_d = n0 @ (Ji @ dqa) - float(d_flr_ref[i] - d0)
-            terms.append((lambda_D * w) * cp.square(res_d))
+            sw = float(np.sqrt(lambda_D * w))
+            A_d_rows.append(sw * (n0 @ Ji))               # (nv_a,)
+            c_d_rows.append(sw * float(d_flr_ref[i] - d0))
 
-        # X term: || Pi0 (Ji dqa) - Pi0 (x_ref - x0) ||^2
+        # X: sqrt(lambda_X * w) * Pi0 Ji  vs  sqrt(lambda_X * w) * Pi0(x_ref - x0)
         if lambda_X > 0:
+            sw = float(np.sqrt(lambda_X * w))
             Pi0 = I3 - np.outer(n0, n0)
-            rhs_x = Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0)
-            res_x = Pi0 @ (Ji @ dqa) - rhs_x
-            terms.append((lambda_X * w) * cp.sum_squares(res_x))
+            B_x_rows.append(sw * (Pi0 @ Ji))              # (3, nv_a)
+            r_x_rows.append(sw * Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0))
+
+    # Build one cvxpy expression per non-empty channel.
+    terms = []
+    if A_d_rows:
+        A_d = np.array(A_d_rows)            # (K_d, nv_a)
+        c_d = np.array(c_d_rows)            # (K_d,)
+        terms.append(cp.sum_squares(A_d @ dqa - c_d))
+    if B_x_rows:
+        B_x = np.vstack(B_x_rows)          # (3*K_x, nv_a)
+        r_x = np.concatenate(r_x_rows)     # (3*K_x,)
+        terms.append(cp.sum_squares(B_x @ dqa - r_x))
 
     return terms
 
@@ -410,8 +428,12 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     jacs = [J[:, rt.v_a_indices] for J in jacs_full]
     idx_to_pos = {int(active_union[k]): k for k in range(len(active_union))}
 
-    terms = []
     I3 = np.eye(3)
+
+    # Collect rows for the stacked B_p matrix and r_p vector.
+    # Each active point contributes 3 rows: sqrt(scale_sq * w) * Pi0 * Jcoeff
+    B_p_rows = []
+    r_p_rows = []
 
     # --- Object channel (object-local frame) ---
     # Robot displacement (object-local):
@@ -438,11 +460,12 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
         p_ref_tm1_loc = Robj_tm1.T @ (p_ref_tm1[i] - obj_tm1)
         dp_ref_loc = p_ref_t_loc - p_ref_tm1_loc              # (3,)
 
-        # residual = Π0 @ (Δp_local - Δp_ref_local)
-        #          = Π0 @ (const_i + Jloc@dqa - dp_ref_loc)
+        # residual = Π0 @ (const_i + Jloc@dqa - dp_ref_loc)
+        # rhs = Π0 @ (dp_ref_loc - const_i)
         rhs_const = Pi0 @ (dp_ref_loc - const_i)              # (3,)
-        res = Pi0 @ (Jloc @ dqa) - rhs_const
-        terms.append((scale_sq * w) * cp.sum_squares(res))
+        sw = float(np.sqrt(scale_sq * w))
+        B_p_rows.append(sw * (Pi0 @ Jloc))                    # (3, nv_a)
+        r_p_rows.append(sw * rhs_const)                        # (3,)
 
     # --- Floor channel (world frame) ---
     # Robot displacement (world): Δp = (P_i - p_prev_world_i) + Ji@dqa.
@@ -454,11 +477,17 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
         n0 = np.asarray(fflr.direction[i], dtype=float)   # world-frame unit normal
         Pi0 = I3 - np.outer(n0, n0)
 
-        const_i = P[i] - p_prev_world[i]                  # (3,) constant offset
-        dp_ref_i = dp_ref_world[i]                         # (3,)
+        const_i   = P[i] - p_prev_world[i]                  # (3,) constant offset
+        dp_ref_i  = dp_ref_world[i]                          # (3,)
+        rhs_const = Pi0 @ (dp_ref_i - const_i)              # (3,)
 
-        rhs_const = Pi0 @ (dp_ref_i - const_i)            # (3,)
-        res = Pi0 @ (Ji @ dqa) - rhs_const
-        terms.append((scale_sq * w) * cp.sum_squares(res))
+        sw = float(np.sqrt(scale_sq * w))
+        B_p_rows.append(sw * (Pi0 @ Ji))                    # (3, nv_a)
+        r_p_rows.append(sw * rhs_const)                     # (3,)
 
-    return terms
+    if not B_p_rows:
+        return []
+
+    B_p = np.vstack(B_p_rows)          # (3*K, nv_a)
+    r_p = np.concatenate(r_p_rows)     # (3*K,)
+    return [cp.sum_squares(B_p @ dqa - r_p)]
