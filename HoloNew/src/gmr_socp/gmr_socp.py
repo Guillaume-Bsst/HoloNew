@@ -16,6 +16,7 @@ import mujoco
 import numpy as np
 from scipy.spatial.transform import Rotation
 
+from HoloNew.config_types.retargeter import FootLockConfig, SelfCollisionConfig
 from .tables import IK_MATCH_TABLE1
 
 # Body name remapping: keys are IK table frame names; values are actual G1
@@ -50,6 +51,13 @@ class GmrSocpRetargeter:
         q_a_init_idx: int = -7,
         activate_joint_limits: bool = True,
         step_size: float = 0.2,
+        activate_obj_non_penetration: bool = False,
+        activate_self_collision: bool = False,
+        activate_foot_sticking: bool = False,
+        penetration_tolerance: float = 1e-3,
+        foot_sticking_tolerance: float = 1e-3,
+        foot_lock=None,            # FootLockConfig | None
+        self_collision=None,       # SelfCollisionConfig | None
         **_ignored,
     ):
         """Initialise the retargeter from task constants.
@@ -113,6 +121,24 @@ class GmrSocpRetargeter:
                 task_constants.MANUAL_UB.values()
             )
 
+        # ===== Holosoma-style optional constraints (default OFF; copied verbatim
+        # from src/holosoma/interaction_mesh_retargeter.py). When every flag is
+        # off the solve is unchanged. =====
+        self.activate_obj_non_penetration = activate_obj_non_penetration
+        self.activate_self_collision = activate_self_collision
+        self.activate_foot_sticking = activate_foot_sticking
+        self.penetration_tolerance = penetration_tolerance
+        self.foot_sticking_tolerance = foot_sticking_tolerance
+        self.object_name = getattr(task_constants, "OBJECT_NAME", "ground")
+        self.foot_links = dict(zip(task_constants.FOOT_STICKING_LINKS,
+                                   task_constants.FOOT_STICKING_LINKS))
+        self.collision_detection_threshold = 0.1
+        self._geom_names = [self.robot_model.geom(g).name or "" for g in range(self.robot_model.ngeom)]
+        self._init_foot_lock(foot_lock if foot_lock is not None else FootLockConfig())
+        self._init_self_collision(self_collision if self_collision is not None else SelfCollisionConfig())
+        # foot_sticking_sequences is filled by from_config; () = no sticking.
+        self.foot_sticking_sequences: list = []
+
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
         available_bodies = {self.robot_model.body(i).name for i in range(self.robot_model.nbody)}
@@ -128,6 +154,78 @@ class GmrSocpRetargeter:
             if actual != frame:
                 print(f"[GmrSocp] Remapped body: '{frame}' -> '{actual}'")
             self.robot_link_names[frame] = actual
+
+    # ------------------------------------------------------------------
+    # Holosoma-style constraint init helpers (copied verbatim from
+    # src/holosoma/interaction_mesh_retargeter.py)
+    # ------------------------------------------------------------------
+
+    def _init_foot_lock(self, foot_lock: FootLockConfig | None) -> None:
+        """Initialize foot lock configuration and normalize window mappings."""
+        self.foot_lock = foot_lock or FootLockConfig()
+        self._foot_lock_windows: dict[str, tuple[tuple[int, int], ...]] = {"left": (), "right": ()}
+        if self.foot_lock.windows is None:
+            return
+        for key, windows in self.foot_lock.windows.items():
+            key_lower = key.lower()
+            side = None
+            if key_lower.startswith("l") or ("left" in key_lower):
+                side = "left"
+            elif key_lower.startswith("r") or ("right" in key_lower):
+                side = "right"
+            if side is None:
+                continue
+
+            normalized_windows: list[tuple[int, int]] = []
+            for window in windows:
+                if len(window) != 2:
+                    raise ValueError(f"Invalid foot lock window for {key}: {window}")
+                start, end = int(window[0]), int(window[1])
+                if end < start:
+                    raise ValueError(f"Invalid foot lock window with end < start for {key}: {window}")
+                normalized_windows.append((start, end))
+            self._foot_lock_windows[side] = tuple(normalized_windows)
+
+    def _init_self_collision(self, self_collision: SelfCollisionConfig | None) -> None:
+        """Initialize self-collision configuration and precompute geom pairs."""
+        sc = self_collision or SelfCollisionConfig()
+        self._self_collision_enabled = sc.enable and len(sc.pairs) > 0
+        self._self_collision_tolerance = sc.tolerance
+        self._self_collision_windows: list[tuple[int, int]] | None = sc.windows
+        self._self_collision_geom_pairs: list[tuple[int, int]] = []
+
+        self._sc_last_vis_frame = -1
+
+        if not self._self_collision_enabled:
+            return
+
+        m = self.robot_model
+
+        # Build body_name → [geom_ids] mapping (only geoms with collision enabled)
+        body_to_geoms: dict[str, list[int]] = {}
+        for g in range(m.ngeom):
+            if m.geom_contype[g] == 0 and m.geom_conaffinity[g] == 0:
+                continue
+            body_id = m.geom_bodyid[g]
+            body_name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_BODY, body_id) or ""
+            body_to_geoms.setdefault(body_name, []).append(g)
+
+        # Build geom pairs from body name pairs
+        for body_a, body_b in sc.pairs:
+            geoms_a = body_to_geoms.get(body_a, [])
+            geoms_b = body_to_geoms.get(body_b, [])
+            if not geoms_a:
+                print(f"[SelfCollision] Warning: no collision geoms found for body '{body_a}'")
+            if not geoms_b:
+                print(f"[SelfCollision] Warning: no collision geoms found for body '{body_b}'")
+            for ga in geoms_a:
+                for gb in geoms_b:
+                    self._self_collision_geom_pairs.append((ga, gb))
+
+        print(
+            f"[SelfCollision] Initialized with {len(self._self_collision_geom_pairs)} geom pairs "
+            f"from {len(sc.pairs)} body pairs, tolerance={sc.tolerance}m"
+        )
 
     # ------------------------------------------------------------------
     # Jacobian helpers (kept verbatim from InteractionMeshRetargeter)
