@@ -69,6 +69,8 @@ class TestSocpRetargeter:
         lambda_r: float = 0.0,
         sigma_qddot: float = 1.0,
         sigma_Vdot: float = 1.0,
+        activate_style: bool = False,
+        pelvis_anchor_weight: float = 1.0,
         load_object_scene: bool = True,
         **_ignored,
     ):
@@ -221,6 +223,10 @@ class TestSocpRetargeter:
         self.lambda_r = lambda_r
         self.sigma_qddot = sigma_qddot
         self.sigma_Vdot = sigma_Vdot
+
+        # Brick 3 — Pelvis-relative Style objective (default off; parity preserved).
+        self.activate_style = activate_style
+        self.pelvis_anchor_weight = pelvis_anchor_weight
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -709,28 +715,74 @@ class TestSocpRetargeter:
         dqa = cp.Variable(self.nv_a, name="dqa")
 
         obj_terms = []
-        for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
-            body = self.robot_link_names[frame]
-            Jp, Jr = self._body_jac(q, body)
+        if not self.activate_style:
+            # World-frame tracking (default): each frame tracked in world coordinates.
+            for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
+                body = self.robot_link_names[frame]
+                Jp, Jr = self._body_jac(q, body)
 
-            if w_p > 0:
-                p_c = self.body_position(q, body)
-                obj_terms.append(
-                    w_p * cp.sum_squares(Jp @ dqa - (p_t - p_c))
-                )
+                if w_p > 0:
+                    p_c = self.body_position(q, body)
+                    obj_terms.append(
+                        w_p * cp.sum_squares(Jp @ dqa - (p_t - p_c))
+                    )
 
-            if w_r > 0:
-                R_c = self.body_rotation(q, body)
-                # Orientation error in body frame; body-frame angular Jacobian.
-                # Convention (b): body-frame Jacobian = R_c.T @ Jr,
-                # body-frame error = log(R_c.T @ R_t).
-                # This is the convention that makes the linearisation consistent:
-                # body_omega ≈ (R_c.T @ Jr) @ dqa  and  e = log(R_c.T @ R_t).
-                e = Rotation.from_matrix(R_c.T @ R_t).as_rotvec()
-                Jr_body = R_c.T @ Jr
-                obj_terms.append(
-                    w_r * cp.sum_squares(Jr_body @ dqa - e)
-                )
+                if w_r > 0:
+                    R_c = self.body_rotation(q, body)
+                    # Orientation error in body frame; body-frame angular Jacobian.
+                    # Convention (b): body-frame Jacobian = R_c.T @ Jr,
+                    # body-frame error = log(R_c.T @ R_t).
+                    # This is the convention that makes the linearisation consistent:
+                    # body_omega ≈ (R_c.T @ Jr) @ dqa  and  e = log(R_c.T @ R_t).
+                    e = Rotation.from_matrix(R_c.T @ R_t).as_rotvec()
+                    Jr_body = R_c.T @ Jr
+                    obj_terms.append(
+                        w_r * cp.sum_squares(Jr_body @ dqa - e)
+                    )
+        else:
+            # Pelvis-relative Style objective (Brick 3):
+            # - pelvis position: weak scaffold (pelvis_anchor_weight * w_p)
+            # - pelvis orientation: roll/pitch-only tilt (yaw-invariant)
+            # - joint orientations: re-based by current pelvis (pelvis-relative)
+            # - joint position terms: dropped (positions emerge from orientations)
+            from HoloNew.src.test_socp.style import pelvis_tilt_residual
+            pelvis_body = "pelvis"
+            R_B0 = self.body_rotation(q, pelvis_body)
+            R_Bref = None
+            pelvis_p_t = None
+            pelvis_w_p = 0.0
+            for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
+                if self.robot_link_names[frame] == pelvis_body:
+                    R_Bref = R_t
+                    pelvis_p_t = p_t
+                    pelvis_w_p = w_p
+            for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
+                body = self.robot_link_names[frame]
+                Jp, Jr = self._body_jac(q, body)
+                if body == pelvis_body:
+                    # Weak position scaffold: keeps pelvis from drifting vertically.
+                    if pelvis_w_p > 0 and self.pelvis_anchor_weight > 0:
+                        p_c = self.body_position(q, body)
+                        obj_terms.append(
+                            self.pelvis_anchor_weight * pelvis_w_p
+                            * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
+                        )
+                    # Roll/pitch tilt term replaces full pelvis orientation tracking.
+                    if w_r > 0:
+                        r0, A = pelvis_tilt_residual(self, q, R_Bref)
+                        obj_terms.append(w_r * cp.sum_squares(A @ dqa - r0))
+                else:
+                    # Joint orientation re-based by the current pelvis (pelvis-relative).
+                    # R_t_rebased = R_B0 @ R_Bref^{-1} @ R_t tracks the joint
+                    # orientation in world frame under the current pelvis yaw.
+                    if w_r > 0:
+                        R_t_rebased = R_B0 @ R_Bref.T @ R_t
+                        R_c = self.body_rotation(q, body)
+                        e = Rotation.from_matrix(R_c.T @ R_t_rebased).as_rotvec()
+                        Jr_body = R_c.T @ Jr
+                        obj_terms.append(w_r * cp.sum_squares(Jr_body @ dqa - e))
+                    # Joint position tracking intentionally dropped: positions
+                    # emerge from the orientation constraints.
 
         constraints = [cp.SOC(self.step_size, dqa)]
         if self.activate_joint_limits:
@@ -1114,6 +1166,8 @@ class TestSocpRetargeter:
         kwargs["lambda_r"] = sc.lambda_r
         kwargs["sigma_qddot"] = sc.sigma_qddot
         kwargs["sigma_Vdot"] = sc.sigma_Vdot
+        kwargs["activate_style"] = sc.activate_style
+        kwargs["pelvis_anchor_weight"] = sc.pelvis_anchor_weight
         # The interaction costs require the non-penetration constraint to stay
         # stable (the paper's optimization has both: the costs + d_ij >= 0).
         # Without it the D term marches the floating base through the floor.

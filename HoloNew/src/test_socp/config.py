@@ -61,3 +61,12 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_r: float = 0.2
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
+
+    # Brick 3 — Pelvis-relative Style objective.
+    # When off (default), the existing world-frame tracking loop runs unchanged.
+    # When on, joint orientation targets are re-based by the current pelvis,
+    # the pelvis orientation term becomes a roll/pitch-only tilt, joint position
+    # terms are dropped, and a weak pelvis position scaffold is kept.
+    # pelvis_anchor_weight scales the scaffold (1.0 = unchanged relative to w_p).
+    activate_style: bool = False
+    pelvis_anchor_weight: float = 1.0

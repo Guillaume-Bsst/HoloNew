@@ -32,3 +32,11 @@ def test_tilt_residual_matches_fd_and_is_yaw_invariant():
         qm2[:36] = rt.pin.q_pin_to_qpos_mj(pin.integrate(rt.pin.model, q_pin, v))
         fd = (u_of(qm2) - u0) / eps
         np.testing.assert_allclose(A[:, k], fd, atol=1e-4, err_msg=f"col {k}")
+
+
+def test_style_default_off_and_runs_on():
+    rt = _rt()
+    assert rt.activate_style is False
+    rt.activate_style = True
+    res = rt.retarget(max_frames=6)
+    assert np.all(np.isfinite(res.qpos))
