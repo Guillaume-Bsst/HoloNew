@@ -244,6 +244,116 @@ class TestSocpRetargeter:
             f"from {len(sc.pairs)} body pairs, tolerance={sc.tolerance}m"
         )
 
+    def _prefilter_pairs_with_mj_collision(self, threshold: float):
+        m, d = self.robot_model, self.robot_data
+        ngeom = m.ngeom
+
+        self._geom_names = [mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_GEOM, g) or "" for g in range(ngeom)]
+
+        if not hasattr(self, "_saved_margins"):
+            self._saved_margins = np.empty_like(m.geom_margin)
+        self._saved_margins[:] = m.geom_margin
+
+        m.geom_margin[:] = threshold
+
+        # Run collision. This runs broad→narrow and fills d.contact.
+        mujoco.mj_collision(m, d)
+
+        # Collect unique candidate pairs that involve at least one masked geom
+        candidates = set()
+        for k in range(d.ncon):
+            c = d.contact[k]
+            g1, g2 = int(c.geom1), int(c.geom2)
+            if g1 < 0 or g2 < 0:
+                continue
+            candidates.add((min(g1, g2), max(g1, g2)))
+
+        # Restore margins to keep physics untouched
+        m.geom_margin[:] = self._saved_margins
+
+        return candidates
+
+    def _compute_jacobian_for_contact_relative(self, geom1, geom2, geom1_name, geom2_name, fromto, dist):
+        # Get closest points from fromto buffer
+        pos1 = fromto[:3]  # closest point on geom1
+        pos2 = fromto[3:]  # closest point on geom2
+
+        v = pos1 - pos2
+        norm_v = np.linalg.norm(v)
+
+        if norm_v > 1e-12:
+            nhat_BA_W = np.sign(dist) * (v / norm_v)
+        # Degenerate: points coincide. Heuristics fallback.
+        # If one side is a plane/ground, use its known normal.
+        elif "ground" in geom2_name.lower():
+            nhat_BA_W = np.array([0.0, 0.0, 1.0]) * (1.0 if dist >= 0 else -1.0)
+        elif "ground" in geom1_name.lower():
+            nhat_BA_W = np.array([0.0, 0.0, -1.0]) * (1.0 if dist >= 0 else -1.0)
+        else:
+            nhat_BA_W = np.array([0.0, 0.0, 0.0])
+
+        J_bodyA = self._calc_contact_jacobian_from_point(geom1.bodyid, pos1, input_world=True)
+        J_bodyB = self._calc_contact_jacobian_from_point(geom2.bodyid, pos2, input_world=True)
+
+        # Compute relative Jacobian
+        Jc = J_bodyA - J_bodyB
+
+        return nhat_BA_W @ Jc
+
+    def _compute_self_collision_constraints(self, frame_idx: int):
+        """Compute Jacobians and distances for self-collision body pairs.
+
+        Assumes ``mj_forward`` has already been called with the current q
+        (done by ``_update_jacobians_and_phis_from_q`` which runs first).
+
+        Returns:
+            Js: dict mapping (geom_a, geom_b) -> relative Jacobian (1 x nq)
+            phis: dict mapping (geom_a, geom_b) -> signed distance
+        """
+        if not self._self_collision_enabled:
+            return {}, {}
+
+        # Check frame windows
+        if self._self_collision_windows is not None:
+            if not any(start <= frame_idx <= end for start, end in self._self_collision_windows):
+                return {}, {}
+
+        m, d = self.robot_model, self.robot_data
+        threshold = float(self.collision_detection_threshold)
+
+        Js, phis = {}, {}
+        fromto = np.zeros(6, dtype=float)
+
+        if not hasattr(self, "_geom_names"):
+            raise RuntimeError(
+                "[SelfCollision] _geom_names not initialized. Please run _prefilter_pairs_with_mj_collision first."
+            )
+
+        _first_iter = self._sc_last_vis_frame != frame_idx
+        if _first_iter:
+            self._sc_last_vis_frame = frame_idx
+
+        for geom_a, geom_b in self._self_collision_geom_pairs:
+            fromto[:] = 0.0
+            dist = mujoco.mj_geomDistance(m, d, geom_a, geom_b, threshold, fromto)
+            if dist <= threshold:
+                J_rel = self._compute_jacobian_for_contact_relative(
+                    m.geom(geom_a),
+                    m.geom(geom_b),
+                    self._geom_names[geom_a],
+                    self._geom_names[geom_b],
+                    fromto,
+                    dist,
+                )
+                key = ("self", geom_a, geom_b)
+                Js[key] = J_rel
+                phis[key] = float(dist)
+
+        if _first_iter and self.visualize:
+            self._draw_self_collision_geoms()
+
+        return Js, phis
+
     # ------------------------------------------------------------------
     # Jacobian helpers (kept verbatim from InteractionMeshRetargeter)
     # ------------------------------------------------------------------
@@ -494,10 +604,10 @@ class TestSocpRetargeter:
             frame_targets: {frame: (p_target(3,), R_target(3,3), w_p, w_r)}
                 as returned by build_frame_targets.
             init_t: True on the very first frame (unused in v2, kept for compat).
-            frame_idx: Index of the current frame in the trajectory (threaded
-                through for future constraint use; unused in this task).
-            foot_sticking: Per-foot sticking flags (left, right) for this frame
-                (threaded through for future constraint use; unused in this task).
+            frame_idx: Index of the current frame; used for window filtering by
+                the holosoma-style constraints (self-collision / foot) when enabled.
+            foot_sticking: Per-foot sticking flags (left, right) for this frame;
+                used by the foot-sticking constraint when enabled.
 
         Returns:
             (q_star, cost): updated full config and objective value.
@@ -537,6 +647,16 @@ class TestSocpRetargeter:
                 dqa >= (self.q_a_lb - q_a_n_last),
                 dqa <= (self.q_a_ub - q_a_n_last),
             ]
+
+        # Self-collision constraints (holosoma-style, default off)
+        if self.activate_self_collision and self._self_collision_enabled:
+            Js_sc, phis_sc = self._compute_self_collision_constraints(frame_idx)
+            for key, phi in phis_sc.items():
+                Ja_n_full = Js_sc[key]
+                Ja_n = Ja_n_full[self.q_a_indices]
+                # Enforce: new_distance >= tolerance  =>  phi + J @ dqa >= tol
+                rhs = self._self_collision_tolerance - phi
+                constraints += [Ja_n @ dqa >= rhs]
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         prob.solve(solver=cp.CLARABEL)
