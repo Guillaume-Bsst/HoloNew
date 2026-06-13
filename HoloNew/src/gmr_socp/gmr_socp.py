@@ -80,8 +80,21 @@ class GmrSocpRetargeter:
         self.visualize = False
         self.demo_joints = task_constants.DEMO_JOINTS
 
-        # Load MuJoCo model (robot_only uses the plain .xml, no object)
+        # object_name must be known before the model is loaded so the gated xml
+        # selection below can reference it.
+        self.object_name = getattr(task_constants, "OBJECT_NAME", "ground")
+
+        # Load MuJoCo model.  Default (flag off or ground): plain robot xml.
+        # When activate_obj_non_penetration is on AND the task has a real object,
+        # swap to the object-scene xml so the collision geometry is present.
         robot_xml_path = task_constants.ROBOT_URDF_FILE.replace(".urdf", ".xml")
+        if activate_obj_non_penetration and self.object_name not in (None, "ground"):
+            if self.object_name == "multi_boxes":
+                robot_xml_path = task_constants.SCENE_XML_FILE
+            else:
+                robot_xml_path = task_constants.ROBOT_URDF_FILE.replace(
+                    ".urdf", "_w_" + self.object_name + ".xml"
+                )
         self.robot_model = mujoco.MjModel.from_xml_path(robot_xml_path)
         print(f"[GmrSocp] Loading robot model from: {robot_xml_path}")
         self.robot_data = mujoco.MjData(self.robot_model)
@@ -129,7 +142,7 @@ class GmrSocpRetargeter:
         self.activate_foot_sticking = activate_foot_sticking
         self.penetration_tolerance = penetration_tolerance
         self.foot_sticking_tolerance = foot_sticking_tolerance
-        self.object_name = getattr(task_constants, "OBJECT_NAME", "ground")
+        # self.object_name already set above (before model load)
         self.foot_links = dict(zip(task_constants.FOOT_STICKING_LINKS,
                                    task_constants.FOOT_STICKING_LINKS))
         self.collision_detection_threshold = 0.1
@@ -761,6 +774,11 @@ class GmrSocpRetargeter:
         out = []
 
         for t in tqdm(range(T), desc="GMR-SOCP"):
+            # Drive object free-joint qpos per frame when non-penetration is on
+            # and object poses were loaded.  Guard: has_dynamic_object ensures q
+            # actually has the trailing 7 object DOFs (flag off → False → skipped).
+            if self.has_dynamic_object and getattr(self, "_obj_poses_mj", None) is not None:
+                q[-7:] = self._obj_poses_mj[t]
             # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
@@ -877,5 +895,26 @@ class GmrSocpRetargeter:
         _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
         rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
         rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
+
+        # Load object poses in MuJoCo qpos order for per-frame object qpos drive.
+        # Only when the flag is on and the task has a real object; otherwise leave
+        # None so the retarget loop's object-qpos block is always skipped (parity).
+        rt._obj_poses_mj = None
+        if sc.activate_obj_non_penetration and rt.object_name not in (None, "ground"):
+            from HoloNew.examples.robot_retarget import convert_object_poses_to_mujoco_order
+            from HoloNew.src.utils import load_intermimic_data
+            _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
+            obj_poses = obj_poses[:T]
+            # Convert from [qw,qx,qy,qz,x,y,z] to MuJoCo order [x,y,z,qw,qx,qy,qz]
+            rt._obj_poses_mj = convert_object_poses_to_mujoco_order(obj_poses)
+
+        # Fail loudly on a misconfigured object scene: poses loaded but the model
+        # has no object free joint would silently skip the per-frame object drive.
+        if rt._obj_poses_mj is not None and not rt.has_dynamic_object:
+            raise RuntimeError(
+                f"[{cls.__name__}] Object poses loaded but has_dynamic_object is False: "
+                f"the scene xml for '{rt.object_name}' did not add a free joint. "
+                "Check SCENE_XML_FILE / robot_urdf_file naming."
+            )
 
         return rt

@@ -47,3 +47,36 @@ def test_ground_non_penetration_solves():
     # q_init_full is set by from_config; it is a valid full qpos of length nq.
     Js, phis = rt._update_jacobians_and_phis_from_q(np.copy(rt.q_init_full))
     assert isinstance(phis, dict)  # robot<->ground pairs within threshold, or empty
+
+
+def test_object_name_set_before_model_load_gmr():
+    """Verify object_name is correctly set and has_dynamic_object defaults False
+    for a robot_only (ground) task — the default-off / parity path."""
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
+
+    rt = GmrSocpRetargeter.from_config(RetargetingConfig(
+        task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
+    # Default (flag off, ground): plain xml loaded -> no dynamic object DOFs.
+    assert rt.object_name == "ground"
+    assert rt.has_dynamic_object is False
+    assert rt._obj_poses_mj is None
+    # Jacobians/phis computable on the plain model (ground collision geometry present).
+    import numpy as np
+    Js, phis = rt._update_jacobians_and_phis_from_q(np.copy(rt.q_init_full))
+    assert isinstance(Js, dict) and isinstance(phis, dict)
+
+
+def test_object_name_set_before_model_load_test_socp():
+    """Mirror of the gmr test for the TestSocpRetargeter."""
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+
+    rt = TestSocpRetargeter.from_config(RetargetingConfig(
+        task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
+    assert rt.object_name == "ground"
+    assert rt.has_dynamic_object is False
+    assert rt._obj_poses_mj is None
+    import numpy as np
+    Js, phis = rt._update_jacobians_and_phis_from_q(np.copy(rt.q_init_full))
+    assert isinstance(Js, dict) and isinstance(phis, dict)
