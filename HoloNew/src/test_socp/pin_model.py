@@ -280,6 +280,23 @@ class PinModel:
         """Integrate a tangent step: q_new = q_pin (+) v, keeping quaternions unit."""
         return pin.integrate(self.model, q_pin, v)
 
+    # ------------------------------------------------------------------
+    # Tangent difference and Jacobian
+    # ------------------------------------------------------------------
+
+    def difference_and_jac(self, q0: np.ndarray, q1: np.ndarray):
+        """Tangent velocity v = difference(q0, q1) and its Jacobian wrt q1.
+
+        Returns:
+            v: tangent vector of shape (nv,) such that integrate(q0, v) = q1.
+            J: Jacobian of shape (nv, nv), d v / d(q1 tangent), i.e. the
+               derivative of difference(q0, q1) with respect to a tangent
+               perturbation of q1.
+        """
+        v = np.asarray(pin.difference(self.model, q0, q1))
+        J = np.asarray(pin.dDifference(self.model, q0, q1, pin.ARG1))
+        return v, J
+
     def com_jacobian(self, q_pin: np.ndarray) -> np.ndarray:
         """Jacobian of the whole-body CoM with respect to the pinocchio tangent vector.
 
