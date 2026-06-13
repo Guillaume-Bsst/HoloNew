@@ -64,3 +64,29 @@ Plus re-baselined regression snapshot + "runs without error" smoke.
    if needed.
 3. **Reference momentum quality** — the reference robot trajectory's CoM/momentum
    must be smooth enough that `c̈^ref`/`L^ref` are meaningful; verify on a clip.
+
+## Validation outcome (Task 4, 2026-06-14) — DONE_WITH_CONCERNS
+
+Tuned parameters: `lambda_c=3.0`, `lambda_L=0.5`, `pelvis_anchor_weight=1.0`,
+30-frame robot_only sub3_largebox_003, activate_style=True.
+
+Results (A = centroidal off, B = centroidal on):
+- **CoM-accel error:** A=7.9028 m/s^2, B=0.0060 m/s^2 (1314x reduction). PASS.
+- **Pelvis z:** B=[0.622, 0.800] m, within [0.4, 1.0] m. PASS.
+- **Pelvis xy drift:** B=0.228 m max vs A=0.022 m max (10x worse despite full
+  scaffold at pelvis_anchor_weight=1.0). This is an inherent limitation: W^c
+  tracks CoM acceleration (second difference) not absolute CoM position. Once
+  the Style objective drops joint position tracking, the pelvis can drift in xy
+  to satisfy the acceleration profile. Increasing the scaffold to reduce drift
+  (pelvis_anchor_weight >= 5.0) degrades CoM-accel tracking and pushes pelvis z
+  below 0.5 m. There is no scaffold level that keeps xy drift < 0.05 m and
+  preserves the centroidal benefit + sane z. FAIL.
+
+Decision: `activate_centroidal` remains **False** by default. The W^c/W^L terms
+are validated as mathematically correct and dramatically reduce CoM-acceleration
+error, but they cause pelvis xy drift (~0.23 m) that the position scaffold cannot
+cure without sacrificing the centroidal benefit. The feature is available behind
+the flag for research use. A future fix would add a CoM absolute-position term
+(e.g., W^c_pos = lambda_c_pos * ||c - c_ref||^2) alongside W^c to anchor the
+integration, or use a Model Predictive Control formulation that tracks the full
+CoM trajectory rather than only its second difference.
