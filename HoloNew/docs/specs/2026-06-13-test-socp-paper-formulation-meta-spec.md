@@ -41,11 +41,16 @@ rejected in favour of staged replacement.
    `dqa` with an SOC trust region; past frames are constant. All new costs
    (`D, X, P, W^c, W^L, W^r, W^o`) are causal, hence quadratic in the current
    step's decision variable. No solver-paradigm change.
-3. **Decision variable evolves.** Bricks 1–4 keep `dqa` = robot active DOF only
-   (objects driven per frame, as today). Brick 5 (`W^o`) extends it to
+3. **Decision variable evolves.** After brick 0, `dqa` lives in the **pinocchio
+   tangent space** `[v_base(6); v_joints(29)]`. Bricks 1–4 keep it = robot DOF
+   only (objects driven per frame, as today). Brick 5 (`W^o`) extends it to
    `[dqa ; dξ_objects]`. New costs are written against a **world-position
    Jacobian with respect to the full decision variable**, so extending to
    objects stays localized.
+6. **Single rigid-body backend (pinocchio).** Brick 0 migrates the
+   kinematics/Jacobian/CoM layer to pinocchio; MuJoCo + coal remain only for
+   collision/SDF queries. All later bricks build on this one source of truth,
+   so there is no MuJoCo↔pinocchio convention mismatch downstream.
 4. **Transitional pelvis anchor (scaffold).** The paper never positionally
    targets the pelvis — but that only holds once the centroidal brick is in.
    Between Style (roll/pitch anchor only) and Centroidal, **keep a weak pelvis
@@ -55,7 +60,19 @@ rejected in favour of staged replacement.
    scales live in `TestSocpRetargeterConfig` (or a dedicated nested sub-config).
    Defaults are chosen so each landed brick is active.
 
-## The five bricks (recommended order)
+## The bricks (recommended order)
+
+### Brick 0 — MuJoCo → pinocchio kinematics migration
+Front-loaded foundation: replace TEST-SOCP's rigid-body kinematics/Jacobian/CoM
+layer with pinocchio (free-flyer g1 model, validated `qpos_mj ↔ q_pin` seam);
+MuJoCo + coal stay only for collision/SDF. `dqa` moves to the pinocchio tangent
+space. No new cost terms; the default solve is re-baselined. Done **before**
+everything else so later bricks share one backend and the brick-4 `A_G`/CoM
+alignment is already solved. Decision variable: `dqa` (pinocchio tangent).
+Dependencies: none (foundation). **Acceptance metric:** kinematic parity vs
+MuJoCo (body poses + Jacobians within tight tolerance); re-baselined end-to-end
+snapshot with tracking quality preserved. See
+[brick 0 design](2026-06-13-brick0-mujoco-to-pinocchio-design.md).
 
 ### Brick 1 — Interaction `D / X / P`
 Wire the **already-computed** fields (object+floor SDF via `contact/backends`,
@@ -132,7 +149,8 @@ judgement but is not part of the automated gate.)
   per-frame SQP linearizes them. Inner-iteration count / trust-region size may
   need tuning — decided in each brick's spec, not here.
 - **`A_G` via pinocchio** (brick 4): the pinocchio↔MuJoCo model alignment
-  (joint order, root convention) is the brick-4 spec's first task.
+  (joint order, root convention) is solved once in **brick 0**; brick 4 only adds
+  the centroidal map on top of the already-validated seam.
 - **Snapshot churn.** Incremental replacement means the default output changes
   each brick; the re-baselined snapshot must be updated intentionally and
   reviewed, never silently.
@@ -141,6 +159,7 @@ judgement but is not part of the automated gate.)
 
 ## Process
 
-Each brick is a separate spec → plan → implementation cycle, in the order above.
-After this meta-spec is approved, the next step is to brainstorm **Brick 1
-(Interaction D/X/P)** into its own design.
+Each brick is a separate spec → plan → implementation cycle, in the order above
+(0 → 1 → 2 → 3 → 4 → 5). Brick 0 (pinocchio migration) is implemented first as
+the shared foundation. All brick designs are written up front; implementation
+plans follow.
