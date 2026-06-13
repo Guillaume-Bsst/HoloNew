@@ -717,6 +717,7 @@ class TestSocpRetargeter:
             for key, phi in phis.items():
                 Ja_n_full = Js[key]
                 Ja_n = Ja_n_full[self.q_a_indices]
+                # Enforce: phi + J @ dqa >= -tol  (keep signed distance above -tolerance).
                 rhs = -phi - self.penetration_tolerance
                 constraints += [Ja_n @ dqa >= rhs]
 
@@ -883,6 +884,15 @@ class TestSocpRetargeter:
         kwargs = build_retargeter_kwargs_from_config(
             cfg.retargeter, constants, object_urdf_path=None, task_type=task_type
         )
+        # Holosoma-style constraints are OPT-IN for TEST-SOCP and default OFF
+        # (holosoma's RetargeterConfig defaults them ON). Take the activate_*
+        # flags from a TEST-SOCP-specific config: honor one if the caller passed it,
+        # else force OFF so the default solve is unchanged.
+        from .config import TestSocpRetargeterConfig
+        sc = cfg.retargeter if isinstance(cfg.retargeter, TestSocpRetargeterConfig) else TestSocpRetargeterConfig()
+        kwargs["activate_obj_non_penetration"] = sc.activate_obj_non_penetration
+        kwargs["activate_foot_sticking"] = sc.activate_foot_sticking
+        kwargs["activate_self_collision"] = sc.activate_self_collision
         rt = cls(**kwargs)
 
         # Load raw joint positions and per-joint quaternions from the .pt file

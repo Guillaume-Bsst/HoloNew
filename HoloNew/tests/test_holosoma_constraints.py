@@ -3,6 +3,24 @@
 TDD: these tests are written before the helper methods exist so they
 initially fail, then pass once the helpers are copied into the solvers.
 """
+
+
+def test_gmr_socp_config_defaults_off():
+    from HoloNew.src.gmr_socp.config import GmrSocpRetargeterConfig
+    c = GmrSocpRetargeterConfig()
+    assert c.activate_obj_non_penetration is False
+    assert c.activate_foot_sticking is False
+    assert c.activate_self_collision is False
+
+
+def test_test_socp_config_defaults_off():
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    c = TestSocpRetargeterConfig()
+    assert c.activate_obj_non_penetration is False
+    assert c.activate_foot_sticking is False
+    assert c.activate_self_collision is False
+
+
 def test_self_collision_solves():
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter

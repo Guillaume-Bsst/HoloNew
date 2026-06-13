@@ -6,7 +6,6 @@ is added.
 """
 import numpy as np
 
-from HoloNew.config_types.retargeter import RetargeterConfig as RetargeterCfg
 from HoloNew.examples.robot_retarget import RetargetingConfig
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
@@ -25,16 +24,15 @@ BASELINE = np.array([
 
 
 def test_default_solve_is_stable():
-    # Disable non-penetration so the solve matches the constraint-free baseline.
-    # RetargeterConfig defaults activate_obj_non_penetration=True (the HS
-    # default), so we must override it explicitly here.
-    retargeter_cfg = RetargeterCfg(activate_obj_non_penetration=False)
+    # The default from_config build must produce a constraint-free solve that
+    # matches this frozen baseline. No flag override needed: TestSocpRetargeterConfig
+    # defaults all holosoma-style constraint flags OFF, so the plain default config
+    # is already constraint-free.
     rt = TestSocpRetargeter.from_config(
         RetargetingConfig(
             task_type="robot_only",
             task_name="sub3_largebox_003",
             data_format="smplh",
-            retargeter=retargeter_cfg,
         )
     )
     res = rt.retarget()
