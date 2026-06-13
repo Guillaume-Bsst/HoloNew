@@ -60,6 +60,34 @@ def robot_control_points(rt, q_pin: np.ndarray) -> np.ndarray:
     return out
 
 
+def frame_references(rt, t: int):
+    """Per-control-point source references at frame t, indexed by correspondence.human_idx.
+
+    Calls the source probe at the same arguments retarget() uses so that the returned
+    fields are consistent with the per-frame solve context.
+
+    Args:
+        rt: TestSocpRetargeter instance (must have smplx_ground_probe, human_quat,
+            gmr_grounded, and correspondence set).
+        t: Frame index.
+
+    Returns:
+        Tuple (d_obj_ref, x_obj_ref, d_flr_ref, x_flr_ref) where:
+            d_obj_ref (M,): object signed distance at each human correspondence point
+                (object-local frame), indexed by correspondence.human_idx.
+            x_obj_ref (M, 3): object closest-surface witness at each human correspondence
+                point (object-local frame).
+            d_flr_ref (M,): floor signed distance at each probe world point, indexed by
+                correspondence.human_idx.
+            x_flr_ref (M, 3): floor closest-surface witness at each probe world point.
+    """
+    pf = rt.smplx_ground_probe(t, rt.human_quat[t], rt.gmr_grounded[:, 0][t])
+    hi = rt.correspondence.human_idx
+    fflr = floor_field(pf.points, rt.smplx_ground_probe.margin)
+    return (pf.field.distance[hi], pf.field.witness[hi],
+            fflr.distance[hi], fflr.witness[hi])
+
+
 def query_entities(rt, pts_world: np.ndarray, obj_pose: np.ndarray,
                    margin: float | None = None):
     """Query the object SDF and floor at robot control points.
