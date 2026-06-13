@@ -41,16 +41,22 @@ def test_centroidal_terms_match_numpy():
     q2 = pin.integrate(pm.model, q1, 0.02*rng.standard_normal(pm.model.nv))   # current q_t0
     c_tm1 = pm.com(q1); c_tm2 = pm.com(q0)
     cddot_ref = np.array([0.0, 0.0, -9.81])
+    # c_ref: reference CoM position offset slightly from q2 CoM to test the anchor
+    c0_ref = pm.com(q2)
+    c_ref = c0_ref + np.array([0.05, -0.03, 0.0])
     dqa = cp.Variable(rt.nv_a); val = 0.01*rng.standard_normal(rt.nv_a); dqa.value = val
-    lam_c, lam_L, dt = 3.0, 1.0, 1.0/30.0
-    terms = build_centroidal_terms(rt, q2, q1, c_tm1, c_tm2, cddot_ref, dqa, lam_c, lam_L, dt)
+    lam_c, lam_c_pos, lam_L, dt = 3.0, 2.0, 1.0, 1.0/30.0
+    terms = build_centroidal_terms(rt, q2, q1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
+                                   lam_c, lam_c_pos, lam_L, dt)
     # independent numpy ground truth at val:
     v_full = np.zeros(pm.model.nv); v_full[rt.v_a_indices] = val
     c0 = pm.com(q2); Jc = pm.com_jacobian(q2)[:, rt.v_a_indices]
     cddot = (c0 + Jc@val - 2*c_tm1 + c_tm2)/dt**2
     Ag = pm.centroidal_map(q2); vrel, Jd = pm.difference_and_jac(q1, q2)
     L = (Ag @ (vrel + Jd@v_full))[3:6]
-    gt = lam_c*float(np.sum((cddot - cddot_ref)**2)) + lam_L*float(np.sum(L**2))
+    gt = (lam_c * float(np.sum((cddot - cddot_ref)**2))
+          + lam_c_pos * float(np.sum((c0 + Jc@val - c_ref)**2))
+          + lam_L * float(np.sum(L**2)))
     np.testing.assert_allclose(float(sum(float(t.value) for t in terms)), gt, rtol=1e-6)
 
 
@@ -63,6 +69,7 @@ def test_centroidal_default_off_and_runs_on():
     assert rt.activate_centroidal is False  # default off
     rt.activate_centroidal = True
     rt.lambda_c = 1.0
+    rt.lambda_c_pos = 2.0
     rt.lambda_L = 0.1
     res = rt.retarget(max_frames=8)
     assert np.all(np.isfinite(res.qpos))

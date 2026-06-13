@@ -73,12 +73,17 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_style: bool = True
     pelvis_anchor_weight: float = 1.0
 
-    # Brick 4 — Centroidal W^c (CoM acceleration) + W^L (angular momentum).
-    # Default OFF (activate_centroidal=False, lambda_c/lambda_L=0): solve is
-    # bit-exact with Brick 3 baseline. Enable only if validated stable (Task 4).
-    # When on, two quadratic terms are added per frame (frame_idx >= 2):
-    #   W^c = lambda_c * ||c_ddot - c_ddot_ref||^2  (CoM acceleration tracking)
-    #   W^L = lambda_L * ||L||^2                     (centroidal angular momentum -> 0)
+    # Brick 4 — Centroidal W^c (CoM acceleration) + W^c_pos (CoM position) + W^L.
+    # Default OFF (activate_centroidal=False, lambdas=0): solve is bit-exact with
+    # Brick 3 baseline. Enable only if validated stable (Task 4).
+    # When on, up to three quadratic terms are added per frame (frame_idx >= 2 for
+    # W^c and W^L; W^c_pos fires from frame 0 as it needs no prior CoM history):
+    #   W^c     = lambda_c     * ||c_ddot - c_ddot_ref||^2  (CoM accel tracking)
+    #   W^c_pos = lambda_c_pos * ||c - c_ref||^2             (CoM position anchor)
+    #   W^L     = lambda_L     * ||L||^2                     (angular momentum -> 0)
+    # W^c_pos anchors the absolute CoM to the reference pelvis trajectory, curing
+    # the constant-velocity drift that W^c (second difference only) cannot prevent.
     activate_centroidal: bool = False
     lambda_c: float = 0.0
+    lambda_c_pos: float = 0.0
     lambda_L: float = 0.0

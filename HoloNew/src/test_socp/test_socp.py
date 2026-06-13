@@ -73,6 +73,7 @@ class TestSocpRetargeter:
         pelvis_anchor_weight: float = 1.0,
         activate_centroidal: bool = False,
         lambda_c: float = 0.0,
+        lambda_c_pos: float = 0.0,
         lambda_L: float = 0.0,
         load_object_scene: bool = True,
         **_ignored,
@@ -231,9 +232,10 @@ class TestSocpRetargeter:
         self.activate_style = activate_style
         self.pelvis_anchor_weight = pelvis_anchor_weight
 
-        # Brick 4 — Centroidal W^c / W^L (default off; parity preserved).
+        # Brick 4 — Centroidal W^c / W^c_pos / W^L (default off; parity preserved).
         self.activate_centroidal = activate_centroidal
         self.lambda_c = lambda_c
+        self.lambda_c_pos = lambda_c_pos
         self.lambda_L = lambda_L
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
@@ -687,6 +689,7 @@ class TestSocpRetargeter:
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
         cddot_ref: np.ndarray | None = None,
+        c_ref: np.ndarray | None = None,
     ):
         """One linearised IK step with GMR position + orientation objective.
 
@@ -919,18 +922,38 @@ class TestSocpRetargeter:
                                               self.lambda_r, self.sigma_qddot,
                                               self.sigma_Vdot, self._dt)]
 
-        # Centroidal W^c / W^L terms (Brick 4, default off; requires two prior solved
-        # CoMs and the reference CoM acceleration, available from frame_idx >= 2).
-        if self.activate_centroidal and (self.lambda_c > 0 or self.lambda_L > 0) \
-                and frame_idx >= 2 \
-                and c_tm1 is not None and c_tm2 is not None \
-                and cddot_ref is not None and q_t_last is not None:
-            from HoloNew.src.test_socp.centroidal import build_centroidal_terms
-            q_t0 = self.pin.qpos_mj_to_q_pin(q[:36])
-            q_tm1 = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
-            obj_terms += build_centroidal_terms(self, q_t0, q_tm1, c_tm1, c_tm2,
-                                                cddot_ref, dqa, self.lambda_c, self.lambda_L,
-                                                self._dt)
+        # Centroidal W^c / W^c_pos / W^L terms (Brick 4, default off).
+        # W^c and W^L require two prior solved CoMs (frame_idx >= 2).
+        # W^c_pos only needs c_ref and fires at any frame when active.
+        # Guard: activate_centroidal and at least one lambda > 0.
+        if self.activate_centroidal \
+                and (self.lambda_c > 0 or self.lambda_c_pos > 0 or self.lambda_L > 0) \
+                and c_ref is not None:
+            # W^c / W^L require the two-step CoM history; only activate from frame 2.
+            _lam_c_eff = self.lambda_c if (
+                frame_idx >= 2
+                and c_tm1 is not None and c_tm2 is not None
+                and cddot_ref is not None and q_t_last is not None
+            ) else 0.0
+            _lam_L_eff = self.lambda_L if (
+                frame_idx >= 2
+                and c_tm1 is not None and c_tm2 is not None
+                and q_t_last is not None
+            ) else 0.0
+            if self.lambda_c_pos > 0 or _lam_c_eff > 0 or _lam_L_eff > 0:
+                from HoloNew.src.test_socp.centroidal import build_centroidal_terms
+                q_t0 = self.pin.qpos_mj_to_q_pin(q[:36])
+                q_tm1 = (self.pin.qpos_mj_to_q_pin(q_t_last[:36])
+                         if q_t_last is not None else q_t0)
+                _cddot_ref_eff = cddot_ref if cddot_ref is not None else np.zeros(3)
+                _c_tm1_eff = c_tm1 if c_tm1 is not None else self.pin.com(q_t0)
+                _c_tm2_eff = c_tm2 if c_tm2 is not None else self.pin.com(q_t0)
+                obj_terms += build_centroidal_terms(
+                    self, q_t0, q_tm1, _c_tm1_eff, _c_tm2_eff,
+                    _cddot_ref_eff, c_ref, dqa,
+                    _lam_c_eff, self.lambda_c_pos, _lam_L_eff,
+                    self._dt
+                )
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
@@ -968,6 +991,7 @@ class TestSocpRetargeter:
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
         cddot_ref: np.ndarray | None = None,
+        c_ref: np.ndarray | None = None,
     ):
         """Iterate solve_single_iteration until convergence or n_iter steps."""
         last = np.inf
@@ -978,6 +1002,7 @@ class TestSocpRetargeter:
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
                 obj_pose=obj_pose, q_t_last2=q_t_last2,
                 c_tm1=c_tm1, c_tm2=c_tm2, cddot_ref=cddot_ref,
+                c_ref=c_ref,
             )
             if np.isclose(cost, last):
                 break
@@ -1029,10 +1054,24 @@ class TestSocpRetargeter:
                 _g_pelvis[_t] - 2.0 * _g_pelvis[_t - 1] + _g_pelvis[_t - 2]
             ) / (self._dt ** 2)
 
+        # Precompute reference CoM positions for W^c_pos.
+        # The reference is the pelvis trajectory (CoM proxy), but the robot CoM sits
+        # below and behind the pelvis (a constant structural offset).  To avoid
+        # pulling the robot CoM to the pelvis position (which would push the pelvis
+        # upward by ~7 cm), we compute the offset at init and apply it to all frames:
+        #   c_ref[t] = g_pelvis[t] + (c_init - pelvis_init)
+        # This anchors the CoM to its reference trajectory *in the robot's own frame
+        # relative to the pelvis*, so W^c_pos corrects drift without biasing height.
+        _q_init_pin = self.pin.qpos_mj_to_q_pin(self.q_init_full[:36])
+        _com_init = self.pin.com(_q_init_pin)
+        _pelvis_init = self.pin.body_position(_q_init_pin, "pelvis")
+        _com_pelvis_offset = _com_init - _pelvis_init  # (3,) structural offset
+        _c_ref_all = _g_pelvis + _com_pelvis_offset     # (T, 3) reference CoM positions
+
         # Previous two solved CoMs for W^c finite-difference stencil.
         # Initialised to the init-config CoM so the warm-up frames are stable.
         if self.activate_centroidal:
-            _c0_init = self.pin.com(self.pin.qpos_mj_to_q_pin(self.q_init_full[:36]))
+            _c0_init = _com_init.copy()
             _c_prev = _c0_init.copy()   # CoM at frame t-1
             _c_prev2 = _c0_init.copy()  # CoM at frame t-2
         else:
@@ -1099,14 +1138,19 @@ class TestSocpRetargeter:
             _obj_pose = (self._obj_poses_raw[t]
                          if getattr(self, "_obj_poses_raw", None) is not None else None)
             _cddot_ref_t = _cddot_ref_all[t]
+            # c_ref: reference CoM = reference pelvis + structural com-pelvis offset.
+            # Keeps the W^c_pos anchor on the correct trajectory without height bias.
+            _c_ref_t = _c_ref_all[t]
             q, _ = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 q_t_last2=q_prev2,
-                                c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t)
+                                c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
+                                c_ref=_c_ref_t)
             q, _ = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 q_t_last2=q_prev2,
-                                c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t)
+                                c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
+                                c_ref=_c_ref_t)
             # Shift two-frame history: q_prev2 <- q_prev (frame t-2 slot) BEFORE
             # q_prev <- q (frame t-1 slot). Order matters: reverse shift would lose q_prev.
             q_prev2 = np.copy(q_prev)
@@ -1230,6 +1274,7 @@ class TestSocpRetargeter:
         kwargs["pelvis_anchor_weight"] = sc.pelvis_anchor_weight
         kwargs["activate_centroidal"] = sc.activate_centroidal
         kwargs["lambda_c"] = sc.lambda_c
+        kwargs["lambda_c_pos"] = sc.lambda_c_pos
         kwargs["lambda_L"] = sc.lambda_L
         # The interaction costs require the non-penetration constraint to stay
         # stable (the paper's optimization has both: the costs + d_ij >= 0).
