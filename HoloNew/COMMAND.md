@@ -98,6 +98,7 @@ Constraint applicability:
 | `activate_obj_non_penetration` | `robot_only` (ground) and object tasks | Ground non-pen uses the `ground` geom in the g1 xml; object non-pen requires an object task + scene xml |
 | `activate_foot_sticking` | `robot_only` and any task with g1 | Uses g1 `FOOT_STICKING_LINKS` (left/right ankle links) |
 | `activate_self_collision` | Any task | Requires `self_collision=SelfCollisionConfig(enable=True, pairs=[...])` to take effect |
+| `foot_lock=FootLockConfig(enable=True, ...)` | `robot_only` and any task with g1 | Independent toggle (gated only by `foot_lock.enable`); pins the foot Z to the floor over the configured frame windows |
 
 ---
 
