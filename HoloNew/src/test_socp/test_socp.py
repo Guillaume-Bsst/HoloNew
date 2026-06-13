@@ -113,7 +113,20 @@ class TestSocpRetargeter:
         self.q_a_indices = np.arange(7 + q_a_init_idx, 7 + task_constants.ROBOT_DOF)
         self.nq_a = len(self.q_a_indices)
 
-        # Joint limits
+        # --- pinocchio backend ---
+        from HoloNew.src.test_socp.pin_model import PinModel
+        self.pin = PinModel(task_constants.ROBOT_URDF_FILE)
+        self.pin.bind_mujoco_order(self.robot_model)
+        if self.q_a_init_idx == -7:
+            # Full floating-base + joint tangent: base 6 DOF + 29 joint DOFs = 35.
+            self.v_a_indices = np.arange(0, 6 + task_constants.ROBOT_DOF)
+        else:
+            # Joints-from-index: base excluded; qpos joint j -> tangent j-1.
+            self.v_a_indices = np.arange(6 + self.q_a_init_idx, 6 + task_constants.ROBOT_DOF)
+        self.nv_a = len(self.v_a_indices)
+
+        # Joint limits — kept in MuJoCo qpos space for joint-range extraction;
+        # also build tangent-space bounds for the pinocchio joint limit constraint.
         n_floating_base = 7
         joint_names = [self.robot_model.joint(i).name for i in range(self.robot_model.njnt)]
         actuated_joints = [(i, name) for i, name in enumerate(joint_names) if name]
@@ -137,6 +150,34 @@ class TestSocpRetargeter:
             self.q_a_ub[np.array(list(task_constants.MANUAL_UB.keys()), dtype=int)] = list(
                 task_constants.MANUAL_UB.values()
             )
+
+        # Tangent-space joint bounds (nv_a,): used by the pinocchio joint limit constraint.
+        # Base tangent DOFs (indices 0:6) are effectively unconstrained (trust region limits step).
+        # Joints (qpos index k >= 7) map to tangent index k-1 for hinge/slide joints.
+        # MANUAL overrides for quaternion components (qpos 3-6) are dropped here because
+        # quaternion components have no direct tangent-space equivalent.
+        _nv = self.pin.model.nv  # 35
+        _jnt_lb_v = np.full(_nv, -large_number)  # base: free
+        _jnt_ub_v = np.full(_nv, large_number)
+        # Joint DOFs: qpos index k (k in 7..35) -> tangent index k-1 (6..34)
+        for qpos_k in range(7, 7 + task_constants.ROBOT_DOF):
+            v_k = qpos_k - 1
+            _jnt_lb_v[v_k] = complete_lower[qpos_k]
+            _jnt_ub_v[v_k] = complete_upper[qpos_k]
+        # Apply MANUAL overrides for joints only (skip qpos 3-6 quaternion overrides).
+        if task_constants.MANUAL_LB:
+            for k_str, val in task_constants.MANUAL_LB.items():
+                k = int(k_str)
+                if k >= 7:
+                    _jnt_lb_v[k - 1] = val
+        if task_constants.MANUAL_UB:
+            for k_str, val in task_constants.MANUAL_UB.items():
+                k = int(k_str)
+                if k >= 7:
+                    _jnt_ub_v[k - 1] = val
+        # Slice to the active tangent indices.
+        self._v_a_lb = _jnt_lb_v[self.v_a_indices]
+        self._v_a_ub = _jnt_ub_v[self.v_a_indices]
 
         # Correspondence table (loaded by from_config from the bundled artifact).
         # None until from_config populates it; not used in the solve yet.
@@ -578,76 +619,63 @@ class TestSocpRetargeter:
         return J_XC_dict, p_XC_dict, P_WO
 
     def _get_robot_link_positions(self, q: np.ndarray, link_names) -> np.ndarray:
-        """Get world positions for each link name given configuration q."""
-        self.robot_data.qpos[:] = q.copy()
-        mujoco.mj_forward(self.robot_model, self.robot_data)
-        positions = []
-        for link_name in link_names:
-            body_id = mujoco.mj_name2id(
-                self.robot_model, mujoco.mjtObj.mjOBJ_BODY, link_name
-            )
-            if body_id == -1:
-                raise ValueError(f"Body '{link_name}' not found in MuJoCo model")
-            positions.append(self.robot_data.xpos[body_id].copy())
-        return np.array(positions)
-
-    def _body_jac(self, q: np.ndarray, body_name: str):
-        """World-frame (Jp, Jr) for a body, reduced to actuated columns.
-
-        Both Jacobians map actuated-DoF increments (dqa, shape nq_a) to
-        world-frame body velocity / angular velocity.
+        """World positions for each link name, computed via pinocchio FK.
 
         Args:
-            q: Full configuration vector (length nq).
-            body_name: MuJoCo body name.
+            q: Full configuration vector (length nq; robot part is q[:36]).
+            link_names: Iterable of link (body) names.
 
         Returns:
-            Tuple (Jp, Jr) each of shape (3, nq_a).
+            Array of shape (N, 3) with world positions.
         """
-        self.robot_data.qpos[:] = q
-        mujoco.mj_forward(self.robot_model, self.robot_data)
+        q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+        return np.array([self.pin.body_position(q_pin, n) for n in link_names])
 
-        bid = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
-        jacp = np.zeros((3, self.robot_model.nv), dtype=np.float64)
-        jacr = np.zeros((3, self.robot_model.nv), dtype=np.float64)
-        mujoco.mj_jacBody(self.robot_model, self.robot_data, jacp, jacr, bid)
+    def _body_jac(self, q: np.ndarray, body_name: str):
+        """World-frame (Jp, Jr) for a body, reduced to active tangent columns.
 
-        # T shape: (nv, nq) — maps qdot -> qvel (same convention used in
-        # _calc_contact_jacobian_from_point for the position Jacobian).
-        T = self._build_transform_qdot_to_qvel_fast()
-        Jp_qa = (jacp @ T)[:, self.q_a_indices]  # (3, nq_a)
-        Jr_qa = (jacr @ T)[:, self.q_a_indices]  # (3, nq_a)
-        return Jp_qa, Jr_qa
+        Uses pinocchio LOCAL_WORLD_ALIGNED Jacobians (translational rows 0:3,
+        angular rows 3:6) sliced to v_a_indices.
+
+        Args:
+            q: Full configuration vector (length nq; robot part is q[:36]).
+            body_name: Link name (pinocchio frame name = MuJoCo body name).
+
+        Returns:
+            Tuple (Jp, Jr) each of shape (3, nv_a).
+        """
+        q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+        Jp = self.pin.frame_translational_jacobian(q_pin, body_name)  # (3, nv)
+        Jr = self.pin.frame_angular_jacobian(q_pin, body_name)        # (3, nv)
+        return Jp[:, self.v_a_indices], Jr[:, self.v_a_indices]
 
     def body_position(self, q: np.ndarray, body_name: str) -> np.ndarray:
         """World position of ``body_name`` at configuration ``q``.
 
+        Delegates to pinocchio FK on the robot qpos slice q[:36].
+
         Args:
             q: Full configuration vector (length nq).
-            body_name: MuJoCo body name.
+            body_name: Link name (pinocchio frame name).
 
         Returns:
             Position array of shape (3,).
         """
-        self.robot_data.qpos[:] = q
-        mujoco.mj_forward(self.robot_model, self.robot_data)
-        bid = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
-        return self.robot_data.xpos[bid].copy()
+        return self.pin.body_position(self.pin.qpos_mj_to_q_pin(q[:36]), body_name)
 
     def body_rotation(self, q: np.ndarray, body_name: str) -> np.ndarray:
         """World rotation matrix of ``body_name`` at configuration ``q``.
 
+        Delegates to pinocchio FK on the robot qpos slice q[:36].
+
         Args:
             q: Full configuration vector (length nq).
-            body_name: MuJoCo body name.
+            body_name: Link name (pinocchio frame name).
 
         Returns:
             Rotation matrix of shape (3, 3).
         """
-        self.robot_data.qpos[:] = q
-        mujoco.mj_forward(self.robot_model, self.robot_data)
-        bid = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
-        return self.robot_data.xmat[bid].reshape(3, 3).copy()
+        return self.pin.body_rotation(self.pin.qpos_mj_to_q_pin(q[:36]), body_name)
 
     # ------------------------------------------------------------------
     # Core solve
@@ -694,7 +722,7 @@ class TestSocpRetargeter:
         q = np.copy(q_locked)
         q[self.q_a_indices] = q_a_n_last
 
-        dqa = cp.Variable(self.nq_a, name="dqa")
+        dqa = cp.Variable(self.nv_a, name="dqa")
 
         obj_terms = []
         for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
@@ -722,10 +750,21 @@ class TestSocpRetargeter:
 
         constraints = [cp.SOC(self.step_size, dqa)]
         if self.activate_joint_limits:
-            constraints += [
-                dqa >= (self.q_a_lb - q_a_n_last),
-                dqa <= (self.q_a_ub - q_a_n_last),
-            ]
+            # Tangent-space joint limit box: precomputed absolute bounds minus
+            # current joint values.  For hinge/slide joints, the pinocchio tangent
+            # increment equals (target - current) directly (same as subtraction).
+            # Base DOFs (tangent 0:6) use large bounds and are effectively unconstrained.
+            # Tangent index vi >= 6 maps to pinocchio q index vi + 1 (offset by 1
+            # because the root FREE joint occupies 7 qpos DOFs but only 6 velocity DOFs).
+            q_pin_cur = self.pin.qpos_mj_to_q_pin(q[:36])
+            lo = np.copy(self._v_a_lb)
+            hi = np.copy(self._v_a_ub)
+            joint_mask = self.v_a_indices >= 6
+            vi_joints = self.v_a_indices[joint_mask]       # tangent indices for joints
+            q_pin_vals = q_pin_cur[vi_joints + 1]          # q_pin at corresponding qpos idx
+            lo[joint_mask] -= q_pin_vals
+            hi[joint_mask] -= q_pin_vals
+            constraints += [dqa >= lo, dqa <= hi]
 
         # Foot constraints (sticking + foot lock window Z pinning) — holosoma-style, default off
         apply_foot_sticking = (self.q_a_init_idx < 12) and self.activate_foot_sticking and foot_sticking is not None
@@ -800,10 +839,17 @@ class TestSocpRetargeter:
         if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
             raise RuntimeError(f"GMR-SOCP solve failed: {prob.status}")
 
+        import pinocchio as pin
+        v_full = np.zeros(self.pin.model.nv)
+        v_full[self.v_a_indices] = dqa.value
+        q_pin_new = pin.integrate(
+            self.pin.model,
+            self.pin.qpos_mj_to_q_pin(q[:36]),
+            v_full,
+        )
         q_star = np.copy(q)
-        q_star[self.q_a_indices] = dqa.value + q_a_n_last
-        # Renormalise quaternion
-        q_star[3:7] /= np.linalg.norm(q_star[3:7]) + 1e-12
+        q_star[:36] = self.pin.q_pin_to_qpos_mj(q_pin_new)
+        # pin.integrate keeps the quaternion unit; no manual renormalisation needed.
         return q_star, float(prob.value)
 
     def iterate(

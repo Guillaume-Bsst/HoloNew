@@ -131,6 +131,27 @@ class PinModel:
         J6 = pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED)
         return np.asarray(J6[0:3, :])
 
+    def frame_angular_jacobian(self, q_pin: np.ndarray, body_name: str) -> np.ndarray:
+        """World-aligned angular Jacobian of a frame, in pinocchio tangent space.
+
+        Computes J such that omega_world = J @ v, where v is the pinocchio tangent
+        vector (nv-dimensional) and omega_world is the world-frame angular velocity
+        of body_name.  Uses LOCAL_WORLD_ALIGNED rows 3:6.
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+            body_name: Link name matching a URDF link / pinocchio frame.
+
+        Returns:
+            Angular Jacobian of shape (3, nv) in pinocchio v order.
+        """
+        q = pin.normalize(self.model, q_pin)
+        pin.computeJointJacobians(self.model, self.data, q)
+        pin.updateFramePlacements(self.model, self.data)
+        fid = self._frame_id(body_name)
+        J6 = pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED)
+        return np.asarray(J6[3:6, :])
+
     def point_translational_jacobian(
         self,
         q_pin: np.ndarray,
