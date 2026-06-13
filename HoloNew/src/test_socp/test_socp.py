@@ -475,93 +475,51 @@ class TestSocpRetargeter:
         return Js, phis
 
     # ------------------------------------------------------------------
-    # Jacobian helpers (kept verbatim from InteractionMeshRetargeter)
+    # Jacobian helpers
     # ------------------------------------------------------------------
-
-    def _build_transform_qdot_to_qvel_fast(self, use_world_omega: bool = True) -> np.ndarray:
-        """Return T(q) (nv x nq) such that v = T(q) @ qdot."""
-        nq, nv = self.robot_model.nq, self.robot_model.nv
-        T = np.zeros((nv, nq), dtype=float)
-
-        j0 = 0
-        assert self.robot_model.jnt_type[j0] == mujoco.mjtJoint.mjJNT_FREE
-
-        def get_e_world(qw, qx, qy, qz):
-            return np.array(
-                [
-                    [-qx, qw, qz, -qy],
-                    [-qy, -qz, qw, qx],
-                    [-qz, qy, -qx, qw],
-                ]
-            )
-
-        def get_e_body(qw, qx, qy, qz):
-            return np.array(
-                [
-                    [-qx, qw, -qz, qy],
-                    [-qy, qz, qw, -qx],
-                    [-qz, -qy, qx, qw],
-                ]
-            )
-
-        E_fn = get_e_world if use_world_omega else get_e_body
-
-        j_free1 = 0
-        assert self.robot_model.jnt_type[j_free1] == mujoco.mjtJoint.mjJNT_FREE
-        qadr1 = int(self.robot_model.jnt_qposadr[j_free1])
-        dadr1 = int(self.robot_model.jnt_dofadr[j_free1])
-
-        qw, qx, qy, qz = self.robot_data.qpos[qadr1 + 3: qadr1 + 7]
-        E1 = 2.0 * E_fn(qw, qx, qy, qz)
-        T[dadr1 + 0: dadr1 + 3, qadr1 + 0: qadr1 + 3] = np.eye(3)
-        T[dadr1 + 3: dadr1 + 6, qadr1 + 3: qadr1 + 7] = E1
-
-        if self.has_dynamic_object:
-            free_joints = [
-                j for j in range(self.robot_model.njnt)
-                if self.robot_model.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE
-            ]
-            assert len(free_joints) >= 2, "Expected two FREE joints (robot + object)."
-            j_free2 = free_joints[1]
-            qadr2 = int(self.robot_model.jnt_qposadr[j_free2])
-            dadr2 = int(self.robot_model.jnt_dofadr[j_free2])
-            qw, qx, qy, qz = self.robot_data.qpos[qadr2 + 3: qadr2 + 7]
-            E2 = 2.0 * E_fn(qw, qx, qy, qz)
-            T[dadr2 + 0: dadr2 + 3, qadr2 + 0: qadr2 + 3] = np.eye(3)
-            T[dadr2 + 3: dadr2 + 6, qadr2 + 3: qadr2 + 7] = E2
-
-        for j in range(1, self.robot_model.njnt):
-            jt = self.robot_model.jnt_type[j]
-            if jt in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
-                qa = self.robot_model.jnt_qposadr[j]
-                da = self.robot_model.jnt_dofadr[j]
-                T[da, qa] = 1.0
-            elif jt == mujoco.mjtJoint.mjJNT_BALL:
-                raise NotImplementedError("BALL joint block not implemented.")
-
-        return T
 
     def _calc_contact_jacobian_from_point(
         self, body_idx: int, p_body: np.ndarray, input_world: bool = False
     ) -> np.ndarray:
-        """Translational Jacobian J(q) (3 x nq) s.t. v_point_world = J @ qdot."""
+        """Translational Jacobian J(q) (3 x nv) in pinocchio tangent space.
+
+        Computes the Jacobian of a fixed point on a body using pinocchio's
+        point_translational_jacobian.  MuJoCo body_idx is converted to a body
+        name; the contact point is expressed in the body's local frame.
+
+        Static bodies (i.e. 'world' / ground, not present in the URDF-derived
+        pinocchio model) have a zero Jacobian because they cannot move.
+
+        Args:
+            body_idx: MuJoCo body index (integer).
+            p_body: Contact point.  If input_world is False (default), the
+                point is in the body-local frame.  If input_world is True, the
+                point is in the world frame and is first projected into the
+                body-local frame via the current pinocchio FK pose.
+            input_world: Whether p_body is given in world coordinates.
+
+        Returns:
+            Translational Jacobian of shape (3, nv) in pinocchio tangent order.
+        """
         p_body = np.asarray(p_body, dtype=float).reshape(3)
-        mujoco.mj_forward(self.robot_model, self.robot_data)
-
-        R_WB = self.robot_data.xmat[body_idx].reshape(3, 3)
-        p_WB = self.robot_data.xpos[body_idx]
-
+        body_idx_int = int(np.asarray(body_idx).flat[0])
+        body_name = mujoco.mj_id2name(
+            self.robot_model, mujoco.mjtObj.mjOBJ_BODY, body_idx_int
+        ) or ""
+        # Static bodies (e.g. world/ground) are not in the URDF pinocchio model;
+        # their velocity Jacobian is identically zero.
+        fid = self.pin.model.getFrameId(body_name)
+        if fid >= self.pin.model.nframes:
+            return np.zeros((3, self.pin.model.nv))
+        q_pin = self.pin.qpos_mj_to_q_pin(self.robot_data.qpos[:36])
         if input_world:
-            p_W = p_body.astype(np.float64).reshape(3, 1)
+            # Convert world-frame point to body-local frame using pinocchio FK pose.
+            R_WB = self.pin.body_rotation(q_pin, body_name)
+            p_WB = self.pin.body_position(q_pin, body_name)
+            offset_local = R_WB.T @ (p_body - p_WB)
         else:
-            p_W = (p_WB + R_WB @ p_body).astype(np.float64).reshape(3, 1)
-
-        Jp = np.zeros((3, self.robot_model.nv), dtype=np.float64, order="C")
-        Jr = np.zeros((3, self.robot_model.nv), dtype=np.float64, order="C")
-        mujoco.mj_jac(self.robot_model, self.robot_data, Jp, Jr, p_W, int(body_idx))
-
-        T_mat = self._build_transform_qdot_to_qvel_fast()
-        return Jp @ T_mat
+            offset_local = p_body
+        return self.pin.point_translational_jacobian(q_pin, body_name, offset_local)
 
     def _calc_manipulator_jacobians(
         self,
@@ -570,7 +528,10 @@ class TestSocpRetargeter:
         obj_frame: bool = False,
         point_offsets: np.ndarray | None = None,
     ):
-        """Compute position Jacobians (3 x nq_a) and world positions per frame.
+        """Compute position Jacobians (3 x nv_a) and world positions per frame.
+
+        Uses pinocchio point_translational_jacobian internally; Jacobians are
+        sliced to v_a_indices and expressed in pinocchio tangent order.
 
         Returns (J_dict, p_dict, P_WO) matching the native retargeter's API.
         """
@@ -594,24 +555,29 @@ class TestSocpRetargeter:
             obj_rot = None
             obj_rot_inv = None
 
+        # Sync MuJoCo data for world positions (collision/SDF still uses MuJoCo).
         self.robot_data.qpos[:] = q.copy()
         mujoco.mj_forward(self.robot_model, self.robot_data)
+
+        q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
 
         for name, link_name in links.items():
             body_id = mujoco.mj_name2id(self.robot_model, mujoco.mjtObj.mjOBJ_BODY, link_name)
             pC_B = point_offsets if point_offsets is not None else np.zeros(3)
 
-            J = self._calc_contact_jacobian_from_point(body_id, pC_B)
+            # Jacobian (3, nv) in pinocchio tangent order.
+            J_nv = self.pin.point_translational_jacobian(q_pin, link_name, pC_B)
             pos_world = self.robot_data.xpos[body_id]
 
             if obj_frame and obj_rot_inv is not None:
                 p_XC = obj_rot_inv @ (pos_world - obj_pos)
-                J_XC = obj_rot_inv @ J
+                J_XC = obj_rot_inv @ J_nv
             else:
                 p_XC = pos_world
-                J_XC = J
+                J_XC = J_nv
 
-            J_XC_dict[name] = np.array(J_XC[:, self.q_a_indices], dtype=float, copy=True)
+            # Slice to active tangent indices (nv_a columns).
+            J_XC_dict[name] = np.array(J_XC[:, self.v_a_indices], dtype=float, copy=True)
             p_XC_dict[name] = np.array(p_XC, dtype=float, copy=True)
 
         P_WO = ({"position": obj_pos, "rotation": obj_rot}
@@ -793,7 +759,8 @@ class TestSocpRetargeter:
                         p_lb = p_WF_t_last_dict[key] - p_WF_dict[key] - self.foot_sticking_tolerance
                         p_ub = p_lb + 2 * self.foot_sticking_tolerance  # symmetric window
 
-                        Jxy = J_WF[:2, self.q_a_indices]  # (2 x nq_act)
+                        # J_WF is already (3, nv_a) from _calc_manipulator_jacobians.
+                        Jxy = J_WF[:2, :]  # (2, nv_a)
                         constraints += [
                             Jxy @ dqa >= p_lb[:2],
                             Jxy @ dqa <= p_ub[:2],
@@ -807,7 +774,8 @@ class TestSocpRetargeter:
 
                     z_anchor = self.foot_lock.z_floor
                     z_delta = z_anchor - p_WF_dict[key][2]
-                    Jz = J_WF[2, self.q_a_indices]
+                    # J_WF is already (3, nv_a) from _calc_manipulator_jacobians.
+                    Jz = J_WF[2, :]  # (nv_a,)
                     constraints += [
                         Jz @ dqa >= z_delta - self.foot_lock.tolerance,
                         Jz @ dqa <= z_delta + self.foot_lock.tolerance,
@@ -817,8 +785,8 @@ class TestSocpRetargeter:
         if self.activate_self_collision and self._self_collision_enabled:
             Js_sc, phis_sc = self._compute_self_collision_constraints(frame_idx)
             for key, phi in phis_sc.items():
-                Ja_n_full = Js_sc[key]
-                Ja_n = Ja_n_full[self.q_a_indices]
+                Ja_n_full = Js_sc[key]  # (nv,) relative Jacobian
+                Ja_n = Ja_n_full[self.v_a_indices]  # (nv_a,)
                 # Enforce: new_distance >= tolerance  =>  phi + J @ dqa >= tol
                 rhs = self._self_collision_tolerance - phi
                 constraints += [Ja_n @ dqa >= rhs]
@@ -827,8 +795,8 @@ class TestSocpRetargeter:
         if self.activate_obj_non_penetration:
             Js, phis = self._update_jacobians_and_phis_from_q(q)
             for key, phi in phis.items():
-                Ja_n_full = Js[key]
-                Ja_n = Ja_n_full[self.q_a_indices]
+                Ja_n_full = Js[key]  # (nv,) relative Jacobian
+                Ja_n = Ja_n_full[self.v_a_indices]  # (nv_a,)
                 # Enforce: phi + J @ dqa >= -tol  (keep signed distance above -tolerance).
                 rhs = -phi - self.penetration_tolerance
                 constraints += [Ja_n @ dqa >= rhs]
