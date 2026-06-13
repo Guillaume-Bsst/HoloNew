@@ -72,3 +72,13 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # pelvis_anchor_weight scales the scaffold (1.0 = unchanged relative to w_p).
     activate_style: bool = True
     pelvis_anchor_weight: float = 1.0
+
+    # Brick 4 — Centroidal W^c (CoM acceleration) + W^L (angular momentum).
+    # Default OFF (activate_centroidal=False, lambda_c/lambda_L=0): solve is
+    # bit-exact with Brick 3 baseline. Enable only if validated stable (Task 4).
+    # When on, two quadratic terms are added per frame (frame_idx >= 2):
+    #   W^c = lambda_c * ||c_ddot - c_ddot_ref||^2  (CoM acceleration tracking)
+    #   W^L = lambda_L * ||L||^2                     (centroidal angular momentum -> 0)
+    activate_centroidal: bool = False
+    lambda_c: float = 0.0
+    lambda_L: float = 0.0

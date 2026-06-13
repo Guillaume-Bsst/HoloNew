@@ -71,6 +71,9 @@ class TestSocpRetargeter:
         sigma_Vdot: float = 1.0,
         activate_style: bool = False,
         pelvis_anchor_weight: float = 1.0,
+        activate_centroidal: bool = False,
+        lambda_c: float = 0.0,
+        lambda_L: float = 0.0,
         load_object_scene: bool = True,
         **_ignored,
     ):
@@ -227,6 +230,11 @@ class TestSocpRetargeter:
         # Brick 3 — Pelvis-relative Style objective (default off; parity preserved).
         self.activate_style = activate_style
         self.pelvis_anchor_weight = pelvis_anchor_weight
+
+        # Brick 4 — Centroidal W^c / W^L (default off; parity preserved).
+        self.activate_centroidal = activate_centroidal
+        self.lambda_c = lambda_c
+        self.lambda_L = lambda_L
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -676,6 +684,9 @@ class TestSocpRetargeter:
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
         q_t_last2: np.ndarray | None = None,
+        c_tm1: np.ndarray | None = None,
+        c_tm2: np.ndarray | None = None,
+        cddot_ref: np.ndarray | None = None,
     ):
         """One linearised IK step with GMR position + orientation objective.
 
@@ -908,6 +919,19 @@ class TestSocpRetargeter:
                                               self.lambda_r, self.sigma_qddot,
                                               self.sigma_Vdot, self._dt)]
 
+        # Centroidal W^c / W^L terms (Brick 4, default off; requires two prior solved
+        # CoMs and the reference CoM acceleration, available from frame_idx >= 2).
+        if self.activate_centroidal and (self.lambda_c > 0 or self.lambda_L > 0) \
+                and frame_idx >= 2 \
+                and c_tm1 is not None and c_tm2 is not None \
+                and cddot_ref is not None and q_t_last is not None:
+            from HoloNew.src.test_socp.centroidal import build_centroidal_terms
+            q_t0 = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_tm1 = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
+            obj_terms += build_centroidal_terms(self, q_t0, q_tm1, c_tm1, c_tm2,
+                                                cddot_ref, dqa, self.lambda_c, self.lambda_L,
+                                                self._dt)
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
             prob.solve(solver=cp.CLARABEL)
@@ -941,6 +965,9 @@ class TestSocpRetargeter:
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
         q_t_last2: np.ndarray | None = None,
+        c_tm1: np.ndarray | None = None,
+        c_tm2: np.ndarray | None = None,
+        cddot_ref: np.ndarray | None = None,
     ):
         """Iterate solve_single_iteration until convergence or n_iter steps."""
         last = np.inf
@@ -950,6 +977,7 @@ class TestSocpRetargeter:
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
                 obj_pose=obj_pose, q_t_last2=q_t_last2,
+                c_tm1=c_tm1, c_tm2=c_tm2, cddot_ref=cddot_ref,
             )
             if np.isclose(cost, last):
                 break
@@ -988,6 +1016,28 @@ class TestSocpRetargeter:
         # q_prev2: frame-before-previous config for temporal W^r acceleration penalty.
         # Initialized to init config so the first two frames produce ~zero acceleration.
         q_prev2 = np.copy(self.q_init_full)
+
+        # Brick 4 — Centroidal: precompute reference CoM acceleration from the
+        # reference pelvis trajectory (a dominant-mass CoM proxy).  Uses central
+        # finite differences; frames 0-1 are set to zero (warm-up, guard inactive).
+        # The reference pelvis positions live in gpos[:, pelvis_body_idx, :].
+        # Ground targets index: 'pos' is (T, N_bodies, 3); index 0 is the pelvis.
+        _g_pelvis = gpos[:, 0, :]  # (T, 3) reference pelvis positions
+        _cddot_ref_all = np.zeros((T, 3), dtype=np.float64)
+        for _t in range(2, T):
+            _cddot_ref_all[_t] = (
+                _g_pelvis[_t] - 2.0 * _g_pelvis[_t - 1] + _g_pelvis[_t - 2]
+            ) / (self._dt ** 2)
+
+        # Previous two solved CoMs for W^c finite-difference stencil.
+        # Initialised to the init-config CoM so the warm-up frames are stable.
+        if self.activate_centroidal:
+            _c0_init = self.pin.com(self.pin.qpos_mj_to_q_pin(self.q_init_full[:36]))
+            _c_prev = _c0_init.copy()   # CoM at frame t-1
+            _c_prev2 = _c0_init.copy()  # CoM at frame t-2
+        else:
+            _c_prev = None
+            _c_prev2 = None
         pelvis_grounded = self.gmr_grounded[:, 0]   # (T, 3) grounded SMPL-X pelvis per frame
 
         probe_pts, probe_obj, probe_flr, probe_wit, g1_pts = [], [], [], [], []
@@ -1048,16 +1098,26 @@ class TestSocpRetargeter:
             _fs = self.foot_sticking_sequences[t] if self.foot_sticking_sequences else None
             _obj_pose = (self._obj_poses_raw[t]
                          if getattr(self, "_obj_poses_raw", None) is not None else None)
+            _cddot_ref_t = _cddot_ref_all[t]
             q, _ = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
-                                q_t_last2=q_prev2)
+                                q_t_last2=q_prev2,
+                                c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t)
             q, _ = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
-                                q_t_last2=q_prev2)
+                                q_t_last2=q_prev2,
+                                c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t)
             # Shift two-frame history: q_prev2 <- q_prev (frame t-2 slot) BEFORE
             # q_prev <- q (frame t-1 slot). Order matters: reverse shift would lose q_prev.
             q_prev2 = np.copy(q_prev)
             q_prev = np.copy(q)
+
+            # Update CoM history for W^c (only when centroidal is active to avoid
+            # the pinocchio FK cost when the feature is unused).
+            if self.activate_centroidal:
+                _c_new = self.pin.com(self.pin.qpos_mj_to_q_pin(q[:36]))
+                _c_prev2 = _c_prev   # shift: t-2 slot <- t-1
+                _c_prev = _c_new     # t-1 slot <- newly solved t
 
             # Update cross-frame persistence state after the solved frame.
             if self._p_state is not None and _obj_pose is not None:
@@ -1168,6 +1228,9 @@ class TestSocpRetargeter:
         kwargs["sigma_Vdot"] = sc.sigma_Vdot
         kwargs["activate_style"] = sc.activate_style
         kwargs["pelvis_anchor_weight"] = sc.pelvis_anchor_weight
+        kwargs["activate_centroidal"] = sc.activate_centroidal
+        kwargs["lambda_c"] = sc.lambda_c
+        kwargs["lambda_L"] = sc.lambda_L
         # The interaction costs require the non-penetration constraint to stay
         # stable (the paper's optimization has both: the costs + d_ij >= 0).
         # Without it the D term marches the floating base through the floor.

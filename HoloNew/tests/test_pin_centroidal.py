@@ -52,3 +52,17 @@ def test_centroidal_terms_match_numpy():
     L = (Ag @ (vrel + Jd@v_full))[3:6]
     gt = lam_c*float(np.sum((cddot - cddot_ref)**2)) + lam_L*float(np.sum(L**2))
     np.testing.assert_allclose(float(sum(float(t.value) for t in terms)), gt, rtol=1e-6)
+
+
+def test_centroidal_default_off_and_runs_on():
+    import numpy as np
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+    rt = TestSocpRetargeter.from_config(RetargetingConfig(
+        task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
+    assert rt.activate_centroidal is False  # default off
+    rt.activate_centroidal = True
+    rt.lambda_c = 1.0
+    rt.lambda_L = 0.1
+    res = rt.retarget(max_frames=8)
+    assert np.all(np.isfinite(res.qpos))
