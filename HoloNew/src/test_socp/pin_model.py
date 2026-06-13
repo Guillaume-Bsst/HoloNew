@@ -52,3 +52,45 @@ class PinModel:
         for name, pin_adr in self._pin_joint_qadr.items():
             q[self._mj_joint_qadr[name]] = q_pin[pin_adr]
         return q
+
+    # ------------------------------------------------------------------
+    # FK helpers
+    # ------------------------------------------------------------------
+
+    def _fk(self, q_pin: np.ndarray) -> None:
+        """Run forward kinematics and update all frame placements."""
+        pin.forwardKinematics(self.model, self.data, q_pin)
+        pin.updateFramePlacements(self.model, self.data)
+
+    def _frame_id(self, body_name: str) -> int:
+        """Return the pinocchio frame id for a link name; raise if not found."""
+        fid = self.model.getFrameId(body_name)
+        if fid >= self.model.nframes:
+            raise ValueError(f"Frame '{body_name}' not found in pinocchio model")
+        return fid
+
+    def body_position(self, q_pin: np.ndarray, body_name: str) -> np.ndarray:
+        """World position of body_name at pinocchio configuration q_pin.
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+            body_name: Link name matching a URDF link / pinocchio frame.
+
+        Returns:
+            Position array of shape (3,).
+        """
+        self._fk(q_pin)
+        return np.array(self.data.oMf[self._frame_id(body_name)].translation)
+
+    def body_rotation(self, q_pin: np.ndarray, body_name: str) -> np.ndarray:
+        """World rotation matrix of body_name at pinocchio configuration q_pin.
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+            body_name: Link name matching a URDF link / pinocchio frame.
+
+        Returns:
+            Rotation matrix of shape (3, 3).
+        """
+        self._fk(q_pin)
+        return np.array(self.data.oMf[self._frame_id(body_name)].rotation)
