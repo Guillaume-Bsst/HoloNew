@@ -166,6 +166,57 @@ class PinModel:
         J6 = pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED)
         return np.asarray(J6[3:6, :])
 
+    def point_jacobians(
+        self,
+        q_pin: np.ndarray,
+        link_names_per_point: list,
+        offsets_local: np.ndarray,
+    ) -> list:
+        """Batched point translational Jacobians with a single computeJointJacobians pass.
+
+        Computes one Jacobian per point, where each point is defined by a link name
+        and a local-frame offset. All Jacobians share a single pinocchio kinematics
+        pass, making this far cheaper than K independent point_translational_jacobian
+        calls when K is large (e.g., the full active-set at each SQP iteration).
+
+        For each point on link L at offset r_L (body frame), the world-frame velocity
+        is J_point = J_trans - skew(R @ r_L) @ J_ang, where J_trans/J_ang are rows
+        0:3/3:6 of the LOCAL_WORLD_ALIGNED frame Jacobian. Results are cached per
+        link name so repeated occurrences share the same frame Jacobian fetch.
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+            link_names_per_point: list of str, length K — one link name per point.
+            offsets_local: (K, 3) offsets from each link origin in the local body frame.
+
+        Returns:
+            List of K arrays each of shape (3, nv) in pinocchio tangent order.
+        """
+        q = pin.normalize(self.model, q_pin)
+        pin.computeJointJacobians(self.model, self.data, q)
+        pin.updateFramePlacements(self.model, self.data)
+        # Cache per link: (J_trans (3,nv), J_ang (3,nv), R (3,3))
+        cache: dict = {}
+        out = []
+        for name, off in zip(link_names_per_point, offsets_local):
+            if name not in cache:
+                fid = self._frame_id(name)
+                J6 = pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED)
+                cache[name] = (
+                    np.asarray(J6[0:3, :]),
+                    np.asarray(J6[3:6, :]),
+                    np.asarray(self.data.oMf[fid].rotation),
+                )
+            Jt, Ja, Rmat = cache[name]
+            rp = Rmat @ np.asarray(off, dtype=float)
+            skew = np.array([
+                [0.0,   -rp[2],  rp[1]],
+                [rp[2],  0.0,   -rp[0]],
+                [-rp[1], rp[0],  0.0],
+            ])
+            out.append(Jt - skew @ Ja)
+        return out
+
     def point_translational_jacobian(
         self,
         q_pin: np.ndarray,
