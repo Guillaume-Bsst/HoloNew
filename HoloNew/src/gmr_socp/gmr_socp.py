@@ -454,6 +454,8 @@ class GmrSocpRetargeter:
         q_t_last: np.ndarray,
         frame_targets: dict,
         init_t: bool = False,
+        frame_idx: int = 0,
+        foot_sticking: tuple[bool, bool] | None = None,
     ):
         """One linearised IK step with GMR position + orientation objective.
 
@@ -475,6 +477,10 @@ class GmrSocpRetargeter:
             frame_targets: {frame: (p_target(3,), R_target(3,3), w_p, w_r)}
                 as returned by build_frame_targets.
             init_t: True on the very first frame (unused in v1, kept for compat).
+            frame_idx: Index of the current frame in the trajectory (threaded
+                through for future constraint use; unused in this task).
+            foot_sticking: Per-foot sticking flags (left, right) for this frame
+                (threaded through for future constraint use; unused in this task).
 
         Returns:
             (q_star, cost): updated full config and objective value.
@@ -534,13 +540,16 @@ class GmrSocpRetargeter:
         q_t_last: np.ndarray,
         frame_targets: dict,
         n_iter: int = 10,
+        frame_idx: int = 0,
+        foot_sticking: tuple[bool, bool] | None = None,
     ):
         """Iterate solve_single_iteration until convergence or n_iter steps."""
         last = np.inf
         cost = 0.0
         for _ in range(n_iter):
             q_n, cost = self.solve_single_iteration(
-                q_locked, q_n[self.q_a_indices], q_t_last, frame_targets
+                q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
+                frame_idx=frame_idx, foot_sticking=foot_sticking,
             )
             if np.isclose(cost, last):
                 break
@@ -573,8 +582,11 @@ class GmrSocpRetargeter:
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
             tg2 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE2)
-            q, _ = self.iterate(q, q, q, tg1, n_iter=(50 if t == 0 else 10))
-            q, _ = self.iterate(q, q, q, tg2, n_iter=(50 if t == 0 else 10))
+            _fs = self.foot_sticking_sequences[t] if self.foot_sticking_sequences else None
+            q, _ = self.iterate(q, q, q, tg1, n_iter=(50 if t == 0 else 10),
+                                frame_idx=t, foot_sticking=_fs)
+            q, _ = self.iterate(q, q, q, tg2, n_iter=(50 if t == 0 else 10),
+                                frame_idx=t, foot_sticking=_fs)
             out.append(np.copy(q))
 
         return RetargetResult(qpos=np.array(out), stages={}, cost=0.0)
