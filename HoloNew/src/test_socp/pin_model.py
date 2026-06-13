@@ -94,3 +94,34 @@ class PinModel:
         """
         self._fk(q_pin)
         return np.array(self.data.oMf[self._frame_id(body_name)].rotation)
+
+    # ------------------------------------------------------------------
+    # Jacobians
+    # ------------------------------------------------------------------
+
+    def frame_translational_jacobian(self, q_pin: np.ndarray, body_name: str) -> np.ndarray:
+        """World-aligned translational Jacobian of a frame, in pinocchio tangent space.
+
+        Computes J such that dp = J @ v, where v is the pinocchio tangent vector
+        (nv-dimensional) and dp is the world-frame velocity of body_name's origin.
+        Uses LOCAL_WORLD_ALIGNED reference frame: world-axis-aligned axes located
+        at the frame origin, which matches the finite difference of world position
+        via pin.integrate.
+
+        The input is normalized so that computeJointJacobians and forwardKinematics
+        operate on exactly the same configuration (computeJointJacobians normalizes
+        unit quaternions internally, while forwardKinematics does not).
+
+        Args:
+            q_pin: Pinocchio configuration vector (length nq).
+            body_name: Link name matching a URDF link / pinocchio frame.
+
+        Returns:
+            Translational Jacobian of shape (3, nv) in pinocchio v order.
+        """
+        q = pin.normalize(self.model, q_pin)
+        pin.computeJointJacobians(self.model, self.data, q)
+        pin.updateFramePlacements(self.model, self.data)
+        fid = self._frame_id(body_name)
+        J6 = pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED)
+        return np.asarray(J6[0:3, :])
