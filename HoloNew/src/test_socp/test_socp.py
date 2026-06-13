@@ -66,6 +66,7 @@ class TestSocpRetargeter:
         lambda_X: float = 0.0,
         lambda_P: float = 0.0,
         sigma_v: float = 0.05,
+        load_object_scene: bool = True,
         **_ignored,
     ):
         """Initialise the retargeter from task constants.
@@ -93,10 +94,15 @@ class TestSocpRetargeter:
         self.object_name = getattr(task_constants, "OBJECT_NAME", "ground")
 
         # Load MuJoCo model.  Default (flag off or ground): plain robot xml.
-        # When activate_obj_non_penetration is on AND the task has a real object,
-        # swap to the object-scene xml so the collision geometry is present.
+        # When activate_obj_non_penetration is on AND the task has a real object
+        # AND load_object_scene is True, swap to the object-scene xml so the
+        # object collision geometry is present (object hard non-penetration).
+        # The interaction coupling uses load_object_scene=False: it wants only the
+        # ground non-penetration (the plain g1 xml already has a ground plane) to
+        # keep the solve stable, and lets the soft D term handle object contact —
+        # the object hard constraint conflicts with the D pull and trips CLARABEL.
         robot_xml_path = task_constants.ROBOT_URDF_FILE.replace(".urdf", ".xml")
-        if activate_obj_non_penetration and self.object_name not in (None, "ground"):
+        if activate_obj_non_penetration and load_object_scene and self.object_name not in (None, "ground"):
             if self.object_name == "multi_boxes":
                 robot_xml_path = task_constants.SCENE_XML_FILE
             else:
@@ -1068,6 +1074,26 @@ class TestSocpRetargeter:
         kwargs["lambda_X"] = sc.lambda_X
         kwargs["lambda_P"] = sc.lambda_P
         kwargs["sigma_v"] = sc.sigma_v
+        # The interaction costs require the non-penetration constraint to stay
+        # stable (the paper's optimization has both: the costs + d_ij >= 0).
+        # Without it the D term marches the floating base through the floor.
+        # Couple them: when interaction is active on an object task, enable
+        # non-penetration. robot_only (object_name "ground", no object SDF) keeps
+        # interaction and non-penetration both off, so its solve is unchanged.
+        # The bundled object SDF / correspondence assets load regardless of task,
+        # so gate interaction on the task actually having an object: robot_only /
+        # ground tasks keep the interaction weights at 0 (default solve unchanged,
+        # parity preserved). Object tasks keep the weights and couple the ground
+        # non-penetration constraint that keeps the D term stable (the paper's
+        # optimization has both costs + d_ij >= 0).
+        _obj_name = getattr(constants, "OBJECT_NAME", "ground")
+        if _obj_name in (None, "ground"):
+            kwargs["lambda_D"] = 0.0
+            kwargs["lambda_X"] = 0.0
+            kwargs["lambda_P"] = 0.0
+        elif sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0:
+            kwargs["activate_obj_non_penetration"] = True
+            kwargs["load_object_scene"] = False  # ground non-pen only; plain model
         rt = cls(**kwargs)
 
         # Load raw joint positions and per-joint quaternions from the .pt file

@@ -119,12 +119,29 @@ FD-validated). Empirical enablement on `object_interaction sub3_largebox_003`
   the **object channel**, which needs manipulation-frame validation (solve up to
   the contact frames).
 
-**Status:** weights remain `0.0` by default (the validated machinery is present
-but inert — no regression). Enabling-by-default + weight tuning is deferred
-pending: (a) resolving the D-term downward instability (smaller weight, a cap, or
-gating D on genuine contact `d_ref << margin` rather than the margin edge), and
-(b) a metric on object-manipulation frames. These are formulation/research
-decisions for the author.
+**Resolution (D/X enabled).** The D downward runaway was diagnosed: the D
+objective is over-determined (hundreds of per-point distance targets on rigid
+feet), so the trust-region SQP never converges (takes the max 0.2 step every
+iteration) and the small net downward bias accumulates; once the base dips below
+the floor the penetrating points flip the field normal and the sink accelerates.
+The fix is **paper-faithful**: the interaction costs require the non-penetration
+constraint (`d_ij >= 0`), which the paper's optimization has alongside the costs.
+`from_config` now **couples** them — when interaction is active on an object task
+it auto-enables **ground** non-penetration on the plain model (`load_object_scene
+= False`; the soft D term handles object contact, so loading the object scene and
+adding the hard object constraint is unnecessary and actually trips CLARABEL).
+With ground non-penetration, D/X are stable (base z stays ~0.7), the floor gap
+improves (~0.012 vs ~0.028 off), and a full clip solves in ~3 min. `lambda_D` and
+`lambda_X` default to `1.0`.
+
+**P still deferred (default off).** With ground non-penetration, D/X are stable,
+but the persistence term `P` is numerically explosive: its `1/(sigma_v*dt)^2`
+normalization (~3.6e5 with sigma_v=0.05, dt=1/30) makes it dominate by orders of
+magnitude, and it trips CLARABEL once the cross-frame state engages (frame 2+),
+even at `lambda_P=0.05`. `lambda_P` stays `0.0` by default. Enabling P needs a
+reworked normalization (a larger characteristic `sigma_v`, or scaling P to be
+comparable to D/X) — a formulation refinement for the author. The P code and its
+math are validated (numpy↔cvxpy equivalence); only the weight/scale is unsafe.
 
 ## Risks
 

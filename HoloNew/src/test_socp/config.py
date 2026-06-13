@@ -27,8 +27,20 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_foot_sticking: bool = False
     activate_self_collision: bool = False
 
-    # Interaction D/X/P cost weights (default 0.0 = off; solve is unchanged).
-    lambda_D: float = 0.0
-    lambda_X: float = 0.0
+    # Interaction cost weights. D (normal proximity) + X (tangential placement)
+    # are enabled by default on object tasks; robot_only (no object SDF) is
+    # unchanged. The interaction costs REQUIRE the non-penetration constraint to
+    # be stable — from_config auto-enables ground non-penetration when interaction
+    # is active on an object task (without it the D term marches the floating base
+    # through the floor). Validated stable; reduces the contact gap (~0.012 vs
+    # ~0.028 off on sub3_largebox_003).
+    #
+    # P (contact persistence) is implemented and math-validated but OFF by default
+    # (lambda_P=0): its 1/(sigma_v*dt)^2 normalization (~3.6e5) makes it
+    # numerically explosive and it trips CLARABEL once the cross-frame state
+    # engages (frame 2+), even at small weight. Enabling it needs dedicated
+    # stability work on the normalization. See the brick-1 design doc.
+    lambda_D: float = 1.0
+    lambda_X: float = 1.0
     lambda_P: float = 0.0
     sigma_v: float = 0.05
