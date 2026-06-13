@@ -62,6 +62,10 @@ class TestSocpRetargeter:
         foot_sticking_tolerance: float = 1e-3,
         foot_lock=None,            # FootLockConfig | None
         self_collision=None,       # SelfCollisionConfig | None
+        lambda_D: float = 0.0,
+        lambda_X: float = 0.0,
+        lambda_P: float = 0.0,
+        sigma_v: float = 0.05,
         **_ignored,
     ):
         """Initialise the retargeter from task constants.
@@ -197,6 +201,12 @@ class TestSocpRetargeter:
         self._init_self_collision(self_collision if self_collision is not None else SelfCollisionConfig())
         # foot_sticking_sequences is filled by from_config; () = no sticking.
         self.foot_sticking_sequences: list = []
+
+        # Interaction D/X/P cost weights (default 0.0 = off; solve is unchanged).
+        self.lambda_D = lambda_D
+        self.lambda_X = lambda_X
+        self.lambda_P = lambda_P
+        self.sigma_v = sigma_v
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -644,6 +654,7 @@ class TestSocpRetargeter:
         init_t: bool = False,
         frame_idx: int = 0,
         foot_sticking: tuple[bool, bool] | None = None,
+        obj_pose=None,
     ):
         """One linearised IK step with GMR position + orientation objective.
 
@@ -795,6 +806,17 @@ class TestSocpRetargeter:
                 rhs = -phi - self.penetration_tolerance
                 constraints += [Ja_n @ dqa >= rhs]
 
+        # D + X interaction terms (default off; only active when weights > 0 and
+        # the required assets are present).
+        if (self.lambda_D > 0 or self.lambda_X > 0) \
+                and getattr(self, "correspondence", None) is not None \
+                and getattr(self, "object_sdf", None) is not None \
+                and obj_pose is not None:
+            from HoloNew.src.test_socp.interaction import build_dx_terms
+            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            obj_terms += build_dx_terms(self, q_pin, dqa, frame_idx, obj_pose,
+                                        self.lambda_D, self.lambda_X)
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         prob.solve(solver=cp.CLARABEL)
 
@@ -818,6 +840,7 @@ class TestSocpRetargeter:
         n_iter: int = 10,
         frame_idx: int = 0,
         foot_sticking: tuple[bool, bool] | None = None,
+        obj_pose=None,
     ):
         """Iterate solve_single_iteration until convergence or n_iter steps."""
         last = np.inf
@@ -826,6 +849,7 @@ class TestSocpRetargeter:
             q_n, cost = self.solve_single_iteration(
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
+                obj_pose=obj_pose,
             )
             if np.isclose(cost, last):
                 break
@@ -891,10 +915,12 @@ class TestSocpRetargeter:
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
             tg2 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE2)
             _fs = self.foot_sticking_sequences[t] if self.foot_sticking_sequences else None
+            _obj_pose = (self._obj_poses_raw[t]
+                         if getattr(self, "_obj_poses_raw", None) is not None else None)
             q, _ = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
-                                frame_idx=t, foot_sticking=_fs)
+                                frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose)
             q, _ = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
-                                frame_idx=t, foot_sticking=_fs)
+                                frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose)
             q_prev = np.copy(q)
             if urdf is not None:
                 Tw = link_world_transforms(urdf, q, self.correspondence.link_names)
@@ -978,6 +1004,10 @@ class TestSocpRetargeter:
         kwargs["activate_obj_non_penetration"] = sc.activate_obj_non_penetration
         kwargs["activate_foot_sticking"] = sc.activate_foot_sticking
         kwargs["activate_self_collision"] = sc.activate_self_collision
+        kwargs["lambda_D"] = sc.lambda_D
+        kwargs["lambda_X"] = sc.lambda_X
+        kwargs["lambda_P"] = sc.lambda_P
+        kwargs["sigma_v"] = sc.sigma_v
         rt = cls(**kwargs)
 
         # Load raw joint positions and per-joint quaternions from the .pt file
@@ -1025,6 +1055,10 @@ class TestSocpRetargeter:
         _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
         rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
         rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
+
+        # Raw object poses [qw, qx, qy, qz, x, y, z] used by the smplx_ground_probe
+        # and D/X interaction terms. None until the object SDF block loads them.
+        rt._obj_poses_raw = None
 
         # Load object poses in MuJoCo qpos order for per-frame object qpos drive.
         # Only when the flag is on and the task has a real object; otherwise leave
@@ -1083,6 +1117,9 @@ class TestSocpRetargeter:
             from HoloNew.src.test_socp.correspondence.human_body import PointCloudCache
             from HoloNew.src.utils import load_intermimic_data
             _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
+            # Store the raw poses so retarget() and build_dx_terms can access them
+            # without a second load.  Sliced to T so indexing by frame is safe.
+            rt._obj_poses_raw = obj_poses[:T]
             corr_cache = None
             if rt.correspondence is not None:
                 corr_cache = PointCloudCache(tri_idx=rt.correspondence.tri_idx,

@@ -115,3 +115,13 @@ def test_dx_terms_assemble_and_solve():
     prob = cp.Problem(cp.Minimize(cp.sum(terms) + cp.sum_squares(dqa)), [cp.SOC(0.2, dqa)])
     prob.solve(solver=cp.CLARABEL)
     assert prob.status in ("optimal", "optimal_inaccurate")
+
+
+def test_solver_with_dx_weights_runs():
+    rt = _rt()
+    if rt.correspondence is None or rt.object_sdf is None:
+        pytest.skip("assets not present")
+    rt.lambda_D = 1.0
+    rt.lambda_X = 1.0
+    res = rt.retarget()
+    assert np.all(np.isfinite(res.qpos))

@@ -26,3 +26,9 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_obj_non_penetration: bool = False
     activate_foot_sticking: bool = False
     activate_self_collision: bool = False
+
+    # Interaction D/X/P cost weights (default 0.0 = off; solve is unchanged).
+    lambda_D: float = 0.0
+    lambda_X: float = 0.0
+    lambda_P: float = 0.0
+    sigma_v: float = 0.05
