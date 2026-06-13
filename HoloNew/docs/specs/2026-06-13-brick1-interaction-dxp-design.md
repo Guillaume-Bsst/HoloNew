@@ -100,6 +100,32 @@ On active contact frames, vs the pre-brick baseline:
 Plus the standard gate: re-baselined regression snapshot + "runs without error"
 smoke on a full OMOMO clip.
 
+## Validation findings (2026-06-13, default still OFF)
+
+The D/X/P machinery is implemented, vectorized (~10x), and the math is
+independently verified (numpy↔cvxpy equivalence at rtol 1e-8; Jacobians
+FD-validated). Empirical enablement on `object_interaction sub3_largebox_003`
+(first frames, floor channel — the object channel is inactive at rest) surfaced:
+
+- **D (normal proximity) is conditionally unstable at high weight.** With
+  `lambda_D=1`, the floating base runs away downward (base z dives to ~-36 m over
+  6 frames): as the base sinks below the floor the penetrating points flip the
+  field normal and reinforce the sink (positive feedback). At `lambda_D=0.05` the
+  solve is stable and the floor gap slightly improves (0.019 vs 0.021 off).
+- **X (tangential placement) is stable** (`lambda_X=1`, base stays ~0.7 m, gap
+  ~0.03).
+- The **floor metric is uninformative**: GMR tracking already keeps the feet at
+  the floor (gap ~0.02 off), so floor interaction adds little. The real value is
+  the **object channel**, which needs manipulation-frame validation (solve up to
+  the contact frames).
+
+**Status:** weights remain `0.0` by default (the validated machinery is present
+but inert — no regression). Enabling-by-default + weight tuning is deferred
+pending: (a) resolving the D-term downward instability (smaller weight, a cap, or
+gating D on genuine contact `d_ref << margin` rather than the margin edge), and
+(b) a metric on object-manipulation frames. These are formulation/research
+decisions for the author.
+
 ## Risks
 
 1. **Weighting vs the existing world tracking** (which currently dominates the
