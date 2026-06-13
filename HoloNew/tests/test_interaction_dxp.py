@@ -123,5 +123,8 @@ def test_solver_with_dx_weights_runs():
         pytest.skip("assets not present")
     rt.lambda_D = 1.0
     rt.lambda_X = 1.0
-    res = rt.retarget()
+    # Solve a few frames only: the D/X assembly builds many cvxpy terms per SQP
+    # iteration, so a full clip is slow; a short run exercises the wiring.
+    res = rt.retarget(max_frames=4)
     assert np.all(np.isfinite(res.qpos))
+    assert res.qpos.shape[0] == 4

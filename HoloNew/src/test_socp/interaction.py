@@ -80,12 +80,25 @@ def frame_references(rt, t: int):
             d_flr_ref (M,): floor signed distance at each probe world point, indexed by
                 correspondence.human_idx.
             x_flr_ref (M, 3): floor closest-surface witness at each probe world point.
+
+    The source references are constant within a frame (they depend only on the
+    source motion, not the robot config), but build_dx_terms / build_p_terms call
+    this once per SQP iteration. A small per-frame memo (keeping the two most
+    recent frames so persistence can read t and t-1) avoids re-running the
+    expensive SMPL-X probe every inner iteration.
     """
+    cache = rt.__dict__.setdefault("_frame_ref_cache", {})
+    if t in cache:
+        return cache[t]
     pf = rt.smplx_ground_probe(t, rt.human_quat[t], rt.gmr_grounded[:, 0][t])
     hi = rt.correspondence.human_idx
     fflr = floor_field(pf.points, rt.smplx_ground_probe.margin)
-    return (pf.field.distance[hi], pf.field.witness[hi],
+    refs = (pf.field.distance[hi], pf.field.witness[hi],
             fflr.distance[hi], fflr.witness[hi])
+    cache[t] = refs
+    for old in [k for k in cache if k < t - 1]:   # keep only t and t-1
+        del cache[old]
+    return refs
 
 
 def query_entities(rt, pts_world: np.ndarray, obj_pose: np.ndarray,
