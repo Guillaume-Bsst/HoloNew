@@ -337,6 +337,59 @@ class GmrSocpRetargeter:
 
         return Js, phis
 
+    def _update_jacobians_and_phis_from_q(self, q: np.ndarray):
+        self.robot_data.qpos[:] = q
+
+        mujoco.mj_forward(self.robot_model, self.robot_data)  # kinematics & AABBs valid
+
+        m, d = self.robot_model, self.robot_data
+        threshold = float(self.collision_detection_threshold)
+
+        # 1) Fast prefilter via mj_collision with temporary margins
+        candidates = self._prefilter_pairs_with_mj_collision(threshold)
+
+        Js, phis = {}, {}
+        fromto = np.zeros(6, dtype=float)
+
+        # 2) Precise distance only on candidates (early-exit at threshold)
+        contype, conaff = m.geom_contype, m.geom_conaffinity
+
+        def masks_ok(g1, g2):
+            if contype[g1] == 0 and conaff[g1] == 0:
+                return False
+            if contype[g2] == 0 and conaff[g2] == 0:
+                return False
+            if self.object_name in self._geom_names[g1] and "ground" in self._geom_names[g2]:
+                return False
+            if "ground" in self._geom_names[g1] and self.object_name in self._geom_names[g2]:
+                return False
+            return (
+                self.object_name in self._geom_names[g1]
+                or self.object_name in self._geom_names[g2]
+                or "ground" in self._geom_names[g1]
+                or "ground" in self._geom_names[g2]
+            )
+
+        for g1, g2 in candidates:
+            # Optional: keep your own filters here (e.g., skip object-ground, only keep interaction with object/ground)
+            if not masks_ok(g1, g2):
+                continue
+
+            fromto[:] = 0.0
+            dist = mujoco.mj_geomDistance(m, d, g1, g2, threshold, fromto)
+            if dist <= threshold:
+                J_rel = self._compute_jacobian_for_contact_relative(
+                    m.geom(g1), m.geom(g2), self._geom_names[g1], self._geom_names[g2], fromto, dist
+                )
+                Js[(g1, g2)] = J_rel
+                phis[(g1, g2)] = float(dist)
+
+                # For debug
+                # self.draw_mesh_pair_with_contact(self.robot_model, self.robot_data, g1, g2,   \
+                #     self._geom_names[g1], self._geom_names[g2], fromto=fromto)
+
+        return Js, phis
+
     # ------------------------------------------------------------------
     # Jacobian helpers (kept verbatim from InteractionMeshRetargeter)
     # ------------------------------------------------------------------
@@ -639,6 +692,15 @@ class GmrSocpRetargeter:
                 Ja_n = Ja_n_full[self.q_a_indices]
                 # Enforce: new_distance >= tolerance  =>  phi + J @ dqa >= tol
                 rhs = self._self_collision_tolerance - phi
+                constraints += [Ja_n @ dqa >= rhs]
+
+        # Non-penetration constraints (holosoma-style, default off)
+        if self.activate_obj_non_penetration:
+            Js, phis = self._update_jacobians_and_phis_from_q(q)
+            for key, phi in phis.items():
+                Ja_n_full = Js[key]
+                Ja_n = Ja_n_full[self.q_a_indices]
+                rhs = -phi - self.penetration_tolerance
                 constraints += [Ja_n @ dqa >= rhs]
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
