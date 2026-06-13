@@ -349,12 +349,23 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
         t: Current frame index (must be >= 1).
         obj_pose: (7,) [qw, qx, qy, qz, x, y, z] current object pose.
         lambda_P: Weight for the persistence term.
-        sigma_v: Velocity noise scale (m/step); persistence cost is divided by
-            (sigma_v * dt)^2.
-        dt: Time step in seconds (1/fps; 1/30 for OMOMO).
+        sigma_v: Accepted for API compatibility; no longer used in the scale (see
+            the normalization note below).
+        dt: Accepted for API compatibility; no longer used in the scale.
 
     Returns:
         List of cvxpy scalar expressions. May be empty if no points have γ > 0.
+
+    Normalization (deliberate divergence from the paper). The paper normalizes P
+    by the characteristic per-frame slide (sigma_v * dt)^2. With sigma_v = 0.05 and
+    dt = 1/30 that scale is ~1.7 mm, giving a weight ~3.6e5 — ~3600x the D/X terms
+    (normalized by the field range L^2 ~ 0.01), which wrecks CLARABEL's
+    conditioning and makes the solve fail once P engages. P is a tangential
+    meter-residual exactly like X, so we normalize it by the SAME L^2: lambda_P is
+    then directly comparable to lambda_X, and no-slip is enforced as a gentle
+    tangential prior (the per-frame slide is already bounded by the SQP trust
+    region). This keeps the paper's intent (reproduce the source's tangential
+    slide) while staying numerically well-conditioned.
     """
     import cvxpy as cp
 
@@ -362,7 +373,7 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
     L = rt.smplx_ground_probe.margin
-    scale_sq = (lambda_P / (sigma_v * dt) ** 2)
+    scale_sq = (lambda_P / L ** 2)
 
     # Per-link point counts for 1/N_k normalisation.
     n_links = len(corr.link_names)

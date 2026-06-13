@@ -188,12 +188,10 @@ def test_p_terms_assemble():
 def test_p_persistence_runs():
     """retarget with the P term in isolation produces finite output over 3 frames.
 
-    P is exercised alone (D/X and the ground non-penetration coupling off): with
-    the default config D/X are on and ground non-penetration is coupled, and the
-    P term's large 1/(sigma_v*dt)^2 normalization currently trips CLARABEL once
-    its cross-frame state engages (frame 2+). P is OFF by default; this test only
-    checks that the P assembly runs through the solve in isolation for a couple of
-    frames (matching how it was validated when P was implemented).
+    P is exercised alone (D/X off, no ground non-penetration) to check the
+    persistence assembly + cross-frame state run through the solve. P is
+    normalized by L^2 (see interaction.build_p_terms) so it is well-conditioned;
+    in the default config it runs alongside D/X + ground non-penetration.
     """
     rt = _rt()
     if rt.correspondence is None or rt.object_sdf is None:

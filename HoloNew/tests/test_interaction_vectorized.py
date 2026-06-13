@@ -144,7 +144,9 @@ def _pointwise_p_objective(rt, q_pin: np.ndarray, val: np.ndarray,
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
     L = rt.smplx_ground_probe.margin
-    scale_sq = lambda_P / (sigma_v * dt) ** 2
+    # P is normalized by the field range L^2 (same scale as X), not (sigma_v*dt)^2
+    # — see the note in interaction.build_p_terms. sigma_v/dt are unused.
+    scale_sq = lambda_P / L ** 2
 
     n_links = len(corr.link_names)
     link_counts = np.zeros(n_links, dtype=float)

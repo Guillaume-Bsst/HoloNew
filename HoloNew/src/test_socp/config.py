@@ -35,12 +35,12 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # through the floor). Validated stable; reduces the contact gap (~0.012 vs
     # ~0.028 off on sub3_largebox_003).
     #
-    # P (contact persistence) is implemented and math-validated but OFF by default
-    # (lambda_P=0): its 1/(sigma_v*dt)^2 normalization (~3.6e5) makes it
-    # numerically explosive and it trips CLARABEL once the cross-frame state
-    # engages (frame 2+), even at small weight. Enabling it needs dedicated
-    # stability work on the normalization. See the brick-1 design doc.
+    # P (contact persistence) is also enabled. It is normalized by the field range
+    # L^2 (same scale as X), so lambda_P is directly comparable to lambda_X — a
+    # deliberate divergence from the paper's (sigma_v*dt)^2 normalization, which is
+    # ~3600x larger and wrecks CLARABEL's conditioning. With the L^2 scale, P at
+    # weight 1.0 is stable (sigma_v is kept for API compatibility but unused).
     lambda_D: float = 1.0
     lambda_X: float = 1.0
-    lambda_P: float = 0.0
+    lambda_P: float = 1.0
     sigma_v: float = 0.05

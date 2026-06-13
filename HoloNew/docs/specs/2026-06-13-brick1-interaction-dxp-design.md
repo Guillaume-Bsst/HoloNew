@@ -134,14 +134,20 @@ With ground non-penetration, D/X are stable (base z stays ~0.7), the floor gap
 improves (~0.012 vs ~0.028 off), and a full clip solves in ~3 min. `lambda_D` and
 `lambda_X` default to `1.0`.
 
-**P still deferred (default off).** With ground non-penetration, D/X are stable,
-but the persistence term `P` is numerically explosive: its `1/(sigma_v*dt)^2`
-normalization (~3.6e5 with sigma_v=0.05, dt=1/30) makes it dominate by orders of
-magnitude, and it trips CLARABEL once the cross-frame state engages (frame 2+),
-even at `lambda_P=0.05`. `lambda_P` stays `0.0` by default. Enabling P needs a
-reworked normalization (a larger characteristic `sigma_v`, or scaling P to be
-comparable to D/X) — a formulation refinement for the author. The P code and its
-math are validated (numpy↔cvxpy equivalence); only the weight/scale is unsafe.
+**P resolved (enabled, renormalized).** The persistence term was numerically
+explosive: its paper normalization `1/(sigma_v*dt)^2` (~3.6e5 with sigma_v=0.05,
+dt=1/30) made it ~3600x the D/X terms and tripped CLARABEL once the cross-frame
+state engaged (frame 2+), even at `lambda_P=0.05`. P is a tangential
+meter-residual exactly like X, so we **renormalize it by the field range `L^2`**
+(the same scale as X) — a deliberate, spirit-preserving divergence: it keeps the
+paper's intent (reproduce the source's tangential slide / no-slip) while making
+`lambda_P` directly comparable to `lambda_X` and the solve well-conditioned. The
+per-frame slide is already bounded by the SQP trust region, so the paper's much
+tighter `sigma_v*dt` tolerance is unnecessary. With the `L^2` scale, `lambda_P =
+1.0` is stable (validated over a clip with D/X + ground non-penetration; the
+contact gap stays ~0.011). `sigma_v` is kept in the config for API compatibility
+but no longer affects the scale. The numpy↔cvxpy equivalence test is updated to
+the `L^2` normalization.
 
 ## Risks
 
