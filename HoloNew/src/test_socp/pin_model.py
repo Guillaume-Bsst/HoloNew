@@ -315,3 +315,9 @@ class PinModel:
                 self.model, self.data, pin.normalize(self.model, q_pin)
             )
         )
+
+    def centroidal_map(self, q_pin: np.ndarray) -> np.ndarray:
+        """(6, nv) centroidal momentum matrix A_G: h = A_G @ v (h[:3] linear, h[3:6] angular)."""
+        return np.asarray(
+            pin.computeCentroidalMap(self.model, self.data, pin.normalize(self.model, q_pin))
+        )
