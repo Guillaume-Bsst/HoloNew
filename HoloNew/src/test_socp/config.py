@@ -63,10 +63,12 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     sigma_Vdot: float = 20.0
 
     # Brick 3 — Pelvis-relative Style objective.
-    # When off (default), the existing world-frame tracking loop runs unchanged.
+    # Enabled by default after validation (2026-06-13): 30-frame robot_only solve
+    # shows pelvis-relative fidelity 0.60 rad vs 0.82 rad for world tracking
+    # (~27 % improvement) and pelvis z in [0.562, 0.800] m — clean, no collapse.
     # When on, joint orientation targets are re-based by the current pelvis,
     # the pelvis orientation term becomes a roll/pitch-only tilt, joint position
     # terms are dropped, and a weak pelvis position scaffold is kept.
     # pelvis_anchor_weight scales the scaffold (1.0 = unchanged relative to w_p).
-    activate_style: bool = False
+    activate_style: bool = True
     pelvis_anchor_weight: float = 1.0

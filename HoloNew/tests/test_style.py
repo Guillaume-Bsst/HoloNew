@@ -34,9 +34,9 @@ def test_tilt_residual_matches_fd_and_is_yaw_invariant():
         np.testing.assert_allclose(A[:, k], fd, atol=1e-4, err_msg=f"col {k}")
 
 
-def test_style_default_off_and_runs_on():
+def test_style_default_on_and_runs():
+    # After Brick 3 validation, activate_style=True is the default.
     rt = _rt()
-    assert rt.activate_style is False
-    rt.activate_style = True
+    assert rt.activate_style is True
     res = rt.retarget(max_frames=6)
     assert np.all(np.isfinite(res.qpos))
