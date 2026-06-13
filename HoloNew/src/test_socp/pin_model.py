@@ -58,8 +58,13 @@ class PinModel:
     # ------------------------------------------------------------------
 
     def _fk(self, q_pin: np.ndarray) -> None:
-        """Run forward kinematics and update all frame placements."""
-        pin.forwardKinematics(self.model, self.data, q_pin)
+        """Run forward kinematics and update all frame placements.
+
+        The input is normalized first so FK and frame_translational_jacobian
+        operate on exactly the same configuration at non-unit quaternions
+        (computeJointJacobians normalizes internally, forwardKinematics does not).
+        """
+        pin.forwardKinematics(self.model, self.data, pin.normalize(self.model, q_pin))
         pin.updateFramePlacements(self.model, self.data)
 
     def _frame_id(self, body_name: str) -> int:
