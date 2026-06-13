@@ -817,6 +817,19 @@ class TestSocpRetargeter:
             obj_terms += build_dx_terms(self, q_pin, dqa, frame_idx, obj_pose,
                                         self.lambda_D, self.lambda_X)
 
+        # P (contact persistence) terms (default off; requires cross-frame state
+        # from the previous solved frame, so only active at frame >= 1).
+        if self.lambda_P > 0 \
+                and getattr(self, "correspondence", None) is not None \
+                and getattr(self, "object_sdf", None) is not None \
+                and obj_pose is not None \
+                and frame_idx >= 1 \
+                and getattr(self, "_p_state", None) is not None:
+            from HoloNew.src.test_socp.interaction import build_p_terms
+            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            obj_terms += build_p_terms(self, q_pin, dqa, frame_idx, obj_pose,
+                                       self.lambda_P, self.sigma_v, self._dt)
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         prob.solve(solver=cp.CLARABEL)
 
@@ -891,6 +904,28 @@ class TestSocpRetargeter:
         urdf = None
         if self.smplx_ground_probe is not None:
             from HoloNew.src.test_socp.contact.backends.floor import floor_field
+
+        # Initialise cross-frame persistence state when P is active.
+        # p_prev_world (M,3): previous solved robot control-point world positions.
+        # obj_prev (7,): previous object pose [qw,qx,qy,qz,x,y,z].
+        # d_prev_obj/flr (M,): previous SOLVED robot-side distances (α̂^{t-1}).
+        # a_prev_obj/flr (M,): previous source activations α^{t-1}.
+        # Initialised to "no previous contact": d_prev=+inf, a_prev=0.
+        if self.lambda_P > 0 \
+                and getattr(self, "correspondence", None) is not None \
+                and getattr(self, "object_sdf", None) is not None:
+            _M = self.correspondence.link_idx.shape[0]
+            self._p_state = {
+                "p_prev_world": np.zeros((_M, 3), dtype=np.float64),
+                "obj_prev": np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+                "d_prev_obj": np.full(_M, np.inf),
+                "a_prev_obj": np.zeros(_M),
+                "d_prev_flr": np.full(_M, np.inf),
+                "a_prev_flr": np.zeros(_M),
+            }
+        else:
+            self._p_state = None
+
         if self.smplx_ground_probe is not None and self.correspondence is not None:
             import yourdfpy
 
@@ -928,6 +963,25 @@ class TestSocpRetargeter:
             q, _ = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose)
             q_prev = np.copy(q)
+
+            # Update cross-frame persistence state after the solved frame.
+            if self._p_state is not None and _obj_pose is not None:
+                from HoloNew.src.test_socp.interaction import (
+                    robot_control_points, query_entities, frame_references, _activation,
+                )
+                _q_pin_solved = self.pin.qpos_mj_to_q_pin(q[:36])
+                _L = self.smplx_ground_probe.margin
+                _p_world = robot_control_points(self, _q_pin_solved)
+                _fobj_s, _fflr_s = query_entities(self, _p_world, _obj_pose, margin=_L)
+                _d_obj_ref, _, _d_flr_ref, _, _ = frame_references(self, t)
+                self._p_state["p_prev_world"] = _p_world
+                self._p_state["obj_prev"] = _obj_pose.copy()
+                self._p_state["d_prev_obj"] = np.asarray(_fobj_s.distance, dtype=np.float64)
+                self._p_state["d_prev_flr"] = np.asarray(_fflr_s.distance, dtype=np.float64)
+                self._p_state["a_prev_obj"] = np.array(
+                    [_activation(float(_d_obj_ref[i]), _L) for i in range(len(_d_obj_ref))])
+                self._p_state["a_prev_flr"] = np.array(
+                    [_activation(float(_d_flr_ref[i]), _L) for i in range(len(_d_flr_ref))])
             if urdf is not None:
                 Tw = link_world_transforms(urdf, q, self.correspondence.link_names)
                 g1_pts.append(transported_points(
@@ -1065,6 +1119,11 @@ class TestSocpRetargeter:
         # Raw object poses [qw, qx, qy, qz, x, y, z] used by the smplx_ground_probe
         # and D/X interaction terms. None until the object SDF block loads them.
         rt._obj_poses_raw = None
+
+        # Frame time step for the P persistence cost: OMOMO is captured at 30 fps.
+        # If the motion config exposes a frame rate attribute, use it; otherwise
+        # fall back to 1/30 with a comment so the value is traceable here.
+        rt._dt = 1.0 / 30.0  # OMOMO dataset frame rate: 30 fps
 
         # Load object poses in MuJoCo qpos order for per-frame object qpos drive.
         # Only when the flag is on and the task has a real object; otherwise leave

@@ -72,7 +72,7 @@ def frame_references(rt, t: int):
         t: Frame index.
 
     Returns:
-        Tuple (d_obj_ref, x_obj_ref, d_flr_ref, x_flr_ref) where:
+        Tuple (d_obj_ref, x_obj_ref, d_flr_ref, x_flr_ref, p_ref) where:
             d_obj_ref (M,): object signed distance at each human correspondence point
                 (object-local frame), indexed by correspondence.human_idx.
             x_obj_ref (M, 3): object closest-surface witness at each human correspondence
@@ -80,6 +80,9 @@ def frame_references(rt, t: int):
             d_flr_ref (M,): floor signed distance at each probe world point, indexed by
                 correspondence.human_idx.
             x_flr_ref (M, 3): floor closest-surface witness at each probe world point.
+            p_ref (M, 3): world positions of the source probe points at each human
+                correspondence index (pf.points[human_idx]). Used by the P term to
+                compute the source tangential displacement Δp_ref = p_ref_t - p_ref_{t-1}.
 
     The source references are constant within a frame (they depend only on the
     source motion, not the robot config), but build_dx_terms / build_p_terms call
@@ -94,7 +97,8 @@ def frame_references(rt, t: int):
     hi = rt.correspondence.human_idx
     fflr = floor_field(pf.points, rt.smplx_ground_probe.margin)
     refs = (pf.field.distance[hi], pf.field.witness[hi],
-            fflr.distance[hi], fflr.witness[hi])
+            fflr.distance[hi], fflr.witness[hi],
+            np.asarray(pf.points, dtype=np.float64)[hi])   # (M, 3) world source points
     cache[t] = refs
     for old in [k for k in cache if k < t - 1]:   # keep only t and t-1
         del cache[old]
@@ -216,7 +220,8 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
     fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
 
     # Source-side references (object-local frame / world frame).
-    d_obj_ref, x_obj_ref, d_flr_ref, x_flr_ref = frame_references(rt, t)
+    # p_ref (world source points) is used only by build_p_terms; ignored here.
+    d_obj_ref, x_obj_ref, d_flr_ref, x_flr_ref, _p_ref = frame_references(rt, t)
 
     # Object-to-world rotation (Robj[:, j] = j-th object axis in world).
     Robj = _robj_from_pose(obj_pose)
@@ -291,5 +296,169 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
             rhs_x = Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0)
             res_x = Pi0 @ (Ji @ dqa) - rhs_x
             terms.append((lambda_X * w) * cp.sum_squares(res_x))
+
+    return terms
+
+
+# ---------------------------------------------------------------------------
+# P (contact persistence) residual assembly
+# ---------------------------------------------------------------------------
+
+def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
+                  obj_pose: np.ndarray,
+                  lambda_P: float, sigma_v: float, dt: float) -> list:
+    """Build cvxpy contact persistence (P) residual terms.
+
+    P penalises tangential slip at contact points across consecutive frames.
+    The residual is the mismatch between the robot's tangential displacement
+    Δp_i and the source's tangential displacement Δp_i^ref, projected by
+    Π0 = I − n0 n0ᵀ (the tangential projector at the current field normal).
+
+    Activation γ_i = min(α_i^t, α_i^{t-1}, α̂_i^{t-1}), where:
+        α_i^t:     source activation at the current frame (from d_obj/flr_ref[i]).
+        α_i^{t-1}: source activation at the previous frame (stored in rt._p_state).
+        α̂_i^{t-1}: previous SOLVED robot-side activation (from rt._p_state d_prev).
+    Points with γ ≤ 0 or inactive robot-side field are skipped.
+
+    Object channel: residuals in the object-local frame (consistent with how the
+    object SDF field direction is expressed).
+    Floor channel: residuals in the world frame.
+
+    Args:
+        rt: TestSocpRetargeter instance.
+        q_pin: Pinocchio configuration vector at the current linearisation point.
+        dqa: cvxpy Variable of shape (nv_a,).
+        t: Current frame index (must be >= 1).
+        obj_pose: (7,) [qw, qx, qy, qz, x, y, z] current object pose.
+        lambda_P: Weight for the persistence term.
+        sigma_v: Velocity noise scale (m/step); persistence cost is divided by
+            (sigma_v * dt)^2.
+        dt: Time step in seconds (1/fps; 1/30 for OMOMO).
+
+    Returns:
+        List of cvxpy scalar expressions. May be empty if no points have γ > 0.
+    """
+    import cvxpy as cp
+
+    state = rt._p_state
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L = rt.smplx_ground_probe.margin
+    scale_sq = (lambda_P / (sigma_v * dt) ** 2)
+
+    # Per-link point counts for 1/N_k normalisation.
+    n_links = len(corr.link_names)
+    link_counts = np.zeros(n_links, dtype=float)
+    for li in range(n_links):
+        link_counts[li] = float(np.sum(corr.link_idx == li))
+    Nk = link_counts[corr.link_idx]  # (M,)
+
+    # Current and previous object-to-world rotation matrices.
+    Robj_t = _robj_from_pose(obj_pose)              # current frame
+    obj_t = np.asarray(obj_pose[4:7], dtype=float)
+    obj_prev_pose = state["obj_prev"]
+    Robj_tm1 = _robj_from_pose(obj_prev_pose)       # previous frame
+    obj_tm1 = np.asarray(obj_prev_pose[4:7], dtype=float)
+
+    # Current world positions of robot control points.
+    P = robot_control_points(rt, q_pin)             # (M, 3)
+
+    # Robot-side field at current config.
+    fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
+
+    # Source references at t and t-1.
+    d_obj_ref_t,  _,  d_flr_ref_t,  _, p_ref_t   = frame_references(rt, t)
+    d_obj_ref_tm1, _, d_flr_ref_tm1, _, p_ref_tm1 = frame_references(rt, t - 1)
+
+    # Previous solved robot-side distances (for α̂^{t-1}).
+    d_prev_obj = state["d_prev_obj"]   # (M,)
+    d_prev_flr = state["d_prev_flr"]  # (M,)
+    # Previous source activations α^{t-1}.
+    a_prev_obj = state["a_prev_obj"]   # (M,)
+    a_prev_flr = state["a_prev_flr"]  # (M,)
+    # Previous solved robot-point world positions.
+    p_prev_world = state["p_prev_world"]  # (M, 3)
+
+    # Source point displacement in world frame: Δp_ref = p_ref_t - p_ref_{t-1}.
+    dp_ref_world = p_ref_t - p_ref_tm1   # (M, 3)
+
+    # --- Activation masks ---
+    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L) for i in range(M)])
+    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L) for i in range(M)])
+
+    def _hat(d_prev_i):
+        """Previous solved robot-side activation α̂^{t-1}."""
+        return _activation(float(d_prev_i), L)
+
+    # Active sets: γ > 0 AND current robot-side field is marked active.
+    gamma_obj = np.minimum(np.minimum(alpha_obj_t, a_prev_obj),
+                           np.array([_hat(d_prev_obj[i]) for i in range(M)]))
+    active_obj = (gamma_obj > 0) & np.asarray(fobj.active, dtype=bool)
+
+    gamma_flr = np.minimum(np.minimum(alpha_flr_t, a_prev_flr),
+                           np.array([_hat(d_prev_flr[i]) for i in range(M)]))
+    active_flr = (gamma_flr > 0) & np.asarray(fflr.active, dtype=bool)
+
+    active_union = np.where(active_obj | active_flr)[0]
+    if active_union.size == 0:
+        return []
+
+    # Batched Jacobian computation.
+    link_names_active = [corr.link_names[corr.link_idx[i]] for i in active_union]
+    offsets_active = corr.offset_local[active_union]
+    jacs_full = rt.pin.point_jacobians(q_pin, link_names_active, offsets_active)
+    jacs = [J[:, rt.v_a_indices] for J in jacs_full]
+    idx_to_pos = {int(active_union[k]): k for k in range(len(active_union))}
+
+    terms = []
+    I3 = np.eye(3)
+
+    # --- Object channel (object-local frame) ---
+    # Robot displacement (object-local):
+    #   Δp_local = Robj_t.T @ (P_i + Ji@dqa − obj_t) − p_prev_local_i
+    # where p_prev_local_i = Robj_{t-1}.T @ (p_prev_world_i − obj_{t-1}).
+    # The constant (non-dqa) part: Robj_t.T @ (P_i − obj_t) − p_prev_local_i.
+    # The linear part: Robj_t.T @ Ji @ dqa.
+    #
+    # Source displacement (object-local):
+    #   Δp_ref_local = Robj_t.T @ (p_ref_t_i − obj_t) − Robj_{t-1}.T @ (p_ref_{t-1}_i − obj_{t-1}).
+    for i in np.where(active_obj)[0]:
+        gamma = gamma_obj[i]
+        w = gamma / Nk[i]
+        Ji = jacs[idx_to_pos[i]]            # (3, nv_a) world-frame Jacobian
+        Jloc = Robj_t.T @ Ji               # (3, nv_a) object-local Jacobian
+
+        n0 = np.asarray(fobj.direction[i], dtype=float)   # object-local unit normal
+        Pi0 = I3 - np.outer(n0, n0)
+
+        p_prev_local_i = Robj_tm1.T @ (p_prev_world[i] - obj_tm1)
+        const_i = Robj_t.T @ (P[i] - obj_t) - p_prev_local_i  # (3,) constant offset
+
+        p_ref_t_loc = Robj_t.T @ (p_ref_t[i] - obj_t)
+        p_ref_tm1_loc = Robj_tm1.T @ (p_ref_tm1[i] - obj_tm1)
+        dp_ref_loc = p_ref_t_loc - p_ref_tm1_loc              # (3,)
+
+        # residual = Π0 @ (Δp_local - Δp_ref_local)
+        #          = Π0 @ (const_i + Jloc@dqa - dp_ref_loc)
+        rhs_const = Pi0 @ (dp_ref_loc - const_i)              # (3,)
+        res = Pi0 @ (Jloc @ dqa) - rhs_const
+        terms.append((scale_sq * w) * cp.sum_squares(res))
+
+    # --- Floor channel (world frame) ---
+    # Robot displacement (world): Δp = (P_i - p_prev_world_i) + Ji@dqa.
+    # Source displacement (world): Δp_ref = p_ref_t_i - p_ref_{t-1}_i.
+    for i in np.where(active_flr)[0]:
+        gamma = gamma_flr[i]
+        w = gamma / Nk[i]
+        Ji = jacs[idx_to_pos[i]]            # (3, nv_a) world-frame Jacobian
+        n0 = np.asarray(fflr.direction[i], dtype=float)   # world-frame unit normal
+        Pi0 = I3 - np.outer(n0, n0)
+
+        const_i = P[i] - p_prev_world[i]                  # (3,) constant offset
+        dp_ref_i = dp_ref_world[i]                         # (3,)
+
+        rhs_const = Pi0 @ (dp_ref_i - const_i)            # (3,)
+        res = Pi0 @ (Ji @ dqa) - rhs_const
+        terms.append((scale_sq * w) * cp.sum_squares(res))
 
     return terms

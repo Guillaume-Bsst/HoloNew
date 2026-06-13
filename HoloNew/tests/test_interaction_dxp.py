@@ -34,10 +34,11 @@ def test_reference_extraction_aligns_with_control_points():
     if rt.correspondence is None or rt.object_sdf is None:
         pytest.skip("assets not present")
     from HoloNew.src.test_socp.interaction import frame_references
-    d_obj, x_obj, d_flr, x_flr = frame_references(rt, t=0)
+    d_obj, x_obj, d_flr, x_flr, p_ref = frame_references(rt, t=0)
     M = rt.correspondence.link_idx.shape[0]
     assert d_obj.shape == (M,) and x_obj.shape == (M, 3)
     assert d_flr.shape == (M,) and x_flr.shape == (M, 3)
+    assert p_ref.shape == (M, 3)  # world source probe points indexed by human_idx
 
 
 def _pm():
@@ -127,4 +128,69 @@ def test_solver_with_dx_weights_runs():
     # iteration, so a full clip is slow; a short run exercises the wiring.
     res = rt.retarget(max_frames=4)
     assert np.all(np.isfinite(res.qpos))
+    assert res.qpos.shape[0] == 4
+
+
+# ---------------------------------------------------------------------------
+# Task 5: P (contact persistence) term
+# ---------------------------------------------------------------------------
+
+def test_p_terms_assemble():
+    """build_p_terms returns a list and the assembled problem solves (at t=1)."""
+    import cvxpy as cp
+    rt = _rt()
+    if rt.correspondence is None or rt.object_sdf is None:
+        pytest.skip("assets not present")
+    from HoloNew.src.test_socp.interaction import build_p_terms, _activation
+
+    q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
+    dqa = cp.Variable(rt.nv_a)
+    M = rt.correspondence.link_idx.shape[0]
+    L = rt.smplx_ground_probe.margin
+
+    # Use the real frame-1 object pose if available, else identity.
+    obj_pose = (rt._obj_poses_raw[1]
+                if getattr(rt, "_obj_poses_raw", None) is not None
+                else np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    obj_prev_pose = (rt._obj_poses_raw[0]
+                     if getattr(rt, "_obj_poses_raw", None) is not None
+                     else np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+
+    # Build a fake _p_state with zero previous positions and no previous contact
+    # (d_prev = +inf -> alpha_hat = 0 -> gamma = 0; terms will be empty).
+    # Then test with a state that has d_prev small enough to activate some points.
+    from HoloNew.src.test_socp.interaction import robot_control_points, query_entities
+    P = robot_control_points(rt, q_pin)
+    fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
+
+    # Mimic a "previous frame" where the robot was at its init pose.
+    rt._p_state = {
+        "p_prev_world": P.copy(),
+        "obj_prev": obj_prev_pose.copy(),
+        "d_prev_obj": np.asarray(fobj.distance, dtype=np.float64),
+        "d_prev_flr": np.asarray(fflr.distance, dtype=np.float64),
+        "a_prev_obj": np.array([_activation(float(fobj.distance[i]), L) for i in range(M)]),
+        "a_prev_flr": np.array([_activation(float(fflr.distance[i]), L) for i in range(M)]),
+    }
+
+    terms = build_p_terms(rt, q_pin, dqa, t=1, obj_pose=obj_pose,
+                          lambda_P=1.0, sigma_v=0.05, dt=1.0 / 30.0)
+    assert isinstance(terms, list)
+    # The assembled problem must be solvable regardless of how many active points.
+    base = cp.sum_squares(dqa)
+    obj = base if len(terms) == 0 else cp.sum(terms) + base
+    prob = cp.Problem(cp.Minimize(obj), [cp.SOC(0.2, dqa)])
+    prob.solve(solver=cp.CLARABEL)
+    assert prob.status in ("optimal", "optimal_inaccurate"), (
+        f"Problem status: {prob.status}; {len(terms)} P-terms assembled")
+
+
+def test_p_persistence_runs():
+    """retarget with lambda_P=1.0 produces finite output over 4 frames."""
+    rt = _rt()
+    if rt.correspondence is None or rt.object_sdf is None:
+        pytest.skip("assets not present")
+    rt.lambda_P = 1.0
+    res = rt.retarget(max_frames=4)
+    assert np.all(np.isfinite(res.qpos)), "Non-finite qpos with P term enabled"
     assert res.qpos.shape[0] == 4
