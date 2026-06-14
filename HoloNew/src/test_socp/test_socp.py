@@ -225,6 +225,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # Online SMPL-X -> SDF probe + its per-frame outputs (set by from_config).
         self.smplx_ground_probe = None
         self.smplx_sdf_fields: list = []
+        # When True, retarget() fills CoM / angular-momentum / foot-slip diagnostics
+        # post-hoc for the viewer. Off by default to keep the solve fast.
+        self.collect_diagnostics = False
 
         # ===== Holosoma-style optional constraints (default OFF; copied verbatim
         # from src/holosoma/interaction_mesh_retargeter.py). When every flag is
@@ -1067,7 +1070,66 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             if g1_pts:
                 res.g1_transport_pts = np.stack(g1_pts)
                 res.human_idx = self.correspondence.human_idx
+        # Diagnostics for the viewer. The solved object pose is already collected at
+        # no extra cost; CoM / angular momentum / foot-slip are computed post-hoc
+        # from the solved trajectory only when collect_diagnostics is on (keeps the
+        # normal solve fast).
+        if self._obj_solved_poses:
+            res.solved_object_poses = np.asarray(self._obj_solved_poses)
+        if getattr(self, "collect_diagnostics", False):
+            self._fill_diagnostics(res)
         return res
+
+    def _fill_diagnostics(self, res) -> None:
+        """Post-hoc CoM, centroidal angular momentum, and foot slip from res.qpos.
+
+        Cheap one-pass diagnostics for the viewer (no effect on the solve). CoM via
+        pinocchio; L via the centroidal map A_G on the causal joint velocity; foot
+        slip = mean tangential motion of active floor foot points vs the reference.
+        """
+        import pinocchio as pin
+        T = res.qpos.shape[0]
+        com = np.zeros((T, 3))
+        L = np.zeros((T, 3))
+        for t in range(T):
+            q_pin = self.pin.qpos_mj_to_q_pin(res.qpos[t, :36])
+            com[t] = self.pin.com(q_pin)
+            if t >= 1:
+                q_prev = self.pin.qpos_mj_to_q_pin(res.qpos[t - 1, :36])
+                v = pin.difference(self.pin.model, q_prev, q_pin) / self._dt
+                L[t] = (self.pin.centroidal_map(q_pin) @ v)[3:6]
+        res.com = com
+        res.angular_momentum = L
+        # Foot slip needs the floor probe + correspondence (object tasks / floor_as_entity).
+        if (getattr(self, "smplx_ground_probe", None) is not None
+                and getattr(self, "correspondence", None) is not None):
+            from HoloNew.src.test_socp.interaction import (
+                _activation, frame_references, query_entities, robot_control_points)
+            corr = self.correspondence
+            M = corr.link_idx.shape[0]
+            Lm = self.smplx_ground_probe.margin
+            foot = [i for i in range(M) if any(k in corr.link_names[corr.link_idx[i]].lower()
+                    for k in ("ankle", "foot", "toe"))]
+            I3 = np.eye(3)
+            slip = np.zeros(T)
+            obj_raw = getattr(self, "_obj_poses_raw", None)
+            for t in range(1, T):
+                qp = self.pin.qpos_mj_to_q_pin(res.qpos[t, :36])
+                qpm = self.pin.qpos_mj_to_q_pin(res.qpos[t - 1, :36])
+                Pt = robot_control_points(self, qp)
+                Ptm = robot_control_points(self, qpm)
+                op = obj_raw[t] if obj_raw is not None else None
+                _, fflr = query_entities(self, Pt, op, margin=Lm)
+                _, _, d_flr_t, _, pr_t = frame_references(self, t)
+                _, _, _, _, pr_tm = frame_references(self, t - 1)
+                vals = []
+                for i in foot:
+                    if _activation(float(d_flr_t[i]), Lm) > 0 and bool(fflr.active[i]):
+                        n0 = np.asarray(fflr.direction[i], float)
+                        Pi = I3 - np.outer(n0, n0)
+                        vals.append(np.linalg.norm(Pi @ ((Pt[i]-Ptm[i]) - (pr_t[i]-pr_tm[i]))))
+                slip[t] = float(np.mean(vals)) if vals else 0.0
+            res.foot_slip = slip
 
     # ------------------------------------------------------------------
     # Class method factory

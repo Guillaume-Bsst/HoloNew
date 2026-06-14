@@ -74,6 +74,11 @@ class MethodViz:
     human_obj_dist: np.ndarray | None = None    # (T, N)    signed distance to the object (SDF)
     human_flr_dist: np.ndarray | None = None    # (T, N)    signed distance to the floor (analytic)
     g1_witness: np.ndarray | None = None        # (T, M, 3) object-local witness per G1 point
+    # TEST-SOCP solve diagnostics.
+    solved_object_poses: np.ndarray | None = None  # (T, 7) the method's SOLVED object pose [wxyz,xyz]
+    com: np.ndarray | None = None                  # (T, 3) robot CoM
+    angular_momentum: np.ndarray | None = None     # (T, 3) centroidal angular momentum L
+    foot_slip: np.ndarray | None = None            # (T,)   mean tangential foot slip (no-slip diagnostic)
 
 
 class Viewer:
@@ -252,9 +257,16 @@ class Viewer:
             self._tog_directions = self.server.gui.add_checkbox("Directions", False)
             self._tog_object_contact = self.server.gui.add_checkbox("Object contact", False)
             self._tog_floor_contact = self.server.gui.add_checkbox("Floor contact", False)
+
+        # TEST-SOCP solve diagnostics: the SOLVED object pose (movable/inertia) and
+        # the per-frame CoM / foot-slip / angular-momentum readout.
+        with self.server.gui.add_folder("TEST diagnostics"):
+            self._tog_solved_obj = self.server.gui.add_checkbox("Solved object pose", True)
+            self._diag_text = self.server.gui.add_text("Solve state", initial_value="", disabled=True)
         for _cb in (self._tog_sdf, self._tog_sdf_floor, self._tog_human,
                     self._tog_g1_transport, self._tog_directions,
-                    self._tog_object_contact, self._tog_floor_contact):
+                    self._tog_object_contact, self._tog_floor_contact,
+                    self._tog_solved_obj):
             @_cb.on_update
             def _(_evt):
                 self._redraw(int(self._slider.value))
@@ -450,6 +462,40 @@ class Viewer:
                 self._object_pts_handle.visible = True
         elif self._object_pts_handle is not None:
             self._object_pts_handle.visible = False
+
+    def _draw_diagnostics(self, frame: int) -> None:
+        """TEST-SOCP solve diagnostics. (1) When "Solved object pose" is on, re-place
+        the object mesh/points at TEST's SOLVED object pose (movable/inertia), overriding
+        the reference pose drawn by _draw_object so the solved-vs-reference gap is visible.
+        (2) Report the per-frame CoM height, foot slip and |L| in the "Solve state" text.
+        No-op for methods without diagnostics (the fields stay None)."""
+        method = self._methods.get(self._method_dd.value)
+        if method is None:
+            return
+        # (1) Solved object pose: the solved pose is [qw,qx,qy,qz, x,y,z]; the mesh/points
+        # handles were created (or hidden) by _draw_object for the active stage/pose.
+        sp_seq = method.solved_object_poses
+        if (self._tog_solved_obj.value and sp_seq is not None and frame < len(sp_seq)
+                and self.object_mesh_verts is not None):
+            quat, trans = sp_seq[frame][:4], sp_seq[frame][4:7]
+            if self._object_mesh_handle is not None and self._tog_object.value:
+                self._object_mesh_handle.vertices = transform_points_local_to_world(
+                    quat, trans, self.object_mesh_verts).astype(np.float32)
+                self._object_mesh_handle.visible = True
+            if (self._object_pts_handle is not None and self._tog_object_pts.value
+                    and self.object_points_local is not None):
+                self._object_pts_handle.points = transform_points_local_to_world(
+                    quat, trans, self.object_points_local).astype(np.float32)
+                self._object_pts_handle.visible = True
+        # (2) Solve-state readout: CoM height, foot slip (mm), |L|.
+        parts = []
+        if method.com is not None and frame < len(method.com):
+            parts.append(f"CoM z={method.com[frame][2]:.3f}m")
+        if method.foot_slip is not None and frame < len(method.foot_slip):
+            parts.append(f"slip={method.foot_slip[frame] * 1000:.1f}mm")
+        if method.angular_momentum is not None and frame < len(method.angular_momentum):
+            parts.append(f"|L|={np.linalg.norm(method.angular_momentum[frame]):.2f}")
+        self._diag_text.value = "  ".join(parts) if parts else "(no TEST diagnostics)"
 
     def _draw_g1_points(self, frame: int) -> None:
         """Holosoma's G1 morphological-graph keypoints (the robot links the interaction
@@ -674,6 +720,7 @@ class Viewer:
         self._draw_interaction(frame)
         self._draw_directions(frame)
         self._draw_sdf_floor()
+        self._draw_diagnostics(frame)
         g_stage = self._ghost_stage_dd.value
         if g_stage != "Off":
             g_method = self._methods[self._ghost_method_dd.value]

@@ -222,6 +222,10 @@ def view(cfg: ViewStagesConfig) -> None:
     def build_gmr(label: str, key: str, cls) -> MethodViz:
         # GMR v1 / v2: solved qpos + full per-stage mapped-body point clouds.
         rt = cls.from_config(cfg)
+        # TEST-SOCP can emit CoM / angular-momentum / foot-slip diagnostics for the
+        # viewer (no-op for GMR-SOCP, which lacks the flag).
+        if hasattr(rt, "collect_diagnostics"):
+            rt.collect_diagnostics = True
         res = rt.retarget()
         T = res.qpos.shape[0]
         # GMR's own floor correction is labelled "Floor" so the early input-grounding
@@ -254,6 +258,11 @@ def view(cfg: ViewStagesConfig) -> None:
             mv.g1_transport_pts = res.g1_transport_pts
             mv.g1_dist = res.human_obj_dist[:, res.human_idx]      # each G1 reads its human's object dist
             mv.g1_witness = res.human_witness[:, res.human_idx]    # and its human's object witness
+        # Solve diagnostics: the method's SOLVED object pose + CoM / momentum / slip.
+        mv.solved_object_poses = res.solved_object_poses
+        mv.com = res.com
+        mv.angular_momentum = res.angular_momentum
+        mv.foot_slip = res.foot_slip
         return mv
 
     builders = {
