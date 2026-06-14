@@ -40,6 +40,45 @@ def load_ori_npz_file(npz_file_path, dest_fps=30):
     }
 
 
+# Standard SMPL-X body kinematic tree (first 22 joints), parent index per joint.
+# Order matches the joint-name list at the bottom of this file and the SMPL-X
+# pose layout (root_orient = joint 0, pose_body = joints 1..21).
+_SMPLX_BODY_PARENTS = np.array([
+    -1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19
+], dtype=np.int64)
+
+
+def compute_global_joint_orientations(aa_rot_body: np.ndarray,
+                                      parents: np.ndarray) -> np.ndarray:
+    """Global per-joint orientations (world frame) from local axis-angle poses.
+
+    SMPL-X poses are LOCAL joint rotations (relative to the parent). The world
+    orientation of joint k is the forward-kinematics product down the tree:
+        R_global[k] = R_global[parent[k]] @ R_local[k],   R_global[root] = R_local[root].
+    The root's local rotation is the root_orient (joint 0). This mirrors what the
+    SMPL-X body model does internally during LBS, so the resulting per-joint world
+    orientations match the joint positions the model returns.
+
+    Args:
+        aa_rot_body: (T, J, 3) local axis-angle rotations (J body joints).
+        parents: (J,) parent index per joint (root parent = -1).
+
+    Returns:
+        (T, J, 4) per-joint world orientation quaternions in WXYZ order.
+    """
+    from scipy.spatial.transform import Rotation
+
+    T, J, _ = aa_rot_body.shape
+    local_R = Rotation.from_rotvec(aa_rot_body.reshape(-1, 3)).as_matrix().reshape(T, J, 3, 3)
+    global_R = np.empty((T, J, 3, 3), dtype=np.float64)
+    global_R[:, 0] = local_R[:, 0]
+    for k in range(1, J):
+        global_R[:, k] = global_R[:, parents[k]] @ local_R[:, k]
+    quat_xyzw = Rotation.from_matrix(global_R.reshape(-1, 3, 3)).as_quat().reshape(T, J, 4)
+    # scipy returns XYZW; the retargeting pipeline uses WXYZ throughout.
+    return quat_xyzw[..., [3, 0, 1, 2]]
+
+
 def run_smplx_model(
     root_trans,
     aa_rot_rep,
@@ -275,7 +314,21 @@ def main(cfg: Config):
 
         global_joint_positions = (
             global_joint_positions.squeeze(0).detach().cpu().numpy()[:, :num_body_joints, :]
-        )  # T X 55 X 3
+        )  # T X 22 X 3
+
+        # Global per-joint world orientations (WXYZ) from the local axis-angle poses
+        # — these are what the TEST-SOCP Style objective needs and the positions-only
+        # output dropped. Prefer the body model's own kinematic tree; fall back to the
+        # standard SMPL-X body parents if it is not exposed.
+        bm_neutral = bm_dict["neutral"]
+        kintree = getattr(bm_neutral, "kintree_table", None)
+        if kintree is not None:
+            parents = np.asarray(kintree)[0][:num_body_joints].astype(np.int64).copy()
+            parents[0] = -1
+        else:
+            parents = _SMPLX_BODY_PARENTS
+        aa_body = aa_rot_52.squeeze(0).detach().cpu().numpy()[:, :num_body_joints, :]  # T X 22 X 3
+        global_joint_orientations = compute_global_joint_orientations(aa_body, parents)  # T X 22 X 4 wxyz
 
         # Compute height based on min_z and max_z value of all the vertices
         height = compute_height(bm_dict, betas, gender=[gender])
@@ -286,7 +339,8 @@ def main(cfg: Config):
         subset_data_name = npz_path.parts[-3]
         sub_name = npz_path.parts[-2]
         output_file_path = os.path.join(cfg.output_folder, subset_data_name + "_" + sub_name + "_" + npz_path.name)
-        np.savez(output_file_path, global_joint_positions=global_joint_positions, height=height)
+        np.savez(output_file_path, global_joint_positions=global_joint_positions,
+                 global_joint_orientations=global_joint_orientations, height=height)
         print(f"Saved processed data to {output_file_path}")
 
         # break
