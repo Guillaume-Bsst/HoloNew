@@ -938,7 +938,7 @@ class TestSocpRetargeter:
                 and getattr(self, "correspondence", None) is not None \
                 and (getattr(self, "object_sdf", None) is not None
                      or getattr(self, "floor_as_entity", False)) \
-                and obj_pose is not None:
+                and (obj_pose is not None or getattr(self, "floor_as_entity", False)):
             from HoloNew.src.test_socp.interaction import build_dx_terms
             q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
             # Pass dxi_obj for bilateral coupling when the object is a variable.
@@ -953,7 +953,7 @@ class TestSocpRetargeter:
                 and getattr(self, "correspondence", None) is not None \
                 and (getattr(self, "object_sdf", None) is not None
                      or getattr(self, "floor_as_entity", False)) \
-                and obj_pose is not None \
+                and (obj_pose is not None or getattr(self, "floor_as_entity", False)) \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
             from HoloNew.src.test_socp.interaction import build_p_terms
@@ -968,7 +968,7 @@ class TestSocpRetargeter:
                 and getattr(self, "correspondence", None) is not None \
                 and (getattr(self, "object_sdf", None) is not None
                      or getattr(self, "floor_as_entity", False)) \
-                and obj_pose is not None \
+                and (obj_pose is not None or getattr(self, "floor_as_entity", False)) \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
             from HoloNew.src.test_socp.interaction import build_p_constraints

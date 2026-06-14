@@ -262,8 +262,10 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
     # p_ref (world source points) is used only by build_p_terms; ignored here.
     d_obj_ref, x_obj_ref, d_flr_ref, x_flr_ref, _p_ref = frame_references(rt, t)
 
-    # Object-to-world rotation (Robj[:, j] = j-th object axis in world).
-    Robj = _robj_from_pose(obj_pose)
+    # Object-to-world rotation (Robj[:, j] = j-th object axis in world). In
+    # floor-only mode (no object: obj_pose is None) the object channel has no
+    # active points, so Robj is never used.
+    Robj = _robj_from_pose(obj_pose) if obj_pose is not None else None
 
     # --- Active-set selection ---
     # Object channel: alpha > 0 AND field marked active.
@@ -635,9 +637,10 @@ def build_p_constraints(rt, q_pin: np.ndarray, dqa, t: int,
     M = corr.link_idx.shape[0]
     L = rt.smplx_ground_probe.margin
 
-    # Current and previous object-to-world rotation matrices.
-    Robj_t = _robj_from_pose(obj_pose)
-    obj_t = np.asarray(obj_pose[4:7], dtype=float)
+    # Current and previous object-to-world rotation matrices. Floor-only mode
+    # (obj_pose is None) has no active object-channel carriers, so these are unused.
+    Robj_t = _robj_from_pose(obj_pose) if obj_pose is not None else None
+    obj_t = np.asarray(obj_pose[4:7], dtype=float) if obj_pose is not None else None
     obj_prev_pose = state["obj_prev"]
     Robj_tm1 = _robj_from_pose(obj_prev_pose)
     obj_tm1 = np.asarray(obj_prev_pose[4:7], dtype=float)
