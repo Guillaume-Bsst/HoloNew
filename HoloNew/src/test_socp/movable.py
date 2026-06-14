@@ -40,6 +40,75 @@ def se3_to_pose(M: pin.SE3) -> np.ndarray:
     return np.array([q.w, q.x, q.y, q.z, M.translation[0], M.translation[1], M.translation[2]])
 
 
+def sample_object_surface(mesh_file: str, density: float = 200.0,
+                          seed: int = 0) -> np.ndarray:
+    """Sample control points on the object mesh surface (object-local frame).
+
+    Mirrors the robot correspondence: the object is a movable carrier whose
+    surface points interact with entities (here the floor). Even surface sampling
+    at ``density`` points/m^2 (minimum 64). Returns (M, 3) object-local offsets,
+    motion-independent (sampled once).
+    """
+    import trimesh
+    mesh = trimesh.load(mesh_file, force="mesh")
+    n = max(64, int(float(mesh.area) * density))
+    pts, _ = trimesh.sample.sample_surface_even(mesh, n, seed=seed)
+    return np.asarray(pts, dtype=np.float64)
+
+
+def build_object_floor_terms(rt, dxi, obj_pose, lambda_of, margin):
+    """Object<->floor contact (the paper's object-environment pair), in inertia
+    mode. Object surface points are carried by the object pose T = exp6(dxi)*T_ref
+    and query the analytic floor field (z=0 plane). Each near-floor point gets a D
+    (normal/height) and X (tangential/no-slip) residual that resists breaking the
+    floor contact, coupling the object pose variable dxi. Activation comes from the
+    reference floor distance, so the term acts only when the object is near the
+    floor and VANISHES when the object is lifted (-> object free -> W^o ballistic).
+
+    Linearization point is the reference object pose (obj_pose), so the residual is
+    zero at dxi=0 and penalizes motion of the floor-contact points away from it.
+    For a world point p, p(dxi) ~= p0 + [I, -skew(p0)] @ dxi (left-compose).
+
+    Args:
+        rt: retargeter (provides rt.object_surface_local).
+        dxi: cp.Variable(6), object SE(3) tangent step.
+        obj_pose: (7,) [qw,qx,qy,qz,x,y,z] reference object pose at this frame.
+        lambda_of: object-floor weight.
+        margin: floor activation band L (metres).
+
+    Returns:
+        List of up to two cvxpy expressions [D_term, X_term] (empty if no active
+        near-floor object points).
+    """
+    import cvxpy as cp
+    from HoloNew.src.test_socp.interaction import _activation, _skew
+
+    p_local = rt.object_surface_local                       # (M, 3)
+    M = p_local.shape[0]
+    T_ref = pose_to_se3(obj_pose)
+    p_w0 = p_local @ T_ref.rotation.T + T_ref.translation   # (M, 3) world
+    d_ref = p_w0[:, 2]                                       # floor signed distance (z)
+
+    alpha = np.array([_activation(float(d_ref[i]), margin) for i in range(M)])
+    active = np.where(alpha > 0)[0]
+    if active.size == 0:
+        return []
+
+    z = np.array([0.0, 0.0, 1.0])
+    Pi0 = np.eye(3) - np.outer(z, z)
+    sw = np.sqrt(lambda_of * alpha[active] / (margin * margin * M))   # (na,)
+
+    A_D = np.empty((active.size, 6))          # D: z^T [I,-skew(p0)] per point
+    AX_blocks = []                            # X: Pi0 [I,-skew(p0)] per point
+    for k, i in enumerate(active):
+        Ji = np.hstack([np.eye(3), -_skew(p_w0[i])])        # (3, 6)
+        A_D[k] = sw[k] * (z @ Ji)
+        AX_blocks.append(sw[k] * (Pi0 @ Ji))
+    A_X = np.vstack(AX_blocks)                                # (3*na, 6)
+
+    return [cp.sum_squares(A_D @ dxi), cp.sum_squares(A_X @ dxi)]
+
+
 def build_wo_term(
     T_obj0,
     T_obj_tm1,

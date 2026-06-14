@@ -168,3 +168,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # contact points, so without this anchor the bilateral D/X coupling offsets
     # the (position-blind) object instead; this term resolves that coupling.
     lambda_o_pos: float = 10.0
+    # Object<->floor contact (the paper's object-environment pair). Places the
+    # object by its floor contact instead of a positional target: object surface
+    # points carried by T_obj query the floor field, resisting any motion that
+    # breaks the near-floor contact, and vanishing when the object is lifted (then
+    # the object is free, placed by object<->robot contact + ballistic W^o). Used
+    # by inertia_mode, which sets lambda_o_pos=0 (drop the anchor) and this > 0 so
+    # the object, like the body, is placed by contacts. Default off (parity).
+    lambda_object_floor: float = 0.0

@@ -80,6 +80,7 @@ class TestSocpRetargeter:
         lambda_o: float = 0.0,
         lambda_omega: float = 0.0,
         lambda_o_pos: float = 0.0,
+        lambda_object_floor: float = 0.0,
         load_object_scene: bool = True,
         floor_as_entity: bool = False,
         activate_persistence: bool = False,
@@ -202,6 +203,9 @@ class TestSocpRetargeter:
         # None until from_config populates them; not used in the solve yet.
         self.object_sdf = None
         self.contact_fields = None
+        # Object surface control points (object-local), sampled from the object
+        # mesh by from_config for the object<->floor inertia term. None until set.
+        self.object_surface_local = None
 
         # Online SMPL-X -> SDF probe + its per-frame outputs (set by from_config).
         self.smplx_ground_probe = None
@@ -251,6 +255,7 @@ class TestSocpRetargeter:
         self.lambda_o = lambda_o
         self.lambda_omega = lambda_omega
         self.lambda_o_pos = lambda_o_pos
+        self.lambda_object_floor = lambda_object_floor
         # Solved object pose history: updated by retarget() when movable is on.
         self._obj_solved_poses: list = []
 
@@ -1047,6 +1052,20 @@ class TestSocpRetargeter:
                 dxi_obj, self.lambda_o_pos,
             ))
 
+        # Object<->floor contact (paper's object-environment pair; inertia mode).
+        # Places the object by its floor contact instead of a positional anchor:
+        # near-floor object surface points resist breaking contact, vanishing when
+        # the object is lifted (then placed by object<->robot + ballistic W^o).
+        if (dxi_obj is not None
+                and obj_pose is not None
+                and self.lambda_object_floor > 0
+                and getattr(self, "object_surface_local", None) is not None):
+            from HoloNew.src.test_socp.movable import build_object_floor_terms
+            _L_floor = (self.smplx_ground_probe.margin
+                        if self.smplx_ground_probe is not None else 0.1)
+            obj_terms += build_object_floor_terms(
+                self, dxi_obj, obj_pose, self.lambda_object_floor, _L_floor)
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
             prob.solve(solver=cp.CLARABEL)
@@ -1436,6 +1455,7 @@ class TestSocpRetargeter:
         kwargs["lambda_o"] = sc.lambda_o
         kwargs["lambda_omega"] = sc.lambda_omega
         kwargs["lambda_o_pos"] = sc.lambda_o_pos
+        kwargs["lambda_object_floor"] = sc.lambda_object_floor
         kwargs["activate_persistence"] = sc.activate_persistence
         kwargs["persistence_tol"] = sc.persistence_tol
         # The interaction costs require the non-penetration constraint to stay
@@ -1460,6 +1480,11 @@ class TestSocpRetargeter:
             # residual/flight. Provisional weights; tuned in a follow-up task.
             kwargs["lambda_c"] = sc.lambda_c if sc.lambda_c > 0 else 1e-5
             kwargs["lambda_L"] = sc.lambda_L if sc.lambda_L > 0 else 1e-4
+            # The OBJECT, like the body, is placed by contacts: drop the position
+            # anchor and place it by object<->floor + object<->robot contacts.
+            kwargs["lambda_o_pos"] = 0.0
+            kwargs["lambda_object_floor"] = (
+                sc.lambda_object_floor if sc.lambda_object_floor > 0 else 5.0)
         else:
             kwargs["floor_as_entity"] = sc.floor_as_entity
 
@@ -1582,6 +1607,15 @@ class TestSocpRetargeter:
             rt.object_sdf = load_object_sdf(_sdf_path)
         if _contact_path.exists():
             rt.contact_fields = load_contact_fields(_contact_path)
+
+        # Object surface control points (object-local) for the object<->floor
+        # inertia term. Sampled once from the object mesh; only needed when the
+        # object pose is a variable (movable) on an object task.
+        _mesh_file = getattr(constants, "OBJECT_MESH_FILE", None)
+        if (rt.object_sdf is not None and _mesh_file is not None
+                and Path(_mesh_file).exists()):
+            from HoloNew.src.test_socp.movable import sample_object_surface
+            rt.object_surface_local = sample_object_surface(_mesh_file)
 
         # Online SMPL-X -> object-SDF probe (causal, per frame). Built only when the
         # object SDF is available: sample the subject SMPL-X surface once. The human is
