@@ -34,19 +34,21 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # is active on an object task (without it the D term marches the floating base
     # through the floor).
     #
-    # Weights jointly re-tuned 2026-06-14 from 1.0 to 5.0. In the full pipeline
-    # (Style scaffold + W^r + persistence + movable all on) lambda=1.0 was
-    # DOMINATED by the other objective terms: D/X at 1.0 made BOTH contact gaps
-    # WORSE than D/X off (the cost was present but too weak to win). Sweep on
-    # sub3_largebox_003 (K=8, all bricks on), object/floor mean contact gap:
-    #   lambda=1:   object=0.0301 floor=0.0363   (worse than off: object=0.0200)
-    #   lambda=5:   object=0.0096 floor=0.0314   <-- chosen (object channel best)
-    #   lambda=20:  object=0.0306 floor=0.0171
-    #   lambda=100: object=0.0372 floor=0.0118
-    # lambda=5 halves the OBJECT (manipulation) contact gap vs D/X off — that is
-    # D/X's primary job. The FLOOR channel is now owned by the persistence no-slip
-    # hard constraint (D/X off + persistence on gives floor=0.0107, which D/X
-    # cannot beat at any weight), so the acceptance metric tracks the object gap.
+    # Weights jointly re-tuned. The interaction must outweigh the other objective
+    # terms (Style + W^r + persistence + movable) to actually reduce the contact
+    # gap. Re-tuned again 2026-06-14 from 5.0 to 20.0 after removing the holosoma
+    # root-XY scale (root_xy_scale=1.0 in from_config): aligning the GMR targets to
+    # the raw pelvis XY (so targets and interaction fields share one world frame)
+    # shifted the contact geometry, and the old lambda=5 no longer beat D/X off.
+    # Sweep on sub3_largebox_003 (K=30, aligned frame), object mean contact gap:
+    #   lambda=0  (off): 0.0323
+    #   lambda=5:        0.0344   (worse than off)
+    #   lambda=10:       0.0344
+    #   lambda=20:       0.0276   <-- chosen (clear win, moderate weight)
+    #   lambda=50:       0.0235   (best, but aggressive)
+    # lambda=20 cuts the OBJECT (manipulation) contact gap ~15% below D/X off — D/X's
+    # primary job. The FLOOR channel is owned by the persistence no-slip hard
+    # constraint, so the acceptance metric tracks the object gap.
     #
     # P (contact persistence / no-slip): the SOFT cost form (lambda_P>0) is kept for
     # reference but defaults OFF. It renormalizes the persistence residual by the field
@@ -57,8 +59,8 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # behaviour is instead delivered by the HARD tangential band constraint
     # (activate_persistence, below), which is both fast and tight — prefer it. sigma_v
     # is kept for API compatibility and is unused by the hard constraint.
-    lambda_D: float = 5.0
-    lambda_X: float = 5.0
+    lambda_D: float = 20.0
+    lambda_X: float = 20.0
     lambda_P: float = 0.0
     sigma_v: float = 0.05
 

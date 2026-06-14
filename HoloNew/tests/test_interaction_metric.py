@@ -11,8 +11,9 @@ contact's no-slip is owned by the persistence hard constraint
 (activate_persistence), which D/X cannot beat on the floor at any weight
 (D/X off + persistence on gives floor gap ~0.0107 m). D/X's enduring,
 non-redundant job is the OBJECT (manipulation) contact channel, where at the
-re-tuned lambda=5.0 it halves the gap (object ~0.0096 on vs ~0.0200 off on
-sub3_largebox_003). See the lambda sweep recorded in config.py.
+re-tuned lambda=20.0 (aligned frame, root_xy_scale=1.0) it cuts the gap ~15%
+(object ~0.0276 on vs ~0.0323 off on sub3_largebox_003, K=30). See the lambda
+sweep recorded in config.py.
 """
 import numpy as np
 import pytest
@@ -55,10 +56,13 @@ def test_dx_reduces_object_contact_gap():
         task_type="object_interaction", task_name="sub3_largebox_003", data_format="smplh",
         retargeter=TestSocpRetargeterConfig(lambda_D=0.0, lambda_X=0.0, lambda_P=0.0)))
 
-    K = 8
+    # Use a window that includes the manipulation phase: on sub3_largebox_003 the
+    # hands engage the box only after ~frame 9, so a short window (e.g. K=8) can
+    # contain no active object contacts at all (gap = None). K=30 covers the grasp.
+    K = 30
     gap_on = _mean_object_gap(rt_on, rt_on.retarget(max_frames=K))
     gap_off = _mean_object_gap(rt_off, rt_off.retarget(max_frames=K))
-    # Observed (sub3_largebox_003, K=8): on ~0.0096 vs off ~0.0200.
-    assert gap_on is not None and gap_off is not None
+    assert gap_on is not None and gap_off is not None, (
+        "no active object contacts in the window — widen K")
     assert gap_on < gap_off, (
         f"D/X did not reduce the object contact gap: on={gap_on:.4f} >= off={gap_off:.4f}")

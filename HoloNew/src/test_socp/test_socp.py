@@ -1382,7 +1382,7 @@ class TestSocpRetargeter:
             build_retargeter_kwargs_from_config,
             create_task_constants,
         )
-        from HoloNew.src.holosoma.preprocess import calculate_scale_factor, ground_to_floor
+        from HoloNew.src.holosoma.preprocess import ground_to_floor
         from .preprocess import compute_stages
         from .tables import HUMAN_ROOT_NAME, MAPPED_BODY_NAMES
         from .targets import load_pt_joints, load_pt_quaternions
@@ -1509,13 +1509,17 @@ class TestSocpRetargeter:
         # grounded input and the 'Grounded' display stage is the real chain input.
         toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
         rt.gmr_grounded = ground_to_floor(raw_joints, toe_indices)
-        # Pull the root toward the world centre by holosoma's scale factor
-        # (ROBOT_HEIGHT / human_height) so the GMR base XY matches holosoma's
-        # globally-scaled placement. compute_stages applies this as a rigid XY
-        # translation, preserving GMR's body proportions and the Z floor-drop.
-        smpl_scale = calculate_scale_factor(cfg.task_name, constants.ROBOT_HEIGHT)
+        # Keep the GMR base XY at the RAW grounded pelvis (root_xy_scale=1.0), NOT
+        # holosoma's globally-scaled placement. Holosoma pulls the root toward the
+        # world centre by ROBOT_HEIGHT/human_height (~0.68 here), which shifts the
+        # base ~0.3 m toward the origin. The contact references (SmplxGroundProbe)
+        # place the human at the raw grounded pelvis, so the holosoma scale would
+        # put the GMR targets and the contact field in inconsistent world frames
+        # (~raw_xy*(1-scale) apart). The TEST-SOCP pipeline keeps both at raw_xy so
+        # the targets and the interaction fields agree. Morphological body
+        # proportions and the Z floor-drop are still applied inside compute_stages.
         rt.gmr_stages = compute_stages(
-            rt.gmr_grounded, human_quat, anchor_root_xy=True, root_xy_scale=smpl_scale
+            rt.gmr_grounded, human_quat, anchor_root_xy=True, root_xy_scale=1.0
         )
         rt.gmr_ground = rt.gmr_stages["ground"]
         ground = rt.gmr_ground

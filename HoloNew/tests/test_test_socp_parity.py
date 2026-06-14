@@ -4,10 +4,11 @@ Records the first 3 frames of the solved root (qpos[:3, :7]) and asserts the
 default solve stays numerically stable to 1e-6 as default-off constraint code
 is added.
 
-Baseline re-recorded after strengthening the Style pelvis position anchor to
-pelvis_anchor_weight=10.0 (2026-06-14).  With the stronger anchor the base
-tracks the reference path (mean xy-drift ~0.09 m on sub3_largebox_003 vs
-0.243 m at paw=1.0) while Style orientation fidelity is unaffected.
+Baseline re-recorded 2026-06-14 after removing the holosoma root-XY scale
+(root_xy_scale=1.0 in from_config): the base now sits at the RAW grounded pelvis
+XY (~0.93, 1.23) instead of the globally-scaled placement (~0.63, 0.83 = raw*0.68),
+so the GMR targets agree with the interaction-field references. Only the base XY
+shifted; the base Z, orientation, and all joints are unchanged.
 """
 import numpy as np
 
@@ -16,15 +17,15 @@ from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
 _G1_QDIM = 36  # G1 base (7) + 29 joints
 
-# Re-baselined after strengthening the Style pelvis anchor to 10.0.
+# Re-baselined after setting root_xy_scale=1.0 (raw pelvis XY).
 # Recorded with: rt.retarget().qpos[:3, :7] on sub3_largebox_003 (smplh, robot_only).
 BASELINE = np.array([
-    [ 0.63471276,  0.83391994,  0.80000567, -0.7108144 , -0.00565931,
+    [ 0.93336654,  1.22630751,  0.80000567, -0.71081440, -0.00565931,
      -0.01560232,  0.70318378],
-    [ 0.6319457 ,  0.83979543,  0.78959527, -0.71410979, -0.05784619,
-     -0.06166082,  0.69490932],
-    [ 0.62812757,  0.84882141,  0.77276444, -0.71302065, -0.11616299,
-     -0.1131963 ,  0.68212485],
+    [ 0.92929775,  1.23494756,  0.78959519, -0.71410985, -0.05784612,
+     -0.06166059,  0.69490929],
+    [ 0.92367282,  1.24801191,  0.77287837, -0.71302129, -0.11616201,
+     -0.11319241,  0.68212499],
 ])
 
 
