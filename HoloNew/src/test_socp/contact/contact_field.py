@@ -33,6 +33,20 @@ class ContactField:
     active: np.ndarray     # (N,)    bool, within margin of the surface
 
 
+def inactive_field(n: int, margin: float) -> "ContactField":
+    """An all-inactive ContactField of length n (distance=+margin, others zero).
+
+    Used for the object channel when no object SDF is present (floor-only mode):
+    activation alpha(d>=margin)=0, so these points contribute nothing to D/X/P.
+    """
+    return ContactField(
+        distance=np.full(n, margin, dtype=np.float64),
+        direction=np.zeros((n, 3), dtype=np.float64),
+        witness=np.zeros((n, 3), dtype=np.float64),
+        active=np.zeros(n, dtype=bool),
+    )
+
+
 def _contains(mesh, pts, batch=_CONTAINS_BATCH):
     n = len(pts)
     inside = np.empty(n, dtype=bool)

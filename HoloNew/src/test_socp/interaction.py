@@ -125,8 +125,14 @@ def query_entities(rt, pts_world: np.ndarray, obj_pose: np.ndarray,
         margin = rt.smplx_ground_probe.margin
 
     # Object SDF: query in the object-local frame (mirrors smplx_field exactly).
-    pts_local = _world_to_object_local(pts_world, obj_pose)
-    fobj = rt.object_sdf.query(pts_local, margin)
+    # Floor-only mode (inertia_mode without an object): no object SDF -> an
+    # all-inactive object field, so only the floor channel contributes.
+    if getattr(rt, "object_sdf", None) is None:
+        from HoloNew.src.test_socp.contact.contact_field import inactive_field
+        fobj = inactive_field(pts_world.shape[0], margin)
+    else:
+        pts_local = _world_to_object_local(pts_world, obj_pose)
+        fobj = rt.object_sdf.query(pts_local, margin)
 
     # Floor: analytic z=0 field in the world frame.
     fflr = floor_field(pts_world.astype(np.float32), margin)
