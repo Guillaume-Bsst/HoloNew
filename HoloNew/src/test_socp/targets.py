@@ -38,6 +38,45 @@ def ground_frame_targets(ground_pos_t: np.ndarray, ground_quat_t: np.ndarray, ta
     return out
 
 
+# SMPL-X 22 body-joint order — matches prep_amass_smplx_for_rt's output
+# (global_joint_positions / global_joint_orientations columns).
+SMPLX_BODY_JOINT_NAMES = [
+    "pelvis", "left_hip", "right_hip", "spine1", "left_knee", "right_knee",
+    "spine2", "left_ankle", "right_ankle", "spine3", "left_foot", "right_foot",
+    "neck", "left_collar", "right_collar", "head", "left_shoulder",
+    "right_shoulder", "left_elbow", "right_elbow", "left_wrist", "right_wrist",
+]
+
+
+def load_smplx_to_smplh_layout(npz_path, mapped_body_names, human_body_to_idx,
+                               n_slots: int = 52):
+    """Load a processed AMASS SMPL-X npz and remap its 22 body joints into the
+    SMPLH 52-slot layout the TEST-SOCP GMR tables expect.
+
+    The npz (from data_utils/prep_amass_smplx_for_rt) holds:
+        global_joint_positions   (T, 22, 3)
+        global_joint_orientations(T, 22, 4) WXYZ
+    Each mapped body is placed at human_body_to_idx[name] (the SMPLH index the
+    smplh-based tables read), so compute_stages/Style consume it unchanged. Slots
+    not used by any mapped body stay zero (position) / identity (quaternion).
+
+    Returns (raw_joints (T, n_slots, 3), human_quat (T, n_slots, 4) WXYZ, height).
+    """
+    d = np.load(npz_path)
+    pos = np.asarray(d["global_joint_positions"], dtype=np.float32)        # (T,22,3)
+    ori = np.asarray(d["global_joint_orientations"], dtype=np.float32)     # (T,22,4)
+    height = float(d["height"]) if "height" in d.files else None
+    sidx = {n: i for i, n in enumerate(SMPLX_BODY_JOINT_NAMES)}
+    T = pos.shape[0]
+    raw = np.zeros((T, n_slots, 3), dtype=np.float32)
+    quat = np.zeros((T, n_slots, 4), dtype=np.float32)
+    quat[..., 0] = 1.0                                                     # identity wxyz
+    for name in mapped_body_names:
+        raw[:, human_body_to_idx[name]] = pos[:, sidx[name]]
+        quat[:, human_body_to_idx[name]] = ori[:, sidx[name]]
+    return raw, quat, height
+
+
 def load_pt_joints(pt_path: str | Path) -> np.ndarray:
     """Load per-joint world positions (T, 52, 3) from an OMOMO .pt file.
 

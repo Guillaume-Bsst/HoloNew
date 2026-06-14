@@ -1502,10 +1502,25 @@ class TestSocpRetargeter:
             kwargs["load_object_scene"] = False  # ground non-pen only; plain model
         rt = cls(**kwargs)
 
-        # Load raw joint positions and per-joint quaternions from the .pt file
+        # Load raw joint positions + per-joint quaternions. Two sources:
+        #  - OMOMO .pt (smplh): 52-joint layout, positions + stored quaternions.
+        #  - AMASS SMPL-X (data_format="smplx"): a processed .npz (from
+        #    data_utils/prep_amass_smplx_for_rt) with 22 body joints + world
+        #    orientations, remapped into the SMPLH 52-slot layout the tables expect.
+        #    This is the path for flight/locomotion clips (SFU etc.), robot_only.
+        # pt_path is defined for both paths (object loading references it); for the
+        # smplx path it simply does not exist, and object loading is gated on the
+        # task having a real object SDF (robot_only smplx has none).
         pt_path = cfg.data_path / f"{cfg.task_name}.pt"
-        raw_joints = load_pt_joints(pt_path)    # (T, 52, 3) raw positions
-        human_quat = load_pt_quaternions(pt_path)  # (T, 52, 4) wxyz
+        if data_format == "smplx":
+            from .targets import load_smplx_to_smplh_layout
+            from .tables import HUMAN_BODY_TO_IDX
+            npz_path = cfg.data_path / f"{cfg.task_name}.npz"
+            raw_joints, human_quat, _smplx_height = load_smplx_to_smplh_layout(
+                npz_path, MAPPED_BODY_NAMES, HUMAN_BODY_TO_IDX)
+        else:
+            raw_joints = load_pt_joints(pt_path)    # (T, 52, 3) raw positions
+            human_quat = load_pt_quaternions(pt_path)  # (T, 52, 4) wxyz
 
         # Align T between raw_joints and human_quat (both come from the same
         # file so they are equal in length, but guard against edge cases)
@@ -1516,10 +1531,15 @@ class TestSocpRetargeter:
         # Build per-frame foot sticking sequence from SMPL joint velocities.
         # Gated by activate_foot_sticking (False by default) in solve; building the
         # sequence here is harmless and does not affect the default solve path.
-        from HoloNew.src.utils import extract_foot_sticking_sequence_velocity
-        toe_names = cfg.motion_data_config.toe_names
-        rt.foot_sticking_sequences = extract_foot_sticking_sequence_velocity(
-            raw_joints, constants.DEMO_JOINTS, toe_names)
+        # The smplx remap does not preserve the full DEMO_JOINTS layout, so skip it
+        # there (foot sticking is off by default and only needs the mapped feet).
+        if data_format == "smplx":
+            rt.foot_sticking_sequences = []
+        else:
+            from HoloNew.src.utils import extract_foot_sticking_sequence_velocity
+            toe_names = cfg.motion_data_config.toe_names
+            rt.foot_sticking_sequences = extract_foot_sticking_sequence_velocity(
+                raw_joints, constants.DEMO_JOINTS, toe_names)
 
         # All joints are zero; base is overridden below from the ground pelvis
         q_init_full = np.zeros(rt.nq)
@@ -1532,7 +1552,12 @@ class TestSocpRetargeter:
         # stage) re-grounds afterwards — a constant z-shift it cancels out — so the solved
         # targets are unchanged, but the mapped/scaled/offset stages now follow the
         # grounded input and the 'Grounded' display stage is the real chain input.
-        toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
+        if data_format == "smplx":
+            # raw_joints is in the SMPLH slot layout; ground on the mapped feet.
+            from .tables import HUMAN_BODY_TO_IDX
+            toe_indices = [HUMAN_BODY_TO_IDX["left_foot"], HUMAN_BODY_TO_IDX["right_foot"]]
+        else:
+            toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
         rt.gmr_grounded = ground_to_floor(raw_joints, toe_indices)
         # Keep the GMR base XY at the RAW grounded pelvis (root_xy_scale=1.0), NOT
         # holosoma's globally-scaled placement. Holosoma pulls the root toward the
@@ -1603,7 +1628,10 @@ class TestSocpRetargeter:
         _contact_assets = Path(__file__).resolve().parent.parent.parent / "assets" / "contact"
         _sdf_path = _contact_assets / "largebox_sdf.npz"
         _contact_path = _contact_assets / f"contact_{cfg.task_name}.npz"
-        if _sdf_path.exists():
+        # Load the object SDF only for tasks that actually have an object. robot_only
+        # (object_name "ground", e.g. smplx locomotion clips with no .pt object poses)
+        # must not pull in object loading. Floor-only inertia keeps object_sdf=None.
+        if _sdf_path.exists() and rt.object_name not in (None, "ground"):
             rt.object_sdf = load_object_sdf(_sdf_path)
         if _contact_path.exists():
             rt.contact_fields = load_contact_fields(_contact_path)
