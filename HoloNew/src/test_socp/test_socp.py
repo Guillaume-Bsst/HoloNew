@@ -80,6 +80,8 @@ class TestSocpRetargeter:
         lambda_o: float = 0.0,
         lambda_omega: float = 0.0,
         load_object_scene: bool = True,
+        activate_persistence: bool = False,
+        persistence_tol: float = 0.005,
         **_ignored,
     ):
         """Initialise the retargeter from task constants.
@@ -248,6 +250,10 @@ class TestSocpRetargeter:
         self.lambda_omega = lambda_omega
         # Solved object pose history: updated by retarget() when movable is on.
         self._obj_solved_poses: list = []
+
+        # Brick 1 — Contact persistence hard band constraint (default off).
+        self.activate_persistence = activate_persistence
+        self.persistence_tol = persistence_tol
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -938,6 +944,20 @@ class TestSocpRetargeter:
             obj_terms += build_p_terms(self, q_pin, dqa, frame_idx, obj_pose,
                                        self.lambda_P, self.sigma_v, self._dt)
 
+        # Contact persistence hard tangential band constraint (default off).
+        # Enforces no-slip per carrier instead of the soft P cost. Requires the
+        # same cross-frame _p_state as the soft P term; only fires at frame >= 1.
+        if self.activate_persistence \
+                and getattr(self, "correspondence", None) is not None \
+                and getattr(self, "object_sdf", None) is not None \
+                and obj_pose is not None \
+                and frame_idx >= 1 \
+                and getattr(self, "_p_state", None) is not None:
+            from HoloNew.src.test_socp.interaction import build_p_constraints
+            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            constraints += build_p_constraints(self, q_pin, dqa, frame_idx, obj_pose,
+                                               self.persistence_tol)
+
         # Temporal regularization W^r (default off; only active when lambda_r > 0
         # and two previous frames are available).
         if self.lambda_r > 0 and q_t_last is not None and q_t_last2 is not None:
@@ -1180,7 +1200,7 @@ class TestSocpRetargeter:
         # d_prev_obj/flr (M,): previous SOLVED robot-side distances (α̂^{t-1}).
         # a_prev_obj/flr (M,): previous source activations α^{t-1}.
         # Initialised to "no previous contact": d_prev=+inf, a_prev=0.
-        if self.lambda_P > 0 \
+        if (self.lambda_P > 0 or self.activate_persistence) \
                 and getattr(self, "correspondence", None) is not None \
                 and getattr(self, "object_sdf", None) is not None:
             _M = self.correspondence.link_idx.shape[0]
@@ -1389,6 +1409,8 @@ class TestSocpRetargeter:
         kwargs["activate_movable"] = sc.activate_movable
         kwargs["lambda_o"] = sc.lambda_o
         kwargs["lambda_omega"] = sc.lambda_omega
+        kwargs["activate_persistence"] = sc.activate_persistence
+        kwargs["persistence_tol"] = sc.persistence_tol
         # The interaction costs require the non-penetration constraint to stay
         # stable (the paper's optimization has both: the costs + d_ij >= 0).
         # Without it the D term marches the floating base through the floor.
@@ -1406,7 +1428,10 @@ class TestSocpRetargeter:
             kwargs["lambda_D"] = 0.0
             kwargs["lambda_X"] = 0.0
             kwargs["lambda_P"] = 0.0
-        elif sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0:
+            # Persistence constraint requires an object SDF; inert for robot_only.
+            # Force off so the solve is structurally unchanged (parity bit-exact).
+            kwargs["activate_persistence"] = False
+        elif sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0 or sc.activate_persistence:
             kwargs["activate_obj_non_penetration"] = True
             kwargs["load_object_scene"] = False  # ground non-pen only; plain model
         rt = cls(**kwargs)

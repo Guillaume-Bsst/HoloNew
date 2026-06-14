@@ -92,6 +92,22 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_c_pos: float = 0.0
     lambda_L: float = 0.0
 
+    # Brick 1 — Contact persistence as a hard tangential band constraint.
+    # Enabled by default after validation (2026-06-14): 30-frame object_interaction
+    # sub3_largebox_003 with persistence_tol=0.005 (5 mm) shows:
+    #   mean tangential slip: 5.09 mm (vs 74.25 mm without constraint; 14.6x tighter)
+    #   runtime: ~1.55x baseline (vs ~3x for soft lambda_P cost with SCS fallback)
+    #   SCS fallbacks: 0 (CLARABEL handles all frames at tol=5 mm)
+    #   all 30 frames finite; no infeasible solves
+    # The hard band Aproj_k @ dqa in [bproj_k - tol, bproj_k + tol] (one per
+    # carrier/link) replaces hundreds of near-parallel per-point soft rows that
+    # wrecked CLARABEL's conditioning. robot_only (no object_sdf) has the flag
+    # forced off by from_config, so its solve is bit-exact with the parity baseline.
+    # persistence_tol: band half-width in metres (5 mm validated; raise to 1 cm if
+    # a task geometry makes the 5 mm band infeasible).
+    activate_persistence: bool = True
+    persistence_tol: float = 0.005
+
     # Brick 5 — Movable entities W^o (object motion regularization).
     # Enabled by default after validation (2026-06-14): 30-frame object_interaction
     # sub3_largebox_003 with lambda_o=1.0/lambda_omega=1.0 shows:

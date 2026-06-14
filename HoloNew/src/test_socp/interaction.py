@@ -575,3 +575,172 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     B_p = np.vstack(B_p_rows)          # (3*K, nv_a)
     r_p = np.concatenate(r_p_rows)     # (3*K,)
     return [cp.sum_squares(B_p @ dqa - r_p)]
+
+
+# ---------------------------------------------------------------------------
+# P (contact persistence) as a hard tangential band constraint
+# ---------------------------------------------------------------------------
+
+def build_p_constraints(rt, q_pin: np.ndarray, dqa, t: int,
+                        obj_pose: np.ndarray,
+                        tol: float) -> list:
+    """Build hard tangential band constraints for contact persistence.
+
+    Instead of a soft quadratic cost (build_p_terms), this function enforces
+    no-slip as a hard per-carrier constraint:
+
+        Aproj_k @ dqa in [bproj_k - tol, bproj_k + tol]
+
+    where Aproj_k and bproj_k are the mean projected Jacobian and target
+    displacement for carrier k (aggregated over all active persistent contact
+    points assigned to link k).
+
+    Aggregating per carrier (one constraint per link instead of one per point)
+    keeps the constraint count small and the problem well-conditioned, avoiding
+    the hundreds of near-parallel rows that made build_p_terms slow.
+
+    The activation logic (gamma_i), frame state (_p_state), and per-point
+    displacement computation are identical to build_p_terms.
+
+    Object channel: object-local frame (consistent with build_p_terms).
+    Floor channel: world frame.
+
+    Args:
+        rt: TestSocpRetargeter instance.
+        q_pin: Pinocchio configuration vector at the current linearisation point.
+        dqa: cvxpy Variable of shape (nv_a,).
+        t: Current frame index (must be >= 1).
+        obj_pose: (7,) [qw, qx, qy, qz, x, y, z] current object pose.
+        tol: Band half-width in metres (e.g. 0.005 = 5 mm).
+
+    Returns:
+        List of cvxpy constraints (two per active carrier: upper and lower bound).
+        Empty if no carriers have active persistent contacts.
+    """
+    import cvxpy as cp
+
+    state = rt._p_state
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L = rt.smplx_ground_probe.margin
+
+    # Current and previous object-to-world rotation matrices.
+    Robj_t = _robj_from_pose(obj_pose)
+    obj_t = np.asarray(obj_pose[4:7], dtype=float)
+    obj_prev_pose = state["obj_prev"]
+    Robj_tm1 = _robj_from_pose(obj_prev_pose)
+    obj_tm1 = np.asarray(obj_prev_pose[4:7], dtype=float)
+
+    # Current world positions of robot control points.
+    P = robot_control_points(rt, q_pin)
+
+    # Robot-side field at current config.
+    fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
+
+    # Source references at t and t-1.
+    d_obj_ref_t,  _,  d_flr_ref_t,  _, p_ref_t   = frame_references(rt, t)
+    d_obj_ref_tm1, _, d_flr_ref_tm1, _, p_ref_tm1 = frame_references(rt, t - 1)
+
+    # Previous solved robot-side distances (for alpha_hat^{t-1}).
+    d_prev_obj = state["d_prev_obj"]
+    d_prev_flr = state["d_prev_flr"]
+    a_prev_obj = state["a_prev_obj"]
+    a_prev_flr = state["a_prev_flr"]
+    p_prev_world = state["p_prev_world"]
+
+    # Source point displacement in world frame.
+    dp_ref_world = p_ref_t - p_ref_tm1
+
+    # Activation masks (same logic as build_p_terms).
+    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L) for i in range(M)])
+    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L) for i in range(M)])
+
+    def _hat(d_prev_i):
+        return _activation(float(d_prev_i), L)
+
+    gamma_obj = np.minimum(np.minimum(alpha_obj_t, a_prev_obj),
+                           np.array([_hat(d_prev_obj[i]) for i in range(M)]))
+    active_obj = (gamma_obj > 0) & np.asarray(fobj.active, dtype=bool)
+
+    gamma_flr = np.minimum(np.minimum(alpha_flr_t, a_prev_flr),
+                           np.array([_hat(d_prev_flr[i]) for i in range(M)]))
+    active_flr = (gamma_flr > 0) & np.asarray(fflr.active, dtype=bool)
+
+    active_union = np.where(active_obj | active_flr)[0]
+    if active_union.size == 0:
+        return []
+
+    # Batched Jacobian computation.
+    link_names_active = [corr.link_names[corr.link_idx[i]] for i in active_union]
+    offsets_active = corr.offset_local[active_union]
+    jacs_full = rt.pin.point_jacobians(q_pin, link_names_active, offsets_active)
+    jacs = [J[:, rt.v_a_indices] for J in jacs_full]
+    idx_to_pos = {int(active_union[k]): k for k in range(len(active_union))}
+
+    I3 = np.eye(3)
+    n_links = len(corr.link_names)
+
+    # Accumulate per-carrier (per-link) projected rows and targets.
+    # carrier_data[li] = {"A_rows": [...], "b_rows": [...]} with Pi0 @ Jcoeff and Pi0 @ target.
+    carrier_data: dict[int, dict] = {}
+
+    # --- Object channel (object-local frame) ---
+    for i in np.where(active_obj)[0]:
+        li = int(corr.link_idx[i])
+        Ji = jacs[idx_to_pos[i]]
+        Jloc = Robj_t.T @ Ji
+
+        n0 = np.asarray(fobj.direction[i], dtype=float)
+        Pi0 = I3 - np.outer(n0, n0)
+
+        p_prev_local_i = Robj_tm1.T @ (p_prev_world[i] - obj_tm1)
+        const_i = Robj_t.T @ (P[i] - obj_t) - p_prev_local_i
+
+        p_ref_t_loc = Robj_t.T @ (p_ref_t[i] - obj_t)
+        p_ref_tm1_loc = Robj_tm1.T @ (p_ref_tm1[i] - obj_tm1)
+        dp_ref_loc = p_ref_t_loc - p_ref_tm1_loc
+
+        # Target: bproj = Pi0 @ (dp_ref_loc - const_i)
+        Aproj_row = Pi0 @ Jloc       # (3, nv_a)
+        bproj_row = Pi0 @ (dp_ref_loc - const_i)  # (3,)
+
+        if li not in carrier_data:
+            carrier_data[li] = {"A_rows": [], "b_rows": []}
+        carrier_data[li]["A_rows"].append(Aproj_row)
+        carrier_data[li]["b_rows"].append(bproj_row)
+
+    # --- Floor channel (world frame) ---
+    for i in np.where(active_flr)[0]:
+        li = int(corr.link_idx[i])
+        Ji = jacs[idx_to_pos[i]]
+
+        n0 = np.asarray(fflr.direction[i], dtype=float)
+        Pi0 = I3 - np.outer(n0, n0)
+
+        const_i = P[i] - p_prev_world[i]
+        dp_ref_i = dp_ref_world[i]
+
+        Aproj_row = Pi0 @ Ji                          # (3, nv_a)
+        bproj_row = Pi0 @ (dp_ref_i - const_i)       # (3,)
+
+        if li not in carrier_data:
+            carrier_data[li] = {"A_rows": [], "b_rows": []}
+        carrier_data[li]["A_rows"].append(Aproj_row)
+        carrier_data[li]["b_rows"].append(bproj_row)
+
+    if not carrier_data:
+        return []
+
+    constraints = []
+    tol_vec = np.full(3, tol)
+    for li, data in carrier_data.items():
+        # Mean projected Jacobian and target over all active points on this carrier.
+        A_stack = np.stack(data["A_rows"], axis=0)   # (N_pts, 3, nv_a)
+        b_stack = np.stack(data["b_rows"], axis=0)   # (N_pts, 3)
+        Aproj_k = A_stack.mean(axis=0)               # (3, nv_a)
+        bproj_k = b_stack.mean(axis=0)               # (3,)
+        # Band constraint: Aproj_k @ dqa in [bproj_k - tol, bproj_k + tol]
+        constraints.append(Aproj_k @ dqa <= bproj_k + tol_vec)
+        constraints.append(Aproj_k @ dqa >= bproj_k - tol_vec)
+
+    return constraints
