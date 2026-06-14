@@ -81,6 +81,7 @@ class TestSocpRetargeter:
         lambda_omega: float = 0.0,
         lambda_o_pos: float = 0.0,
         load_object_scene: bool = True,
+        floor_as_entity: bool = False,
         activate_persistence: bool = False,
         persistence_tol: float = 0.005,
         **_ignored,
@@ -256,6 +257,9 @@ class TestSocpRetargeter:
         # Brick 1 — Contact persistence hard band constraint (default off).
         self.activate_persistence = activate_persistence
         self.persistence_tol = persistence_tol
+
+        # Inertia mode — floor as a permanent interaction entity (default off).
+        self.floor_as_entity = floor_as_entity
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -923,7 +927,8 @@ class TestSocpRetargeter:
         # the required assets are present).
         if (self.lambda_D > 0 or self.lambda_X > 0) \
                 and getattr(self, "correspondence", None) is not None \
-                and getattr(self, "object_sdf", None) is not None \
+                and (getattr(self, "object_sdf", None) is not None
+                     or getattr(self, "floor_as_entity", False)) \
                 and obj_pose is not None:
             from HoloNew.src.test_socp.interaction import build_dx_terms
             q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
@@ -937,7 +942,8 @@ class TestSocpRetargeter:
         # from the previous solved frame, so only active at frame >= 1).
         if self.lambda_P > 0 \
                 and getattr(self, "correspondence", None) is not None \
-                and getattr(self, "object_sdf", None) is not None \
+                and (getattr(self, "object_sdf", None) is not None
+                     or getattr(self, "floor_as_entity", False)) \
                 and obj_pose is not None \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
@@ -951,7 +957,8 @@ class TestSocpRetargeter:
         # same cross-frame _p_state as the soft P term; only fires at frame >= 1.
         if self.activate_persistence \
                 and getattr(self, "correspondence", None) is not None \
-                and getattr(self, "object_sdf", None) is not None \
+                and (getattr(self, "object_sdf", None) is not None
+                     or getattr(self, "floor_as_entity", False)) \
                 and obj_pose is not None \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
@@ -1220,7 +1227,8 @@ class TestSocpRetargeter:
         # Initialised to "no previous contact": d_prev=+inf, a_prev=0.
         if (self.lambda_P > 0 or self.activate_persistence) \
                 and getattr(self, "correspondence", None) is not None \
-                and getattr(self, "object_sdf", None) is not None:
+                and (getattr(self, "object_sdf", None) is not None
+                     or getattr(self, "floor_as_entity", False)):
             _M = self.correspondence.link_idx.shape[0]
             self._p_state = {
                 "p_prev_world": np.zeros((_M, 3), dtype=np.float64),
@@ -1442,15 +1450,29 @@ class TestSocpRetargeter:
         # parity preserved). Object tasks keep the weights and couple the ground
         # non-penetration constraint that keeps the D term stable (the paper's
         # optimization has both costs + d_ij >= 0).
+        # Inertia mode bundle: paper-faithful placement (see design doc).
+        if sc.inertia_mode:
+            kwargs["floor_as_entity"] = True
+            kwargs["pelvis_anchor_weight"] = 0.0
+            kwargs["lambda_c_pos"] = 0.0
+            kwargs["activate_centroidal"] = True
+            # Weak W^c / W^L so contacts place the body and W^c only fills the
+            # residual/flight. Provisional weights; tuned in a follow-up task.
+            kwargs["lambda_c"] = sc.lambda_c if sc.lambda_c > 0 else 1e-5
+            kwargs["lambda_L"] = sc.lambda_L if sc.lambda_L > 0 else 1e-4
+        else:
+            kwargs["floor_as_entity"] = sc.floor_as_entity
+
         _obj_name = getattr(constants, "OBJECT_NAME", "ground")
-        if _obj_name in (None, "ground"):
+        _floor_entity = kwargs.get("floor_as_entity", False)
+        if _obj_name in (None, "ground") and not _floor_entity:
             kwargs["lambda_D"] = 0.0
             kwargs["lambda_X"] = 0.0
             kwargs["lambda_P"] = 0.0
             # Persistence constraint requires an object SDF; inert for robot_only.
             # Force off so the solve is structurally unchanged (parity bit-exact).
             kwargs["activate_persistence"] = False
-        elif sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0 or sc.activate_persistence:
+        elif sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0 or sc.activate_persistence or _floor_entity:
             kwargs["activate_obj_non_penetration"] = True
             kwargs["load_object_scene"] = False  # ground non-pen only; plain model
         rt = cls(**kwargs)
@@ -1561,22 +1583,28 @@ class TestSocpRetargeter:
         # object SDF is available: sample the subject SMPL-X surface once. The human is
         # placed at its Grounded pose in retarget(); the object pose is used as-is (the
         # raw human floats, the object sits correctly, so only the human is grounded).
-        if rt.object_sdf is not None:
+        _floor_entity = getattr(rt, "floor_as_entity", False)
+        if rt.object_sdf is not None or _floor_entity:
             from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
             from HoloNew.src.test_socp.contact.smplx_field import build_smplx_ground_probe
             from HoloNew.src.test_socp.correspondence.human_body import PointCloudCache
             from HoloNew.src.utils import load_intermimic_data
-            _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
-            # Store the raw poses so retarget() and build_dx_terms can access them
-            # without a second load.  Sliced to T so indexing by frame is safe.
-            rt._obj_poses_raw = obj_poses[:T]
+            # When an object SDF is present, load its raw poses so retarget() and
+            # build_dx_terms can access them; floor-only mode has no object channel.
+            if rt.object_sdf is not None:
+                _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
+                rt._obj_poses_raw = obj_poses[:T]
+                _obj_poses_arg = obj_poses[:T]
+            else:
+                rt._obj_poses_raw = None
+                _obj_poses_arg = None
             corr_cache = None
             if rt.correspondence is not None:
                 corr_cache = PointCloudCache(tri_idx=rt.correspondence.tri_idx,
                                              bary=rt.correspondence.bary)
             rt.smplx_ground_probe = build_smplx_ground_probe(
                 cfg.task_name, OMOMO_DIR_DEFAULT, SMPLX_MODEL_DIR_DEFAULT,
-                rt.object_sdf, obj_poses[:T], CONTACT_MARGIN_M, HUMAN_GRID_DENSITY,
+                rt.object_sdf, _obj_poses_arg, CONTACT_MARGIN_M, HUMAN_GRID_DENSITY,
                 cache=corr_cache)
 
         return rt

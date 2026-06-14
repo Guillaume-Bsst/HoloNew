@@ -104,6 +104,18 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_c_pos: float = 0.0
     lambda_L: float = 0.0
 
+    # Inertia mode (paper-faithful body placement). When True, from_config applies
+    # a bundle: floor_as_entity=True, pelvis_anchor_weight=0, lambda_c_pos=0,
+    # activate_centroidal=True with weak lambda_c/lambda_L. The body is placed by
+    # contacts (feet pinned to the permanent floor entity) and a weak W^c filling
+    # the residual/flight, with NO positional pelvis/CoM target. Default off so the
+    # parity/golden tests stay bit-exact. See docs/specs/2026-06-14-inertia-mode-design.md.
+    inertia_mode: bool = False
+    # floor_as_entity: load the floor interaction channel (correspondence + ground
+    # probe + floor field) for ANY task, not only object tasks. Turned on by
+    # inertia_mode; kept separable for testing.
+    floor_as_entity: bool = False
+
     # Brick 1 — Contact persistence as a hard tangential band constraint.
     # Enabled by default after validation (2026-06-14): 30-frame object_interaction
     # sub3_largebox_003 with persistence_tol=0.005 (5 mm) shows:
