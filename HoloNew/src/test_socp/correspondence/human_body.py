@@ -142,19 +142,64 @@ class HumanBody:
             bary=bary.astype(np.float32),
         )
 
+    def placed_verts_smpl(self, quats_wxyz_22: np.ndarray, pelvis_target: np.ndarray,
+                          frame_idx: int | None = None) -> np.ndarray:
+        """Posed SMPL-X vertices for one frame from SMPL-order body orientations.
+
+        Like placed_verts but the input is the 22 SMPL body joints' GLOBAL
+        orientations already in SMPL order (the AMASS prep output), so no MuJoCo
+        scatter is needed. Hand joints (22..51) are left at identity. Caches by
+        frame_idx the same way as placed_verts (shared cache slot).
+        """
+        if frame_idx is not None and frame_idx == self._cache_idx:
+            assert self._cache_verts is not None
+            return self._cache_verts
+
+        from scipy.spatial.transform import Rotation as R
+        torch = self._torch
+
+        q_smpl_xyzw = np.zeros((52, 4))
+        q_smpl_xyzw[:, 3] = 1.0                                   # identity default
+        q_smpl_xyzw[:22] = np.asarray(quats_wxyz_22)[:, [1, 2, 3, 0]]
+        norms = np.linalg.norm(q_smpl_xyzw, axis=1, keepdims=True)
+        q_smpl_xyzw = np.where(norms > 1e-6, q_smpl_xyzw / norms, np.array([0, 0, 0, 1.0]))
+
+        global_rots = R.from_quat(q_smpl_xyzw).as_matrix()
+        parents = self.parents[:52]
+        rel_rots = np.matmul(np.transpose(global_rots[parents], (0, 2, 1)), global_rots)
+        rel_rots[parents == -1] = global_rots[parents == -1]
+
+        global_orient = torch.from_numpy(R.from_matrix(rel_rots[0]).as_rotvec()).float().view(1, 3)
+        body_pose = torch.from_numpy(R.from_matrix(rel_rots[1:22]).as_rotvec()).float().view(1, -1)
+        with torch.no_grad():
+            output = self.model(global_orient=global_orient, body_pose=body_pose,
+                                betas=self._betas, return_verts=True, return_joints=True)
+        verts = output.vertices[0].detach().cpu().numpy()
+        pelvis = output.joints[0, 0].detach().cpu().numpy()
+        out = verts - pelvis + pelvis_target
+        if frame_idx is not None:
+            self._cache_idx = frame_idx
+            self._cache_verts = out
+        return out
+
     def placed_points(
         self,
         quats_wxyz: np.ndarray,
         pelvis_target: np.ndarray,
         cache: PointCloudCache,
         frame_idx: int | None = None,
+        smpl_order: bool = False,
     ) -> np.ndarray:
         """Posed surface samples (N,3) for one frame, in the Z-up world frame.
 
         Reuses placed_verts so SMPL-X skinning is applied once; each cached
         point is the barycentric blend of its triangle's posed vertices.
+        ``smpl_order=True`` selects placed_verts_smpl (AMASS 22 SMPL-order joints).
         """
-        verts = self.placed_verts(quats_wxyz, pelvis_target, frame_idx=frame_idx)
+        if smpl_order:
+            verts = self.placed_verts_smpl(quats_wxyz, pelvis_target, frame_idx=frame_idx)
+        else:
+            verts = self.placed_verts(quats_wxyz, pelvis_target, frame_idx=frame_idx)
         tri_verts = verts[self.faces[cache.tri_idx]]            # (N, 3, 3)
         return np.einsum("nij,ni->nj", tri_verts, cache.bary).astype(np.float32)
 

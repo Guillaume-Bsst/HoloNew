@@ -93,7 +93,12 @@ def frame_references(rt, t: int):
     cache = rt.__dict__.setdefault("_frame_ref_cache", {})
     if t in cache:
         return cache[t]
-    pf = rt.smplx_ground_probe(t, rt.human_quat[t], rt.gmr_grounded[:, 0][t])
+    # AMASS clips pose the probe from the 22 SMPL-order joints (smpl_order);
+    # OMOMO uses the full MuJoCo-order per-joint quats.
+    _probe_q = (rt._smplx_orientations[t]
+                if getattr(rt, "_smplx_orientations", None) is not None
+                else rt.human_quat[t])
+    pf = rt.smplx_ground_probe(t, _probe_q, rt.gmr_grounded[:, 0][t])
     hi = rt.correspondence.human_idx
     fflr = floor_field(pf.points, rt.smplx_ground_probe.margin)
     refs = (pf.field.distance[hi], pf.field.witness[hi],

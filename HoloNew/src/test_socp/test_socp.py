@@ -1297,7 +1297,12 @@ class TestSocpRetargeter:
             # Online SMPL-X -> object-SDF query for this frame (causal: reads only t).
             # Available as smplx_field for the step; also recorded for inspection.
             if self.smplx_ground_probe is not None:
-                pf = self.smplx_ground_probe(t, self.human_quat[t], pelvis_grounded[t])
+                # AMASS clips pose the probe body from the 22 SMPL-order joints; OMOMO
+                # uses the full MuJoCo-order per-joint quats.
+                _probe_q = (self._smplx_orientations[t]
+                            if getattr(self, "_smplx_orientations", None) is not None
+                            else self.human_quat[t])
+                pf = self.smplx_ground_probe(t, _probe_q, pelvis_grounded[t])
                 self.smplx_sdf_fields.append(pf.field)
                 probe_pts.append(pf.points)
                 probe_obj.append(pf.field.distance.copy())
@@ -1532,12 +1537,21 @@ class TestSocpRetargeter:
         # smplx path it simply does not exist, and object loading is gated on the
         # task having a real object SDF (robot_only smplx has none).
         pt_path = cfg.data_path / f"{cfg.task_name}.pt"
+        rt._smplx_orientations = None   # AMASS 22 SMPL-order joints (for the probe)
+        rt._smplx_betas = None
+        rt._smplx_gender = "neutral"
         if data_format == "smplx":
             from .targets import load_smplx_to_smplh_layout
             from .tables import HUMAN_BODY_TO_IDX
             npz_path = cfg.data_path / f"{cfg.task_name}.npz"
             raw_joints, human_quat, _smplx_height = load_smplx_to_smplh_layout(
                 npz_path, MAPPED_BODY_NAMES, HUMAN_BODY_TO_IDX)
+            _smplx_npz = np.load(npz_path)
+            rt._smplx_orientations = np.asarray(
+                _smplx_npz["global_joint_orientations"], dtype=np.float64)
+            if "betas" in _smplx_npz.files:
+                rt._smplx_betas = np.asarray(_smplx_npz["betas"], dtype=np.float32)
+                rt._smplx_gender = str(_smplx_npz["gender"]) if "gender" in _smplx_npz.files else "neutral"
         else:
             raw_joints = load_pt_joints(pt_path)    # (T, 52, 3) raw positions
             human_quat = load_pt_quaternions(pt_path)  # (T, 52, 4) wxyz
@@ -1701,9 +1715,15 @@ class TestSocpRetargeter:
             if rt.correspondence is not None:
                 corr_cache = PointCloudCache(tri_idx=rt.correspondence.tri_idx,
                                              bary=rt.correspondence.bary)
+            # AMASS (smplx) clips carry their own betas/gender and pose the body from
+            # the 22 SMPL-order joints; OMOMO loads betas via task metadata.
+            _is_smplx = rt._smplx_betas is not None
             rt.smplx_ground_probe = build_smplx_ground_probe(
                 cfg.task_name, OMOMO_DIR_DEFAULT, SMPLX_MODEL_DIR_DEFAULT,
                 rt.object_sdf, _obj_poses_arg, CONTACT_MARGIN_M, HUMAN_GRID_DENSITY,
-                cache=corr_cache)
+                cache=corr_cache,
+                betas=(rt._smplx_betas if _is_smplx else None),
+                gender=(rt._smplx_gender if _is_smplx else None),
+                smpl_order=_is_smplx)
 
         return rt

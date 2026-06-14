@@ -44,10 +44,12 @@ class SmplxGroundProbe:
     obj_quat: "np.ndarray | None"
     obj_trans: "np.ndarray | None"
     margin: float
+    smpl_order: bool = False   # True for AMASS: quats are 22 SMPL-order body joints
 
     def __call__(self, t: int, quats_wxyz: np.ndarray, pelvis_grounded: np.ndarray) -> "ProbeFrame":
         """ProbeFrame (probe world points + their ContactField) at frame t. Reads only t."""
-        world = self.human_body.placed_points(quats_wxyz, pelvis_grounded, self.cache, frame_idx=t)
+        world = self.human_body.placed_points(quats_wxyz, pelvis_grounded, self.cache,
+                                               frame_idx=t, smpl_order=self.smpl_order)
         if self.object_sdf is None:
             from HoloNew.src.test_socp.contact.contact_field import inactive_field
             field = inactive_field(world.shape[0], self.margin)
@@ -58,7 +60,8 @@ class SmplxGroundProbe:
 
 
 def build_smplx_ground_probe(task_name, omomo_dir, model_dir, object_sdf,
-                             obj_poses, margin, density, cache=None):
+                             obj_poses, margin, density, cache=None,
+                             betas=None, gender=None, smpl_order=False):
     """Build the probe: load the subject SMPL-X shape and sample its surface once.
 
     The object pose is used as-is (not grounded): the human is placed at its Grounded
@@ -66,17 +69,24 @@ def build_smplx_ground_probe(task_name, omomo_dir, model_dir, object_sdf,
     must not be shifted.
 
     obj_poses: (T, 7) raw .pt object poses [qw, qx, qy, qz, x, y, z].
+    betas/gender: pass the subject shape directly (AMASS path); when None they are
+        loaded from the OMOMO metadata by task_name.
+    smpl_order: True for AMASS clips whose per-frame quats are the 22 SMPL-order body
+        joints (placed via HumanBody.placed_verts_smpl).
     """
     from pathlib import Path
 
     from ..correspondence.human_body import HumanBody
-    from ..correspondence.human_metadata import load_human_metadata
 
-    betas, gender = load_human_metadata(Path(omomo_dir), task_name)
+    if betas is None:
+        from ..correspondence.human_metadata import load_human_metadata
+        betas, gender = load_human_metadata(Path(omomo_dir), task_name)
     body = HumanBody(model_dir, betas, gender)
     cache = cache if cache is not None else body.build_point_cloud_cache(density)
 
     if obj_poses is None:
-        return SmplxGroundProbe(body, cache, object_sdf, None, None, margin)
+        return SmplxGroundProbe(body, cache, object_sdf, None, None, margin,
+                                smpl_order=smpl_order)
     obj_poses = np.asarray(obj_poses, dtype=np.float64)
-    return SmplxGroundProbe(body, cache, object_sdf, obj_poses[:, :4], obj_poses[:, 4:7], margin)
+    return SmplxGroundProbe(body, cache, object_sdf, obj_poses[:, :4], obj_poses[:, 4:7],
+                            margin, smpl_order=smpl_order)

@@ -339,8 +339,12 @@ def main(cfg: Config):
         subset_data_name = npz_path.parts[-3]
         sub_name = npz_path.parts[-2]
         output_file_path = os.path.join(cfg.output_folder, subset_data_name + "_" + sub_name + "_" + npz_path.name)
+        # Save betas + gender too: the SMPL-X contact probe (inertia mode on these
+        # clips) needs the subject shape to sample the body surface.
         np.savez(output_file_path, global_joint_positions=global_joint_positions,
-                 global_joint_orientations=global_joint_orientations, height=height)
+                 global_joint_orientations=global_joint_orientations, height=height,
+                 betas=np.asarray(betas, dtype=np.float32).reshape(-1),
+                 gender=str(gender))
         print(f"Saved processed data to {output_file_path}")
 
         # break
