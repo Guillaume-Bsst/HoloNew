@@ -6,6 +6,9 @@ and checks:
   2. Joint-orientation fidelity: mean pelvis-relative orientation error over
      tracked non-pelvis bodies is comparable to (or better than) the same
      metric from world-frame tracking (activate_style=False).
+  3. Base-xy drift: on object_interaction sub3_largebox_003, 30 frames, the
+     default config (pelvis_anchor_weight=10.0) keeps mean xy-drift below
+     0.12 m.  Guards against the position scaffold silently weakening again.
 
 Pelvis-relative orientation error for body k at frame t:
     err_k_t = || log(R_tilde_k^{-1} @ R_tilde_k_ref) ||
@@ -17,6 +20,11 @@ Observed numbers (recorded 2026-06-13, sub3_largebox_003, robot_only, smplh, 30 
     Style pelvis-relative fidelity : 0.6003 rad
     World pelvis-relative fidelity : 0.8180 rad  (Style is ~27 % better)
     Pelvis z range (30 frames)     : [0.562, 0.800] m  (well within [0.4, 1.0])
+
+Base-xy drift (recorded 2026-06-14, sub3_largebox_003, object_interaction, smplh,
+    30 frames, pelvis_anchor_weight=10.0):
+    max  drift : 0.1261 m
+    mean drift : 0.0491 m  (well within the 0.12 m limit)
 """
 from __future__ import annotations
 
@@ -147,4 +155,53 @@ def test_style_finite_no_collapse_and_fidelity():
         f"\n[style_metric] style_err={style_err:.4f} rad  "
         f"world_err={world_err:.4f} rad  "
         f"pelvis_z=[{pelvis_z.min():.3f}, {pelvis_z.max():.3f}] m"
+    )
+
+
+def test_style_base_drift_bounded():
+    """Assert that the default Style config (pelvis_anchor_weight=10.0) keeps
+    the solved base-xy close to the reference pelvis trajectory on
+    object_interaction sub3_largebox_003, 30 frames.
+
+    Style frees the pelvis ORIENTATION (yaw), not its position; the scaffold
+    must be strong enough to prevent xy drift.
+
+    Observed (2026-06-14, paw=10.0): max=0.126 m, mean=0.049 m.
+    Regression limit: mean < 0.12 m.
+    """
+    cfg = RetargetingConfig(
+        task_type="object_interaction",
+        task_name=TASK_NAME,
+        data_format=DATA_FORMAT,
+    )
+    rt = TestSocpRetargeter.from_config(cfg)
+    res = rt.retarget(max_frames=MAX_FRAMES)
+
+    gpos = rt.gmr_ground["pos"]   # (T_full, B, 3)
+    gquat = rt.gmr_ground["quat"]  # (T_full, B, 4) wxyz
+
+    T = min(res.qpos.shape[0], MAX_FRAMES)
+    ref_xy = []
+    for t in range(T):
+        tg = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
+        for frame, (p_t, _, _, _) in tg.items():
+            if rt.robot_link_names[frame] == ROBOT_ROOT_NAME:
+                ref_xy.append(p_t[:2])
+                break
+
+    ref_xy = np.array(ref_xy)
+    solved_xy = res.qpos[:len(ref_xy), :2]
+    drifts = np.linalg.norm(solved_xy - ref_xy, axis=1)
+    mean_drift = float(drifts.mean())
+    max_drift = float(drifts.max())
+
+    print(
+        f"\n[style_drift] paw={rt.pelvis_anchor_weight}  "
+        f"mean_drift={mean_drift:.4f} m  max_drift={max_drift:.4f} m"
+    )
+
+    assert mean_drift < 0.12, (
+        f"Base-xy mean drift {mean_drift:.4f} m exceeds 0.12 m limit "
+        f"(pelvis_anchor_weight={rt.pelvis_anchor_weight}); "
+        f"the Style position scaffold may have been weakened."
     )

@@ -4,10 +4,10 @@ Records the first 3 frames of the solved root (qpos[:3, :7]) and asserts the
 default solve stays numerically stable to 1e-6 as default-off constraint code
 is added.
 
-Baseline re-recorded after Brick 3 pelvis-relative Style enabled by default
-(activate_style=True in TestSocpRetargeterConfig). Validation (2026-06-13):
-30-frame robot_only sub3_largebox_003 — style pelvis-relative err 0.60 rad vs
-world 0.82 rad (~27 % better), pelvis z [0.562, 0.800] m, fully finite.
+Baseline re-recorded after strengthening the Style pelvis position anchor to
+pelvis_anchor_weight=10.0 (2026-06-14).  With the stronger anchor the base
+tracks the reference path (mean xy-drift ~0.09 m on sub3_largebox_003 vs
+0.243 m at paw=1.0) while Style orientation fidelity is unaffected.
 """
 import numpy as np
 
@@ -16,15 +16,15 @@ from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
 _G1_QDIM = 36  # G1 base (7) + 29 joints
 
-# Re-baselined after Brick 3 pelvis-relative Style enabled by default.
+# Re-baselined after strengthening the Style pelvis anchor to 10.0.
 # Recorded with: rt.retarget().qpos[:3, :7] on sub3_largebox_003 (smplh, robot_only).
 BASELINE = np.array([
     [ 0.63471276,  0.83391994,  0.80000567, -0.7108144 , -0.00565931,
      -0.01560232,  0.70318378],
-    [ 0.63394258,  0.83555328,  0.79711165, -0.71410965, -0.05784666,
-     -0.06166139,  0.69490938],
-    [ 0.63208578,  0.83994367,  0.78959769, -0.71301853, -0.11616867,
-     -0.11320524,  0.68212461],
+    [ 0.6319457 ,  0.83979543,  0.78959527, -0.71410979, -0.05784619,
+     -0.06166082,  0.69490932],
+    [ 0.62812757,  0.84882141,  0.77276444, -0.71302065, -0.11616299,
+     -0.1131963 ,  0.68212485],
 ])
 
 

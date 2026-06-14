@@ -68,10 +68,14 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # (~27 % improvement) and pelvis z in [0.562, 0.800] m — clean, no collapse.
     # When on, joint orientation targets are re-based by the current pelvis,
     # the pelvis orientation term becomes a roll/pitch-only tilt, joint position
-    # terms are dropped, and a weak pelvis position scaffold is kept.
-    # pelvis_anchor_weight scales the scaffold (1.0 = unchanged relative to w_p).
+    # terms are dropped, and a position scaffold keeps the base on the reference path.
+    # pelvis_anchor_weight scales the scaffold relative to w_p.  Style frees the
+    # pelvis ORIENTATION (yaw), not its position; the scaffold must be strong enough
+    # to prevent the base from drifting off the reference trajectory.  Sweep on
+    # sub3_largebox_003 (30 frames): paw=1 → mean xy-drift 0.243 m (too much),
+    # paw=10 → mean xy-drift ~0.09 m, well within tolerance.
     activate_style: bool = True
-    pelvis_anchor_weight: float = 1.0
+    pelvis_anchor_weight: float = 10.0
 
     # Brick 4 — Centroidal W^c (CoM acceleration) + W^c_pos (CoM position) + W^L.
     # Default OFF (activate_centroidal=False, lambdas=0): solve is bit-exact with
