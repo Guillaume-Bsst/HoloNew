@@ -902,6 +902,15 @@ class TestSocpRetargeter:
                 rhs = -phi - self.penetration_tolerance
                 constraints += [Ja_n @ dqa >= rhs]
 
+        # Brick 5 — Object tangent variable: created whenever movable is on and an
+        # object pose is present, so both the W^o term and the bilateral D/X term
+        # share the SAME dxi_obj variable.  The trust-region SOC is added here so
+        # the step size is bounded regardless of which downstream terms use dxi_obj.
+        dxi_obj = None
+        if self.activate_movable and obj_pose is not None:
+            dxi_obj = cp.Variable(6, name="dxi_obj")
+            constraints.append(cp.SOC(self.step_size, dxi_obj))
+
         # D + X interaction terms (default off; only active when weights > 0 and
         # the required assets are present).
         if (self.lambda_D > 0 or self.lambda_X > 0) \
@@ -910,8 +919,11 @@ class TestSocpRetargeter:
                 and obj_pose is not None:
             from HoloNew.src.test_socp.interaction import build_dx_terms
             q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            # Pass dxi_obj for bilateral coupling when the object is a variable.
+            # When dxi_obj is None (movable off), behaviour is unchanged.
             obj_terms += build_dx_terms(self, q_pin, dqa, frame_idx, obj_pose,
-                                        self.lambda_D, self.lambda_X)
+                                        self.lambda_D, self.lambda_X,
+                                        dxi=dxi_obj)
 
         # P (contact persistence) terms (default off; requires cross-frame state
         # from the previous solved frame, so only active at frame >= 1).
@@ -971,18 +983,14 @@ class TestSocpRetargeter:
                 )
 
         # W^o object motion regularization (Brick 5, default off).
-        # Only fires when all of: movable flag, object pose present, two prior object
-        # poses available, at least one lambda > 0, and frame_idx >= 2.
-        dxi_obj = None
-        if (self.activate_movable
-                and obj_pose is not None
+        # dxi_obj was already created above; the W^o cost is added when the two
+        # prior object poses and at least one lambda are available (frame_idx >= 2).
+        if (dxi_obj is not None
                 and obj_pose_tm1 is not None
                 and obj_pose_tm2 is not None
                 and (self.lambda_o > 0 or self.lambda_omega > 0)
                 and frame_idx >= 2):
             from HoloNew.src.test_socp.movable import build_wo_term, pose_to_se3
-            dxi_obj = cp.Variable(6, name="dxi_obj")
-            constraints.append(cp.SOC(self.step_size, dxi_obj))
             T_obj0 = pose_to_se3(obj_pose)
             T_obj_tm1 = pose_to_se3(obj_pose_tm1)
             T_obj_tm2 = pose_to_se3(obj_pose_tm2)

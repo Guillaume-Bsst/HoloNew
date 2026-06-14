@@ -169,9 +169,20 @@ def _robj_from_pose(obj_pose: np.ndarray) -> np.ndarray:
 # D + X residual assembly
 # ---------------------------------------------------------------------------
 
+def _skew(v: np.ndarray) -> np.ndarray:
+    """3x3 skew-symmetric matrix for cross-product: skew(v) @ w == v x w."""
+    v = np.asarray(v, dtype=float).ravel()
+    return np.array([
+        [     0.0, -v[2],  v[1]],
+        [  v[2],    0.0, -v[0]],
+        [ -v[1],  v[0],   0.0],
+    ])
+
+
 def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
                    obj_pose: np.ndarray,
-                   lambda_D: float, lambda_X: float) -> list:
+                   lambda_D: float, lambda_X: float,
+                   dxi=None) -> list:
     """Build cvxpy D (normal proximity) and X (tangential placement) residual terms.
 
     Uses an active-set strategy: only points where alpha > 0 AND the robot-side
@@ -186,6 +197,20 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         J_loc = R_obj.T @ J_world  (object driven => object fixed in the per-frame solve)
     Floor-channel residuals are expressed in the world frame.
 
+    When ``dxi`` is provided (a cvxpy Variable of shape (6,) — the object SE(3)
+    tangent step in the world frame), the object-channel residuals become
+    bilateral: the object-local relative displacement of each control point
+    gains the object rigid-motion contribution:
+
+        Bobj_i = R_obj.T @ [I_3 | -skew(p_i)]      (3, 6)
+
+    where ``p_i`` is the world position of the control point (NOT p_i - t_obj;
+    see derivation note in docs). The object-DOF contribution is subtracted:
+        relative_disp_local = R_obj.T @ (J_i @ dqa - [I, -skew(p_i)] @ dxi)
+                            = (R_obj.T @ J_i) @ dqa  -  Bobj_i @ dxi
+
+    The floor channel is unchanged (floor is not a movable entity).
+
     Args:
         rt: TestSocpRetargeter instance with correspondence, object_sdf, pin, smplx_ground_probe.
         q_pin: Pinocchio configuration vector.
@@ -194,6 +219,9 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         obj_pose: (7,) [qw, qx, qy, qz, x, y, z] object pose.
         lambda_D: Weight for the normal-proximity (D) term.
         lambda_X: Weight for the tangential-placement (X) term.
+        dxi: Optional cvxpy Variable of shape (6,) — the object SE(3) tangent
+            step (world-frame left perturbation). When None (default), the
+            object channel is robot-only (current behaviour).
 
     Returns:
         List of cvxpy scalar expressions (one per active point per entity per
@@ -253,11 +281,18 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
 
     I3 = np.eye(3)
 
-    # Collect rows for the two stacked matrices.
-    # D channel: one scalar row per active point  -> A_d (K_d, nv_a), c_d (K_d,)
-    # X channel: three rows per active point      -> B_x (3*K_x, nv_a), r_x (3*K_x,)
-    A_d_rows, c_d_rows = [], []
-    B_x_rows, r_x_rows = [], []
+    # Separate object-channel and floor-channel rows so the dxi block can be
+    # added only to the object channel (floor is not movable).
+    # D channel: one scalar row per active object point.
+    A_d_obj_rows, c_d_obj_rows = [], []   # robot-DOF columns (nv_a)
+    Adxi_d_rows = []                       # object-DOF columns (6); only when dxi given
+    # X channel: three rows per active object point.
+    B_x_obj_rows, r_x_obj_rows = [], []
+    Bdxi_x_rows = []
+
+    # Floor D / X rows (robot DOF only; floor is not movable).
+    A_d_flr_rows, c_d_flr_rows = [], []
+    B_x_flr_rows, r_x_flr_rows = [], []
 
     # --- Object channel (object-local frame) ---
     for i in np.where(active_obj)[0]:
@@ -269,18 +304,29 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         d0 = float(fobj.distance[i])
         x0 = np.asarray(fobj.witness[i], dtype=float)     # object-local witness
 
+        # Object-DOF block for bilateral coupling (when dxi is given).
+        # Bobj_i = R_obj.T @ [I_3, -skew(p_i)]  where p_i = P[i] is the world
+        # position of the control point.  This block is SUBTRACTED from the
+        # robot-DOF Jacobian contribution (see docstring derivation).
+        if dxi is not None:
+            Bobj_i = Robj.T @ np.hstack([I3, -_skew(P[i])])  # (3, 6)
+
         # D: sqrt(lambda_D * w) * n0^T Jloc  vs  sqrt(lambda_D * w) * (d_ref - d0)
         if lambda_D > 0:
             sw = float(np.sqrt(lambda_D * w))
-            A_d_rows.append(sw * (n0 @ Jloc))             # (nv_a,)
-            c_d_rows.append(sw * float(d_obj_ref[i] - d0))
+            A_d_obj_rows.append(sw * (n0 @ Jloc))             # (nv_a,)
+            c_d_obj_rows.append(sw * float(d_obj_ref[i] - d0))
+            if dxi is not None:
+                Adxi_d_rows.append(sw * (n0 @ Bobj_i))        # (6,)
 
         # X: sqrt(lambda_X * w) * Pi0 Jloc  vs  sqrt(lambda_X * w) * Pi0(x_ref - x0)
         if lambda_X > 0:
             sw = float(np.sqrt(lambda_X * w))
             Pi0 = I3 - np.outer(n0, n0)
-            B_x_rows.append(sw * (Pi0 @ Jloc))            # (3, nv_a)
-            r_x_rows.append(sw * Pi0 @ (np.asarray(x_obj_ref[i], dtype=float) - x0))
+            B_x_obj_rows.append(sw * (Pi0 @ Jloc))            # (3, nv_a)
+            r_x_obj_rows.append(sw * Pi0 @ (np.asarray(x_obj_ref[i], dtype=float) - x0))
+            if dxi is not None:
+                Bdxi_x_rows.append(sw * (Pi0 @ Bobj_i))       # (3, 6)
 
     # --- Floor channel (world frame) ---
     for i in np.where(active_flr)[0]:
@@ -294,26 +340,53 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         # D: sqrt(lambda_D * w) * n0^T Ji  vs  sqrt(lambda_D * w) * (d_ref - d0)
         if lambda_D > 0:
             sw = float(np.sqrt(lambda_D * w))
-            A_d_rows.append(sw * (n0 @ Ji))               # (nv_a,)
-            c_d_rows.append(sw * float(d_flr_ref[i] - d0))
+            A_d_flr_rows.append(sw * (n0 @ Ji))               # (nv_a,)
+            c_d_flr_rows.append(sw * float(d_flr_ref[i] - d0))
 
         # X: sqrt(lambda_X * w) * Pi0 Ji  vs  sqrt(lambda_X * w) * Pi0(x_ref - x0)
         if lambda_X > 0:
             sw = float(np.sqrt(lambda_X * w))
             Pi0 = I3 - np.outer(n0, n0)
-            B_x_rows.append(sw * (Pi0 @ Ji))              # (3, nv_a)
-            r_x_rows.append(sw * Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0))
+            B_x_flr_rows.append(sw * (Pi0 @ Ji))              # (3, nv_a)
+            r_x_flr_rows.append(sw * Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0))
 
     # Build one cvxpy expression per non-empty channel.
+    # Object channel: bilateral when dxi is given (A_full=[A_dqa | -A_dxi],
+    # variable = cp.hstack([dqa, dxi])), or robot-only otherwise.
     terms = []
-    if A_d_rows:
-        A_d = np.array(A_d_rows)            # (K_d, nv_a)
-        c_d = np.array(c_d_rows)            # (K_d,)
-        terms.append(cp.sum_squares(A_d @ dqa - c_d))
-    if B_x_rows:
-        B_x = np.vstack(B_x_rows)          # (3*K_x, nv_a)
-        r_x = np.concatenate(r_x_rows)     # (3*K_x,)
-        terms.append(cp.sum_squares(B_x @ dqa - r_x))
+
+    # Object D rows.
+    if A_d_obj_rows:
+        A_d_obj = np.array(A_d_obj_rows)    # (K_d_obj, nv_a)
+        c_d_obj = np.array(c_d_obj_rows)    # (K_d_obj,)
+        if dxi is not None and Adxi_d_rows:
+            Adxi_d = np.array(Adxi_d_rows)  # (K_d_obj, 6)
+            # residual = A_dqa @ dqa - Adxi_d @ dxi - c_d_obj
+            terms.append(cp.sum_squares(A_d_obj @ dqa - Adxi_d @ dxi - c_d_obj))
+        else:
+            terms.append(cp.sum_squares(A_d_obj @ dqa - c_d_obj))
+
+    # Object X rows.
+    if B_x_obj_rows:
+        B_x_obj = np.vstack(B_x_obj_rows)  # (3*K_x_obj, nv_a)
+        r_x_obj = np.concatenate(r_x_obj_rows)
+        if dxi is not None and Bdxi_x_rows:
+            Bdxi_x = np.vstack(Bdxi_x_rows)  # (3*K_x_obj, 6)
+            terms.append(cp.sum_squares(B_x_obj @ dqa - Bdxi_x @ dxi - r_x_obj))
+        else:
+            terms.append(cp.sum_squares(B_x_obj @ dqa - r_x_obj))
+
+    # Floor D rows (robot-only; floor not movable).
+    if A_d_flr_rows:
+        A_d_flr = np.array(A_d_flr_rows)   # (K_d_flr, nv_a)
+        c_d_flr = np.array(c_d_flr_rows)
+        terms.append(cp.sum_squares(A_d_flr @ dqa - c_d_flr))
+
+    # Floor X rows.
+    if B_x_flr_rows:
+        B_x_flr = np.vstack(B_x_flr_rows)  # (3*K_x_flr, nv_a)
+        r_x_flr = np.concatenate(r_x_flr_rows)
+        terms.append(cp.sum_squares(B_x_flr @ dqa - r_x_flr))
 
     return terms
 
