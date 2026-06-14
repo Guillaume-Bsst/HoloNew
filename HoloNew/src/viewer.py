@@ -134,6 +134,9 @@ class Viewer:
         self._object_contact_handle = None
         self._floor_contact_handle = None
         self._sdf_floor_handle = None
+        # Persistent centroidal-diagnostic handles (CoM marker + its ground shadow).
+        self._com_handle = None
+        self._com_shadow_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -262,11 +265,13 @@ class Viewer:
         # the per-frame CoM / foot-slip / angular-momentum readout.
         with self.server.gui.add_folder("TEST diagnostics"):
             self._tog_solved_obj = self.server.gui.add_checkbox("Solved object pose", True)
+            self._tog_com = self.server.gui.add_checkbox("CoM + trail", False)
+            self._tog_L = self.server.gui.add_checkbox("Angular momentum L", False)
             self._diag_text = self.server.gui.add_text("Solve state", initial_value="", disabled=True)
         for _cb in (self._tog_sdf, self._tog_sdf_floor, self._tog_human,
                     self._tog_g1_transport, self._tog_directions,
                     self._tog_object_contact, self._tog_floor_contact,
-                    self._tog_solved_obj):
+                    self._tog_solved_obj, self._tog_com, self._tog_L):
             @_cb.on_update
             def _(_evt):
                 self._redraw(int(self._slider.value))
@@ -497,6 +502,54 @@ class Viewer:
             parts.append(f"|L|={np.linalg.norm(method.angular_momentum[frame]):.2f}")
         self._diag_text.value = "  ".join(parts) if parts else "(no TEST diagnostics)"
 
+    def _draw_centroidal(self, frame: int) -> None:
+        """Make TEST's centroidal quantities geometric (they are otherwise only numbers).
+        "CoM + trail": a magenta CoM marker, its grey ground shadow (z=0), and the whole-clip
+        CoM polyline (the ballistic arc). "Angular momentum L": an arrow from the CoM along L,
+        scaled so the clip's peak |L| reads ~0.5 m. Both gate on method.com / .angular_momentum
+        being present; the marker/shadow are persistent (no flicker), trail/arrow are dynamic."""
+        method = self._methods.get(self._method_dd.value)
+        com = None if method is None else method.com
+        show_com = self._tog_com.value and com is not None and frame < len(com)
+        # Persistent CoM marker + ground shadow, updated in place.
+        if show_com:
+            c = np.asarray(com[frame], dtype=np.float32)
+            shadow = np.array([[c[0], c[1], 0.0]], dtype=np.float32)
+            if self._com_handle is None:
+                self._com_handle = self.server.scene.add_point_cloud(
+                    "/test/com", c[None], np.array([[230, 0, 230]], np.uint8), point_size=0.05)
+                self._com_shadow_handle = self.server.scene.add_point_cloud(
+                    "/test/com_shadow", shadow, np.array([[90, 90, 90]], np.uint8), point_size=0.04)
+            else:
+                self._com_handle.points = c[None]
+                self._com_handle.visible = True
+                self._com_shadow_handle.points = shadow
+                self._com_shadow_handle.visible = True
+            # Whole-clip CoM trail (ballistic arc) as a dynamic polyline.
+            if len(com) > 1:
+                tr = np.asarray(com, dtype=np.float32)
+                segs = np.stack([tr[:-1], tr[1:]], axis=1)
+                cols = np.broadcast_to((230, 0, 230), (len(segs), 2, 3)).astype(np.uint8)
+                self._dynamic_handles.append(self.server.scene.add_line_segments(
+                    "/test/com_trail", segs, cols, line_width=2.0))
+        elif self._com_handle is not None:
+            self._com_handle.visible = False
+            self._com_shadow_handle.visible = False
+        # Angular-momentum arrow from the CoM along L (dynamic single segment).
+        L = None if method is None else method.angular_momentum
+        if (self._tog_L.value and com is not None and L is not None
+                and frame < len(com) and frame < len(L)):
+            peak = float(np.linalg.norm(np.asarray(L), axis=1).max())
+            k = 0.5 / peak if peak > 1e-9 else 0.0
+            c = np.asarray(com[frame], dtype=np.float32)
+            tip = (c + k * np.asarray(L[frame], dtype=np.float32)).astype(np.float32)
+            seg = np.stack([c, tip])[None]
+            cols = np.broadcast_to((0, 180, 230), (1, 2, 3)).astype(np.uint8)
+            self._dynamic_handles.append(self.server.scene.add_line_segments(
+                "/test/L_arrow", seg, cols, line_width=4.0))
+            self._dynamic_handles.append(self.server.scene.add_point_cloud(
+                "/test/L_tip", tip[None], np.array([[0, 180, 230]], np.uint8), point_size=0.04))
+
     def _draw_g1_points(self, frame: int) -> None:
         """Holosoma's G1 morphological-graph keypoints (the robot links the interaction
         mesh pairs with the object points) at the active method's solved pose. Shown only
@@ -721,6 +774,7 @@ class Viewer:
         self._draw_directions(frame)
         self._draw_sdf_floor()
         self._draw_diagnostics(frame)
+        self._draw_centroidal(frame)
         g_stage = self._ghost_stage_dd.value
         if g_stage != "Off":
             g_method = self._methods[self._ghost_method_dd.value]
