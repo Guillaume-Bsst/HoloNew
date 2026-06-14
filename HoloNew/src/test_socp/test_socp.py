@@ -116,6 +116,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.task_constants = task_constants
         self.activate_joint_limits = activate_joint_limits
         self.step_size = step_size
+        # SQP inner-loop early-stop: break when the actuated step norm falls below
+        # this (catches passes plateauing at the trust-region boundary). 0 disables.
+        self._iterate_step_tol = 0.01
         self.visualize = False
         self.demo_joints = task_constants.DEMO_JOINTS
 
@@ -796,11 +799,19 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         vdot_ref_obj: np.ndarray | None = None,
         omega_ref_obj: np.ndarray | None = None,
     ):
-        """Iterate solve_single_iteration until convergence or n_iter steps."""
+        """Iterate solve_single_iteration until convergence or n_iter steps.
+
+        Two stop conditions: the objective stops improving (np.isclose), or the
+        actuated configuration stops moving (step norm < _iterate_step_tol). The
+        second catches passes that plateau at a tiny oscillating step at the
+        trust-region / active-set boundary — they never trip the cost test but
+        their extra iterations only chatter and waste solves.
+        """
         last = np.inf
         cost = 0.0
         solved_obj_pose = None
         for _ in range(n_iter):
+            q_a_prev = q_n[self.q_a_indices].copy()
             q_n, cost, solved_obj_pose = self.solve_single_iteration(
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
@@ -810,7 +821,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 obj_pose_tm1=obj_pose_tm1, obj_pose_tm2=obj_pose_tm2,
                 vdot_ref_obj=vdot_ref_obj, omega_ref_obj=omega_ref_obj,
             )
-            if np.isclose(cost, last):
+            step = float(np.linalg.norm(q_n[self.q_a_indices] - q_a_prev))
+            if np.isclose(cost, last) or step < self._iterate_step_tol:
                 break
             last = cost
         return q_n, cost, solved_obj_pose

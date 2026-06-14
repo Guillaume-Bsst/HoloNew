@@ -17,15 +17,17 @@ from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
 _G1_QDIM = 36  # G1 base (7) + 29 joints
 
-# Re-baselined after setting root_xy_scale=1.0 (raw pelvis XY).
-# Recorded with: rt.retarget().qpos[:3, :7] on sub3_largebox_003 (smplh, robot_only).
+# Re-baselined after adding the SQP plateau step-break (_iterate_step_tol=0.01),
+# a ~3x speedup. The base pose is essentially unchanged; the step-break only stops
+# the inner loop's joint chatter ~6 mm earlier (max |qpos diff| ~6 mm vs running
+# every iteration). Recorded with rt.retarget().qpos[:3, :7] on sub3_largebox_003.
 BASELINE = np.array([
-    [ 0.93336654,  1.22630751,  0.80000567, -0.71081440, -0.00565931,
-     -0.01560232,  0.70318378],
-    [ 0.92929775,  1.23494756,  0.78959519, -0.71410985, -0.05784612,
-     -0.06166059,  0.69490929],
-    [ 0.92367282,  1.24801191,  0.77287837, -0.71302129, -0.11616201,
-     -0.11319241,  0.68212499],
+    [ 0.93336654,  1.22630751,  0.80000567, -0.71056267, -0.00636412,
+     -0.01614609,  0.70341986],
+    [ 0.92929709,  1.23494086,  0.78959036, -0.71344381, -0.05943356,
+     -0.06284857,  0.69535289],
+    [ 0.92367599,  1.24801238,  0.77287924, -0.71196827, -0.11827157,
+     -0.11462996,  0.68262214],
 ])
 
 
