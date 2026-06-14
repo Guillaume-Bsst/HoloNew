@@ -40,17 +40,21 @@ class SmplxGroundProbe:
 
     human_body: "HumanBody"
     cache: "PointCloudCache"
-    object_sdf: "ObjectSDF"
-    obj_quat: np.ndarray
-    obj_trans: np.ndarray
+    object_sdf: "ObjectSDF | None"
+    obj_quat: "np.ndarray | None"
+    obj_trans: "np.ndarray | None"
     margin: float
 
     def __call__(self, t: int, quats_wxyz: np.ndarray, pelvis_grounded: np.ndarray) -> "ProbeFrame":
         """ProbeFrame (probe world points + their ContactField) at frame t. Reads only t."""
         world = self.human_body.placed_points(quats_wxyz, pelvis_grounded, self.cache, frame_idx=t)
-        local = transform_points_world_to_local(self.obj_quat[t], self.obj_trans[t], world)
-        return ProbeFrame(points=world.astype(np.float32),
-                          field=self.object_sdf.query(local, self.margin))
+        if self.object_sdf is None:
+            from HoloNew.src.test_socp.contact.contact_field import inactive_field
+            field = inactive_field(world.shape[0], self.margin)
+        else:
+            local = transform_points_world_to_local(self.obj_quat[t], self.obj_trans[t], world)
+            field = self.object_sdf.query(local, self.margin)
+        return ProbeFrame(points=world.astype(np.float32), field=field)
 
 
 def build_smplx_ground_probe(task_name, omomo_dir, model_dir, object_sdf,
@@ -72,5 +76,7 @@ def build_smplx_ground_probe(task_name, omomo_dir, model_dir, object_sdf,
     body = HumanBody(model_dir, betas, gender)
     cache = cache if cache is not None else body.build_point_cloud_cache(density)
 
+    if obj_poses is None:
+        return SmplxGroundProbe(body, cache, object_sdf, None, None, margin)
     obj_poses = np.asarray(obj_poses, dtype=np.float64)
     return SmplxGroundProbe(body, cache, object_sdf, obj_poses[:, :4], obj_poses[:, 4:7], margin)
