@@ -56,6 +56,12 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
     Jc = rt.pin.com_jacobian(q_t0)[:, rt.v_a_indices]          # (3, nv_a)
 
     # --- W^c: CoM acceleration tracking ---
+    # In inertia mode W^c is kept WEAK (below the interaction weights): when
+    # contacts are active they place the body and W^c only shapes the residual;
+    # when contacts deactivate (free flight) W^c becomes the sole CoM term and the
+    # ballistic parabola emerges (cddot_ref carries -g z from the data). The
+    # free-flight branch is implemented but UNVALIDATED — no demo_data clip
+    # contains a flight phase (see the inertia-mode design doc).
     if lambda_c > 0:
         # Fold sqrt(lambda_c) and 1/dt^2 into A and b so that:
         #   ||A_c @ dqa + b_c||^2 = lambda_c * ||cddot - cddot_ref||^2
@@ -73,7 +79,13 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
         b_p = s_p * (c0 - np.asarray(c_ref))                   # (3,)
         terms.append(cp.sum_squares(A_p @ dqa + b_p))
 
-    # --- W^L: angular centroidal momentum -> 0 ---
+    # --- W^L: weak angular-momentum spin regularizer (toward 0) ---
+    # NOTE: the paper tracks the reference centroidal angular momentum
+    # (||L - L_ref||^2). Computing L_ref needs a reference robot VELOCITY (not just
+    # target orientations) and a free-flight clip to matter (in stance L is
+    # dominated by the contacts). We have neither, so W^L is kept as a weak
+    # spin-toward-zero regularizer — sane for the grounded manipulation/climb clips
+    # available. True L_ref tracking is deferred (see the inertia-mode design doc).
     if lambda_L > 0:
         Ag = rt.pin.centroidal_map(q_t0)                       # (6, nv)
         v0, Jd = rt.pin.difference_and_jac(q_tm1, q_t0)       # v0: (nv,), Jd: (nv, nv)
