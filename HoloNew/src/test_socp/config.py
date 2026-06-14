@@ -89,12 +89,18 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_L: float = 0.0
 
     # Brick 5 — Movable entities W^o (object motion regularization).
-    # Default OFF (activate_movable=False, lambdas=0): object driven by reference,
-    # solve is bit-exact with previous baseline. Enable to make the object pose a
-    # solved decision variable with W^o regularization toward the reference motion.
+    # Enabled by default after validation (2026-06-14): 30-frame object_interaction
+    # sub3_largebox_003 with lambda_o=1.0/lambda_omega=1.0 shows:
+    #   mean solved-object position error vs reference: 0.0004 m (< 0.15 m limit)
+    #   mean contact gap |d_robot - d_ref|: 0.07183 m (vs 0.07202 m off; slightly better)
+    #   pelvis z in [0.360, 0.812] m; all qpos finite; runtime ~1.1 s/frame.
+    # The object stays tightly near its reference trajectory (W^o regularization)
+    # while the bilateral D/X coupling keeps contact tracking at least as good.
+    # robot_only has no object (obj_pose is None) so its solve is structurally
+    # unaffected; the parity test (test_test_socp_parity.py) remains bit-exact.
     # Only active on object tasks (obj_pose is not None) from frame_idx >= 2.
     #   W^o = lambda_o     * ||vdot_obj - vdot_ref||^2  (linear acceleration tracking)
     #         + lambda_omega * ||omega_obj - omega_ref||^2  (angular velocity tracking)
-    activate_movable: bool = False
-    lambda_o: float = 0.0
-    lambda_omega: float = 0.0
+    activate_movable: bool = True
+    lambda_o: float = 1.0
+    lambda_omega: float = 1.0
