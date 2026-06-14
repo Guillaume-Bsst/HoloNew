@@ -76,6 +76,8 @@ class TestSocpRetargeter:
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
         lambda_L: float = 0.0,
+        track_L_ref: bool = False,
+        lambda_L_track: float = 1.0,
         activate_movable: bool = False,
         lambda_o: float = 0.0,
         lambda_omega: float = 0.0,
@@ -256,6 +258,8 @@ class TestSocpRetargeter:
         self.lambda_omega = lambda_omega
         self.lambda_o_pos = lambda_o_pos
         self.lambda_object_floor = lambda_object_floor
+        self.track_L_ref = track_L_ref
+        self.lambda_L_track = lambda_L_track
         # Solved object pose history: updated by retarget() when movable is on.
         self._obj_solved_poses: list = []
 
@@ -1016,6 +1020,20 @@ class TestSocpRetargeter:
                     self._dt
                 )
 
+        # W^L reference tracking (opt-in): track the lumped reference angular
+        # momentum instead of driving L to 0. Needs the previous solved config for
+        # the velocity finite difference, so fires from frame_idx >= 1.
+        if (self.track_L_ref
+                and getattr(self, "_L_ref_all", None) is not None
+                and frame_idx >= 1 and q_t_last is not None):
+            from HoloNew.src.test_socp.centroidal import build_lumped_L_term
+            q_pin_cur = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin_prev = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
+            obj_terms.append(build_lumped_L_term(
+                self, q_pin_cur, q_pin_prev, dqa, self._lumped_frames,
+                self._lumped_masses, self._L_ref_all[frame_idx],
+                self.lambda_L_track, self._dt))
+
         # W^o object motion regularization (Brick 5, default off).
         # dxi_obj was already created above; the W^o cost is added when the two
         # prior object poses and at least one lambda are available (frame_idx >= 2).
@@ -1451,6 +1469,8 @@ class TestSocpRetargeter:
         kwargs["lambda_c"] = sc.lambda_c
         kwargs["lambda_c_pos"] = sc.lambda_c_pos
         kwargs["lambda_L"] = sc.lambda_L
+        kwargs["track_L_ref"] = sc.track_L_ref
+        kwargs["lambda_L_track"] = sc.lambda_L_track
         kwargs["activate_movable"] = sc.activate_movable
         kwargs["lambda_o"] = sc.lambda_o
         kwargs["lambda_omega"] = sc.lambda_omega
@@ -1585,6 +1605,19 @@ class TestSocpRetargeter:
         # If the motion config exposes a frame rate attribute, use it; otherwise
         # fall back to 1/30 with a comment so the value is traceable here.
         rt._dt = 1.0 / 30.0  # OMOMO dataset frame rate: 30 fps
+
+        # Precompute the lumped reference angular momentum L_ref(t) for W^L tracking
+        # (opt-in). Built from the GMR target mapped-body trajectory + robot link
+        # masses; consumed by build_lumped_L_term in the solve.
+        rt._lumped_frames = None
+        rt._lumped_masses = None
+        rt._L_ref_all = None
+        if rt.track_L_ref:
+            from .centroidal import (
+                mapped_frame_masses_and_names, reference_orbital_angular_momentum)
+            rt._lumped_frames, rt._lumped_masses = mapped_frame_masses_and_names(rt)
+            rt._L_ref_all = reference_orbital_angular_momentum(
+                rt.gmr_ground["pos"], rt._lumped_masses, rt._dt)
 
         # Load object poses in MuJoCo qpos order for per-frame object qpos drive.
         # Only when the flag is on and the task has a real object; otherwise leave

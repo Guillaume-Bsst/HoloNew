@@ -106,6 +106,20 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_c_pos: float = 0.0
     lambda_L: float = 0.0
 
+    # W^L reference tracking (opt-in). The default W^L (lambda_L) drives the angular
+    # momentum toward 0; the paper tracks the reference momentum L_ref. When
+    # track_L_ref is True, a lumped orbital angular momentum (robot link masses at
+    # the 14 mapped bodies) is built for BOTH the reference (from the GMR target
+    # trajectory) and the current config (linearized in dqa), and W^L tracks
+    # ||L_lumped - L_ref||^2 with weight lambda_L_track. This matters mainly in
+    # flight (in stance L is dominated by contacts); validated on aerial SFU clips.
+    # Default off so the grounded pipeline is unchanged. See centroidal.py.
+    track_L_ref: bool = False
+    # Tuned on SFU 0007_Cartwheel001 (60 frames): solved-vs-reference angular-momentum
+    # correlation off=-0.03 (Style ignores the aerial spin) -> w=1: 0.76, w=5: 0.97,
+    # w=20: 1.00. w=5 reproduces the reference spin cleanly without over-constraining.
+    lambda_L_track: float = 5.0
+
     # Inertia mode (paper-faithful body placement). When True, from_config applies
     # a bundle: floor_as_entity=True, pelvis_anchor_weight=0, lambda_c_pos=0,
     # activate_centroidal=True with weak lambda_c/lambda_L. The body is placed by

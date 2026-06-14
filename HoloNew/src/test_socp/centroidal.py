@@ -8,6 +8,98 @@ import cvxpy as cp
 import numpy as np
 
 
+def mapped_frame_masses_and_names(rt):
+    """Robot link names + masses for the 14 mapped bodies (MAPPED_BODY_NAMES order).
+
+    Each mapped human body tracks a robot frame (via the IK table); the toe frames
+    are remapped to the ankle-roll links that actually exist in the pinocchio model.
+    Returns (frame_names: list[str], masses: np.ndarray (K,)). Used by the lumped
+    angular-momentum tracking (W^L) — the same masses are used for the reference and
+    the current momentum, so the two are consistent despite the lumping.
+    """
+    from .tables import IK_MATCH_TABLE1, MAPPED_BODY_NAMES
+    _remap = {"left_toe_link": "left_ankle_roll_link",
+              "right_toe_link": "right_ankle_roll_link"}
+    inv = {entry[0]: frame for frame, entry in IK_MATCH_TABLE1.items()}
+    m = rt.pin.model
+    frames, masses = [], []
+    for body in MAPPED_BODY_NAMES:
+        fn = _remap.get(inv[body], inv[body])
+        frames.append(fn)
+        fid = m.getFrameId(fn)
+        masses.append(float(m.inertias[m.frames[fid].parentJoint].mass))
+    return frames, np.asarray(masses, dtype=np.float64)
+
+
+def reference_orbital_angular_momentum(ref_pos, masses, dt):
+    """Lumped reference orbital angular momentum L_ref(t) (T, 3).
+
+    Built from the reference mapped-body world trajectory (the GMR targets), the
+    same finite-difference way cddot_ref is built from the reference CoM:
+        c = sum_k m_k p_k / M,  v_k, c_dot via causal differences,
+        L = sum_k m_k (p_k - c) x (v_k - c_dot).
+    Captures the body's net angular momentum (e.g. an aerial cartwheel/somersault),
+    which W^L should track instead of driving to zero. The lumped mass set (the 14
+    mapped links) under-represents the total mass, but the SAME masses build the
+    current momentum in build_lumped_L_term, so the tracked residual is consistent;
+    the absolute scale is absorbed by lambda_L_track.
+
+    Args:
+        ref_pos: (T, K, 3) reference world positions of the mapped bodies.
+        masses: (K,) robot link masses.
+        dt: timestep.
+
+    Returns:
+        (T, 3) reference angular momentum, zeros for frames 0/1 (no velocity yet).
+    """
+    ref_pos = np.asarray(ref_pos, dtype=np.float64)
+    T = ref_pos.shape[0]
+    M = masses.sum()
+    c = (masses[None, :, None] * ref_pos).sum(axis=1) / M          # (T,3)
+    v = np.zeros_like(ref_pos); v[1:] = (ref_pos[1:] - ref_pos[:-1]) / dt
+    cdot = np.zeros_like(c); cdot[1:] = (c[1:] - c[:-1]) / dt
+    L = np.zeros((T, 3))
+    for k in range(masses.shape[0]):
+        L += masses[k] * np.cross(ref_pos[:, k] - c, v[:, k] - cdot)
+    return L
+
+
+def build_lumped_L_term(rt, q_pin, q_pin_prev, dqa, frames, masses, L_ref_t,
+                        lambda_L, dt):
+    """W^L tracking: lambda_L * ||L_lumped(dqa) - L_ref_t||^2.
+
+    Current lumped orbital angular momentum, linearized in dqa with the moment arms
+    held at the current config (mirroring how A_G(q0) @ v fixes q0):
+        L(dqa) = sum_k m_k (p_k0 - c0) x (v_k(dqa) - cdot(dqa)),
+        v_k(dqa) = (p_k0 - p_k_prev)/dt + (J_k/dt) dqa,
+    which is affine in dqa. p_k0/J_k at q_pin; p_k_prev at q_pin_prev (previous solved
+    frame). Returns a scalar cvxpy expression.
+    """
+    import cvxpy as cp
+    from HoloNew.src.test_socp.interaction import _skew
+
+    K = len(frames)
+    M = masses.sum()
+    p0 = np.array([rt.pin.body_position(q_pin, f) for f in frames])          # (K,3)
+    pprev = np.array([rt.pin.body_position(q_pin_prev, f) for f in frames])  # (K,3)
+    Js = [rt.pin.frame_translational_jacobian(q_pin, f)[:, rt.v_a_indices] for f in frames]
+    c0 = (masses[:, None] * p0).sum(0) / M
+    cprev = (masses[:, None] * pprev).sum(0) / M
+    Jc = sum(masses[k] * Js[k] for k in range(K)) / M                        # (3, nv_a)
+
+    A_L = np.zeros((3, rt.nv_a))
+    b_L0 = np.zeros(3)
+    for k in range(K):
+        arm = p0[k] - c0
+        v_rel0 = ((p0[k] - pprev[k]) - (c0 - cprev)) / dt
+        Jrel = (Js[k] - Jc) / dt
+        A_L += masses[k] * (_skew(arm) @ Jrel)
+        b_L0 += masses[k] * np.cross(arm, v_rel0)
+
+    r = np.sqrt(lambda_L) * (A_L @ dqa + (b_L0 - np.asarray(L_ref_t, dtype=np.float64)))
+    return cp.sum_squares(r)
+
+
 def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
                             lambda_c, lambda_c_pos, lambda_L, dt):
     """Assemble W^c (CoM accel) + W^c_pos (CoM position) + W^L (angular momentum -> 0).
