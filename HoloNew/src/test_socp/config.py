@@ -32,8 +32,21 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # unchanged. The interaction costs REQUIRE the non-penetration constraint to
     # be stable — from_config auto-enables ground non-penetration when interaction
     # is active on an object task (without it the D term marches the floating base
-    # through the floor). Validated stable; reduces the contact gap (~0.012 vs
-    # ~0.028 off on sub3_largebox_003).
+    # through the floor).
+    #
+    # Weights jointly re-tuned 2026-06-14 from 1.0 to 5.0. In the full pipeline
+    # (Style scaffold + W^r + persistence + movable all on) lambda=1.0 was
+    # DOMINATED by the other objective terms: D/X at 1.0 made BOTH contact gaps
+    # WORSE than D/X off (the cost was present but too weak to win). Sweep on
+    # sub3_largebox_003 (K=8, all bricks on), object/floor mean contact gap:
+    #   lambda=1:   object=0.0301 floor=0.0363   (worse than off: object=0.0200)
+    #   lambda=5:   object=0.0096 floor=0.0314   <-- chosen (object channel best)
+    #   lambda=20:  object=0.0306 floor=0.0171
+    #   lambda=100: object=0.0372 floor=0.0118
+    # lambda=5 halves the OBJECT (manipulation) contact gap vs D/X off — that is
+    # D/X's primary job. The FLOOR channel is now owned by the persistence no-slip
+    # hard constraint (D/X off + persistence on gives floor=0.0107, which D/X
+    # cannot beat at any weight), so the acceptance metric tracks the object gap.
     #
     # P (contact persistence / no-slip): the SOFT cost form (lambda_P>0) is kept for
     # reference but defaults OFF. It renormalizes the persistence residual by the field
@@ -44,8 +57,8 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # behaviour is instead delivered by the HARD tangential band constraint
     # (activate_persistence, below), which is both fast and tight — prefer it. sigma_v
     # is kept for API compatibility and is unused by the hard constraint.
-    lambda_D: float = 1.0
-    lambda_X: float = 1.0
+    lambda_D: float = 5.0
+    lambda_X: float = 5.0
     lambda_P: float = 0.0
     sigma_v: float = 0.05
 
