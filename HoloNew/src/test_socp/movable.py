@@ -98,3 +98,37 @@ def build_wo_term(
     r1 = np.sqrt(lambda_o) * (A_vdot @ dxi + b_vdot)
     r2 = np.sqrt(lambda_omega) * (A_omega @ dxi + b_omega)
     return cp.sum_squares(r1) + cp.sum_squares(r2)
+
+
+def build_wo_position_anchor(T_obj0, p_ref, dxi, lambda_o_pos):
+    """W^o position anchor: lambda_o_pos * ||p_obj(dxi) - p_ref||^2.
+
+    W^o (build_wo_term) regularizes only the object's linear acceleration and
+    angular velocity, which are invariant to a constant position offset.  With
+    nothing anchoring the absolute object position, the solved object pose can
+    drift along the reference path while still matching the reference
+    acceleration profile (the same position-blindness as the centroidal W^c
+    term).  This term pins the absolute object position to p_ref.
+
+    The object position is p(dxi) = (exp6(dxi) * T_obj0).translation, whose
+    first-order expansion about dxi=0 (with p0 = T_obj0.translation and the
+    pinocchio motion ordering dxi = [v; omega]) is:
+
+        p(dxi) ~= p0 + [I3 | -skew(p0)] @ dxi
+
+    so the residual is A_pos @ dxi + (p0 - p_ref).
+
+    Args:
+        T_obj0: pin.SE3, current object pose (linearization point, T_obj at t).
+        p_ref: (3,) reference object position to anchor to.
+        dxi: cp.Variable of shape (6,), world-frame SE(3) tangent step.
+        lambda_o_pos: weight on the position anchor.
+
+    Returns:
+        A scalar cvxpy expression (the position-anchor cost).
+    """
+    p0 = np.asarray(T_obj0.translation, dtype=float)
+    A_pos = np.hstack([np.eye(3), -pin.skew(p0)])     # (3, 6)
+    b_pos = p0 - np.asarray(p_ref, dtype=float)        # (3,)
+    r = np.sqrt(lambda_o_pos) * (A_pos @ dxi + b_pos)
+    return cp.sum_squares(r)

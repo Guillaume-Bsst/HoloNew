@@ -35,16 +35,15 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # through the floor). Validated stable; reduces the contact gap (~0.012 vs
     # ~0.028 off on sub3_largebox_003).
     #
-    # P (contact persistence): implemented, math-validated, and renormalized by the
-    # field range L^2 (same scale as X — see interaction.build_p_terms; a deliberate
-    # divergence from the paper's (sigma_v*dt)^2 which is ~3600x larger and wrecks
-    # conditioning). With the L^2 scale P no longer explodes, but its hundreds of
-    # near-parallel per-point rows still make CLARABEL fail intermittently mid-clip,
-    # so the solve falls back to SCS on those iterations (see solve_single_iteration)
-    # — which is robust but ~3x slower over a clip. P is therefore OFF by default to
-    # keep the solve fast; enabling it is a one-liner (lambda_P>0). Making it fast
-    # needs a per-carrier aggregation of the persistence residual (few well-
-    # conditioned rows instead of hundreds). sigma_v is kept for API compatibility.
+    # P (contact persistence / no-slip): the SOFT cost form (lambda_P>0) is kept for
+    # reference but defaults OFF. It renormalizes the persistence residual by the field
+    # range L^2 (same scale as X — see interaction.build_p_terms; a deliberate divergence
+    # from the paper's (sigma_v*dt)^2 which is ~3600x larger and wrecks conditioning).
+    # Even at the L^2 scale its hundreds of near-parallel per-point rows make CLARABEL
+    # fail intermittently mid-clip, forcing a ~3x-slower SCS fallback. The no-slip
+    # behaviour is instead delivered by the HARD tangential band constraint
+    # (activate_persistence, below), which is both fast and tight — prefer it. sigma_v
+    # is kept for API compatibility and is unused by the hard constraint.
     lambda_D: float = 1.0
     lambda_X: float = 1.0
     lambda_P: float = 0.0
@@ -124,3 +123,21 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_movable: bool = True
     lambda_o: float = 1.0
     lambda_omega: float = 1.0
+    # W^o position anchor. W^o (lambda_o/lambda_omega) regularizes only the
+    # object's acceleration/velocity, which is invariant to a constant position
+    # offset, so with the bilateral D/X coupling free to move the object the
+    # solved object pose drifts in absolute position while still matching the
+    # reference acceleration (the same position-blindness as centroidal W^c).
+    # This anchor pins the absolute object position to the reference path. It is
+    # the object analogue of lambda_c_pos. Tuned 2026-06-14 by sweep on
+    # sub3_largebox_003 (30 frames, all bricks on incl. persistence):
+    #   lambda_o_pos=0:   obj err mean=267.6 mm, contact gap=75.59 mm
+    #   lambda_o_pos=1:   obj err mean=  0.8 mm, contact gap=54.37 mm
+    #   lambda_o_pos=10:  obj err mean=  0.5 mm, contact gap=54.34 mm  <-- chosen
+    #   lambda_o_pos>=50: saturated (no further change).
+    # The anchor not only removes the drift but IMPROVES contact tracking (the gap
+    # was previously measured against a drifted object pose). 10.0 sits safely in
+    # the saturated regime. The persistence hard constraint pins the robot's
+    # contact points, so without this anchor the bilateral D/X coupling offsets
+    # the (position-blind) object instead; this term resolves that coupling.
+    lambda_o_pos: float = 10.0

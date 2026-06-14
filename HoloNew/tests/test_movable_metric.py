@@ -11,15 +11,22 @@ object_interaction sub3_largebox_003 over 30 frames and asserts:
      <= (A) + 0.005 m slack — making the object a variable must not
      worsen contact tracking.
 
-Numbers recorded from the validation run (2026-06-14):
+Numbers re-recorded 2026-06-14 after the contact-persistence hard constraint
+and the W^o position anchor (lambda_o_pos) landed. Persistence pins the robot's
+contact points, so without an object position anchor the bilateral D/X coupling
+offsets the (acceleration-only-regularized, position-blind) object and it drifts
+~0.27 m. The lambda_o_pos=10 anchor (default) pins the absolute object position
+to the reference path, which also improves contact tracking (the gap was being
+measured against a drifted object pose):
   (A) activate_movable=False: mean obj pos err=0.0000 m (driven),
-      mean contact gap=0.07202 m
-  (B) activate_movable=True, lambda_o=1.0, lambda_omega=1.0:
-      mean obj pos err=0.0004 m, mean contact gap=0.07183 m
-  --> object stays within 0.003 m of reference across 30 frames;
-      contact gap is slightly better with movable on (0.07183 < 0.07202).
+      mean contact gap~0.072 m
+  (B) activate_movable=True, lambda_o=1.0, lambda_omega=1.0 (lambda_o_pos=10):
+      mean obj pos err~0.0005 m, mean contact gap~0.054 m
+  --> object stays within ~0.003 m of reference across 30 frames; contact gap
+      is better with movable+anchor on. (With lambda_o_pos=0 the object drifts
+      0.27 m and this test fails — the anchor is required.)
   Decision: ENABLED by default (activate_movable=True, lambda_o=1.0,
-  lambda_omega=1.0 in TestSocpRetargeterConfig).
+  lambda_omega=1.0, lambda_o_pos=10.0 in TestSocpRetargeterConfig).
 """
 import numpy as np
 import pytest

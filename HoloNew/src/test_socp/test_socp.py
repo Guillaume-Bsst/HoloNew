@@ -79,6 +79,7 @@ class TestSocpRetargeter:
         activate_movable: bool = False,
         lambda_o: float = 0.0,
         lambda_omega: float = 0.0,
+        lambda_o_pos: float = 0.0,
         load_object_scene: bool = True,
         activate_persistence: bool = False,
         persistence_tol: float = 0.005,
@@ -248,6 +249,7 @@ class TestSocpRetargeter:
         self.activate_movable = activate_movable
         self.lambda_o = lambda_o
         self.lambda_omega = lambda_omega
+        self.lambda_o_pos = lambda_o_pos
         # Solved object pose history: updated by retarget() when movable is on.
         self._obj_solved_poses: list = []
 
@@ -1022,6 +1024,22 @@ class TestSocpRetargeter:
                 dxi_obj, self.lambda_o, self.lambda_omega, self._dt,
             ))
 
+        # W^o position anchor: pins the absolute object position to the reference
+        # path. W^o regularizes only object acceleration/velocity (position-blind),
+        # so the bilateral D/X coupling can offset the object in absolute position
+        # while still matching the reference acceleration. This anchor cures that
+        # drift. Needs no object history, so it fires whenever the object is a
+        # variable (all frames), unlike the frame_idx>=2 W^o term above.
+        if (dxi_obj is not None
+                and obj_pose is not None
+                and self.lambda_o_pos > 0):
+            from HoloNew.src.test_socp.movable import (
+                build_wo_position_anchor, pose_to_se3)
+            obj_terms.append(build_wo_position_anchor(
+                pose_to_se3(obj_pose), np.asarray(obj_pose[4:7], dtype=float),
+                dxi_obj, self.lambda_o_pos,
+            ))
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
             prob.solve(solver=cp.CLARABEL)
@@ -1409,6 +1427,7 @@ class TestSocpRetargeter:
         kwargs["activate_movable"] = sc.activate_movable
         kwargs["lambda_o"] = sc.lambda_o
         kwargs["lambda_omega"] = sc.lambda_omega
+        kwargs["lambda_o_pos"] = sc.lambda_o_pos
         kwargs["activate_persistence"] = sc.activate_persistence
         kwargs["persistence_tol"] = sc.persistence_tol
         # The interaction costs require the non-penetration constraint to stay

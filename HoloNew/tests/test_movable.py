@@ -2,11 +2,44 @@
 import numpy as np
 import cvxpy as cp
 import pinocchio as pin
-from HoloNew.src.test_socp.movable import build_wo_term, pose_to_se3, se3_to_pose
+from HoloNew.src.test_socp.movable import (
+    build_wo_position_anchor, build_wo_term, pose_to_se3, se3_to_pose)
 
 
 def _rand_se3(rng, scale=0.1):
     return pin.exp6(scale * rng.standard_normal(6)) * pin.SE3.Identity()
+
+
+def test_wo_position_anchor_matches_numpy_and_jacobian():
+    """build_wo_position_anchor: value matches the numpy linear model, and its
+    Jacobian [I, -skew(p0)] is the first-order derivative of the true object
+    position p(dxi) = (exp6(dxi) * T0).translation."""
+    rng = np.random.default_rng(3)
+    T0 = pin.SE3(pin.exp3(0.3 * rng.standard_normal(3)),
+                 np.array([0.4, -0.7, 1.1]))
+    p_ref = T0.translation + 0.05 * rng.standard_normal(3)
+    lam = 4.0
+
+    # (1) cvxpy term value == lambda * ||A_pos @ dxi + (p0 - p_ref)||^2.
+    dxi = cp.Variable(6)
+    val = 0.01 * rng.standard_normal(6)
+    dxi.value = val
+    term = build_wo_position_anchor(T0, p_ref, dxi, lam)
+    p0 = T0.translation
+    A_pos = np.hstack([np.eye(3), -pin.skew(p0)])
+    r = A_pos @ val + (p0 - p_ref)
+    gt = lam * float(r @ r)
+    np.testing.assert_allclose(float(term.value), gt, rtol=1e-10)
+
+    # (2) A_pos is the first-order Jacobian of the true position p(dxi).
+    def p_true(d):
+        return (pin.exp6(d) * T0).translation
+    eps = 1e-6
+    J_fd = np.zeros((3, 6))
+    for k in range(6):
+        e = np.zeros(6); e[k] = eps
+        J_fd[:, k] = (p_true(e) - p_true(-e)) / (2 * eps)
+    np.testing.assert_allclose(J_fd, A_pos, atol=1e-6)
 
 
 def test_wo_term_matches_numpy():
