@@ -403,6 +403,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         q = np.copy(q_locked)
         q[self.q_a_indices] = q_a_n_last
 
+        # q[:36] is fixed within a solve_single_iteration call, so convert to
+        # the pinocchio configuration ONCE and reuse it across all the term
+        # builders (D/X, persistence, centroidal, L_ref, ...) instead of ~9x.
+        _q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+
         dqa = cp.Variable(self.nv_a, name="dqa")
 
         obj_terms = []
@@ -483,7 +488,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             # Base DOFs (tangent 0:6) use large bounds and are effectively unconstrained.
             # Tangent index vi >= 6 maps to pinocchio q index vi + 1 (offset by 1
             # because the root FREE joint occupies 7 qpos DOFs but only 6 velocity DOFs).
-            q_pin_cur = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin_cur = _q_pin
             lo = np.copy(self._v_a_lb)
             hi = np.copy(self._v_a_ub)
             joint_mask = self.v_a_indices >= 6
@@ -581,7 +586,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                      or getattr(self, "floor_as_entity", False)) \
                 and (obj_pose is not None or getattr(self, "floor_as_entity", False)):
             from HoloNew.src.test_socp.interaction import build_dx_terms
-            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin = _q_pin
             # Pass dxi_obj for bilateral coupling when the object is a variable.
             # When dxi_obj is None (movable off), behaviour is unchanged.
             obj_terms += build_dx_terms(self, q_pin, dqa, frame_idx, obj_pose,
@@ -598,7 +603,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
             from HoloNew.src.test_socp.interaction import build_p_terms
-            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin = _q_pin
             obj_terms += build_p_terms(self, q_pin, dqa, frame_idx, obj_pose,
                                        self.lambda_P, self.sigma_v, self._dt)
 
@@ -613,7 +618,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
             from HoloNew.src.test_socp.interaction import build_p_constraints
-            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin = _q_pin
             constraints += build_p_constraints(self, q_pin, dqa, frame_idx, obj_pose,
                                                self.persistence_tol)
 
@@ -626,7 +631,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and obj_pose is not None \
                 and getattr(self, "correspondence", None) is not None:
             from HoloNew.src.test_socp.interaction import build_obj_surface_nonpen_constraints
-            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin = _q_pin
             constraints += build_obj_surface_nonpen_constraints(
                 self, q_pin, dqa, frame_idx, obj_pose, dxi=dxi_obj,
                 tol=self.obj_surface_nonpen_tol)
@@ -635,7 +640,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # and two previous frames are available).
         if self.lambda_r > 0 and q_t_last is not None and q_t_last2 is not None:
             from HoloNew.src.test_socp.temporal import build_temporal_term
-            q_pin0 = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin0 = _q_pin
             q_pin1 = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
             q_pin2 = self.pin.qpos_mj_to_q_pin(q_t_last2[:36])
             obj_terms += [build_temporal_term(self, q_pin0, q_pin1, q_pin2, dqa,
@@ -662,7 +667,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             ) else 0.0
             if self.lambda_c_pos > 0 or _lam_c_eff > 0 or _lam_L_eff > 0:
                 from HoloNew.src.test_socp.centroidal import build_centroidal_terms
-                q_t0 = self.pin.qpos_mj_to_q_pin(q[:36])
+                q_t0 = _q_pin
                 q_tm1 = (self.pin.qpos_mj_to_q_pin(q_t_last[:36])
                          if q_t_last is not None else q_t0)
                 _cddot_ref_eff = cddot_ref if cddot_ref is not None else np.zeros(3)
@@ -682,7 +687,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and getattr(self, "_L_ref_all", None) is not None
                 and frame_idx >= 1 and q_t_last is not None):
             from HoloNew.src.test_socp.centroidal import build_lumped_L_term
-            q_pin_cur = self.pin.qpos_mj_to_q_pin(q[:36])
+            q_pin_cur = _q_pin
             q_pin_prev = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
             obj_terms.append(build_lumped_L_term(
                 self, q_pin_cur, q_pin_prev, dqa, self._lumped_frames,
@@ -755,7 +760,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
 
         v_full = np.zeros(self.pin.model.nv)
         v_full[self.v_a_indices] = dqa.value
-        q_pin_new = self.pin.integrate(self.pin.qpos_mj_to_q_pin(q[:36]), v_full)
+        q_pin_new = self.pin.integrate(_q_pin, v_full)
         q_star = np.copy(q)
         q_star[:36] = self.pin.q_pin_to_qpos_mj(q_pin_new)
         # pin.integrate keeps the quaternion unit; no manual renormalisation needed.
