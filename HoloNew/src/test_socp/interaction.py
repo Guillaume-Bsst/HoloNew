@@ -190,6 +190,49 @@ def _skew(v: np.ndarray) -> np.ndarray:
     ])
 
 
+def build_obj_surface_nonpen_constraints(rt, q_pin: np.ndarray, dqa, t: int,
+                                         obj_pose: np.ndarray, dxi=None,
+                                         tol: float = 0.0) -> list:
+    """Hard non-penetration of the robot control points against the object surface.
+
+    The paper's constraint d_{i,j} >= 0 for the OBJECT entity (the D cost only
+    discourages penetration softly). For each robot control point currently within
+    the object SDF margin band, enforce the linearized signed distance to stay
+    above -tol:
+
+        d_i(dqa, dxi) ~= d0_i + n_i . (J_i @ dqa - B_obj_i @ dxi) >= -tol,
+
+    with n_i the object surface normal (surface -> point), J_i the robot point world
+    Jacobian, and B_obj_i = [I, -skew(p_i)] the object rigid-motion contribution
+    (only when the object is a variable). Returns a list of cvxpy inequalities.
+    """
+    if obj_pose is None or getattr(rt, "object_sdf", None) is None:
+        return []
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L = rt.smplx_ground_probe.margin
+    P = robot_control_points(rt, q_pin)
+    fobj, _ = query_entities(rt, P, obj_pose, margin=L)
+    active = np.where(np.asarray(fobj.active, dtype=bool))[0]
+    if active.size == 0:
+        return []
+
+    link_names = [corr.link_names[corr.link_idx[i]] for i in active]
+    offsets = corr.offset_local[active]
+    jacs = [J[:, rt.v_a_indices] for J in rt.pin.point_jacobians(q_pin, link_names, offsets)]
+    I3 = np.eye(3)
+    cons = []
+    for k, i in enumerate(active):
+        n0 = np.asarray(fobj.direction[i], dtype=float)   # surface -> point (world)
+        d0 = float(fobj.distance[i])
+        expr = d0 + n0 @ (jacs[k] @ dqa)
+        if dxi is not None:
+            Bobj_i = np.hstack([I3, -_skew(P[i])])        # world rigid motion
+            expr = expr - n0 @ (Bobj_i @ dxi)
+        cons.append(expr >= -tol)
+    return cons
+
+
 def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
                    obj_pose: np.ndarray,
                    lambda_D: float, lambda_X: float,

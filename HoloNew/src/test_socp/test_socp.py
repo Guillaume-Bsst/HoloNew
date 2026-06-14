@@ -83,6 +83,8 @@ class TestSocpRetargeter:
         lambda_omega: float = 0.0,
         lambda_o_pos: float = 0.0,
         lambda_object_floor: float = 0.0,
+        activate_obj_surface_nonpen: bool = False,
+        obj_surface_nonpen_tol: float = 0.005,
         load_object_scene: bool = True,
         floor_as_entity: bool = False,
         activate_persistence: bool = False,
@@ -258,6 +260,8 @@ class TestSocpRetargeter:
         self.lambda_omega = lambda_omega
         self.lambda_o_pos = lambda_o_pos
         self.lambda_object_floor = lambda_object_floor
+        self.activate_obj_surface_nonpen = activate_obj_surface_nonpen
+        self.obj_surface_nonpen_tol = obj_surface_nonpen_tol
         self.track_L_ref = track_L_ref
         self.lambda_L_track = lambda_L_track
         # Solved object pose history: updated by retarget() when movable is on.
@@ -976,6 +980,20 @@ class TestSocpRetargeter:
             constraints += build_p_constraints(self, q_pin, dqa, frame_idx, obj_pose,
                                                self.persistence_tol)
 
+        # Object-surface non-penetration (paper's d_{i,j} >= 0 for the object).
+        # Hard inequality so robot points cannot pass through the object surface;
+        # the D cost only discourages it softly. Only fires when an object SDF and
+        # pose are present.
+        if self.activate_obj_surface_nonpen \
+                and getattr(self, "object_sdf", None) is not None \
+                and obj_pose is not None \
+                and getattr(self, "correspondence", None) is not None:
+            from HoloNew.src.test_socp.interaction import build_obj_surface_nonpen_constraints
+            q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
+            constraints += build_obj_surface_nonpen_constraints(
+                self, q_pin, dqa, frame_idx, obj_pose, dxi=dxi_obj,
+                tol=self.obj_surface_nonpen_tol)
+
         # Temporal regularization W^r (default off; only active when lambda_r > 0
         # and two previous frames are available).
         if self.lambda_r > 0 and q_t_last is not None and q_t_last2 is not None:
@@ -1481,6 +1499,8 @@ class TestSocpRetargeter:
         kwargs["lambda_omega"] = sc.lambda_omega
         kwargs["lambda_o_pos"] = sc.lambda_o_pos
         kwargs["lambda_object_floor"] = sc.lambda_object_floor
+        kwargs["activate_obj_surface_nonpen"] = sc.activate_obj_surface_nonpen
+        kwargs["obj_surface_nonpen_tol"] = sc.obj_surface_nonpen_tol
         kwargs["activate_persistence"] = sc.activate_persistence
         kwargs["persistence_tol"] = sc.persistence_tol
         # The interaction costs require the non-penetration constraint to stay
@@ -1510,6 +1530,12 @@ class TestSocpRetargeter:
             kwargs["lambda_o_pos"] = 0.0
             kwargs["lambda_object_floor"] = (
                 sc.lambda_object_floor if sc.lambda_object_floor > 0 else 5.0)
+            # NOTE: track_L_ref (paper W^L = track reference momentum) is NOT bundled.
+            # The rotation-tuned weight (lambda_L_track=5, validated on the cartwheel)
+            # over-constrains dynamic VERTICAL motion — it suppresses the leg
+            # extension on jump clips, killing the jump. The right weight is
+            # clip-dependent (strong for aerial spin, off/weak for vertical jumps), so
+            # track_L_ref stays an explicit opt-in rather than a fixed bundle weight.
         else:
             kwargs["floor_as_entity"] = sc.floor_as_entity
 

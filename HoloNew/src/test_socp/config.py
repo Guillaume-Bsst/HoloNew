@@ -64,6 +64,17 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_P: float = 0.0
     sigma_v: float = 0.05
 
+    # Object-surface non-penetration (paper's d_{i,j} >= 0 for the object entity).
+    # The D cost only discourages penetration softly; this adds the HARD inequality
+    # so robot control points cannot pass through the object surface. Implemented and
+    # validated (deepest penetration on sub3_largebox_003 cut -32.5 -> -10.3 mm), but
+    # it defaults OFF because it is SLOW: the many near-surface inequalities make
+    # CLARABEL fail and fall back to SCS (~13-26 s/frame vs ~1.1 baseline). Same
+    # speed/conditioning tradeoff as the soft P cost — kept as an explicit opt-in,
+    # not on by default. tol is the allowed signed-distance floor.
+    activate_obj_surface_nonpen: bool = False
+    obj_surface_nonpen_tol: float = 0.005
+
     # Temporal regularization (W^r): penalizes tangent-space acceleration across
     # consecutive frames. sigma_qddot / sigma_Vdot set the per-DOF noise scale
     # for joints and base, respectively (same units as temporal.py).
