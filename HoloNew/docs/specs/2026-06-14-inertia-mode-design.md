@@ -2,7 +2,19 @@
 
 **Date:** 2026-06-14
 **Author:** driven by G. Besset (paper formulation), implemented in TEST-SOCP
-**Status:** approved (brainstorm), pending implementation plan
+**Status:** implemented (validated on largebox; flight branch unvalidated — no flight clip)
+
+**Implementation note (2026-06-14):** during validation we found the apparent
+inertia "drift" was mostly a constant ~0.25 m frame offset: GMR scaled the root XY
+toward the origin (`root_xy_scale=smpl_scale≈0.68`) while the interaction fields
+used the raw grounded pelvis. Fixed separately by setting `root_xy_scale=1.0` for
+the whole TEST-SOCP pipeline (commit aligning GMR targets to the raw pelvis;
+λ_D/λ_X re-tuned 5→20 in the aligned frame). With that fixed, inertia mode places a
+physically coherent body (feet planted, foot slip ~4 mm) at a constant offset from
+the human pelvis — the robot's morphology puts its pelvis-over-feet differently
+than the human. Decision: accept inertia as *physical placement, not human-pelvis
+tracking*. The coherence metric checks feet-planted + no-runaway, not distance to
+the human pelvis.
 
 ## Goal
 
