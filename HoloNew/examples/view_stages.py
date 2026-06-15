@@ -213,6 +213,27 @@ def view(cfg: ViewStagesConfig) -> None:
     # mesh matches (task_constants.JOINTS_MAPPING values), read by FK from each solved qpos.
     g1_links = list(constants.JOINTS_MAPPING.values())
 
+    def _method_object_pose(key: str):
+        """The object pose THIS method places on its scaled stages: the raw object pose
+        scaled by the method's own object knobs, resolved exactly like the builders
+        (XY: None -> smpl_scale, Z: None -> 1.0). So TEST-SOCP (scale_*_object=1.0) shows
+        the RAW object and GMR-SOCP the smpl_scale-centred one. Position is a pure
+        multiply, so it is applied directly to the MuJoCo-order [x,y,z, qw..] raw pose -
+        decoupled from the solve-only rt._obj_poses_mj (None unless non-penetration is
+        on). None when there is no object (viewer falls back to its global scaled pose)."""
+        if object_pose_raw is None:
+            return None
+        from HoloNew.src.gmr_socp.config import GmrSocpRetargeterConfig
+        from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+        cfg_cls = TestSocpRetargeterConfig if key == "test_socp" else GmrSocpRetargeterConfig
+        sc = cfg.retargeter if isinstance(cfg.retargeter, cfg_cls) else cfg_cls()
+        ox = sc.scale_xy_object if sc.scale_xy_object is not None else smpl_scale
+        oz = sc.scale_z_object if sc.scale_z_object is not None else 1.0
+        placed = object_pose_raw.copy()
+        placed[:, 0:2] *= ox   # x, y
+        placed[:, 2] *= oz     # z
+        return placed
+
     def build_holosoma() -> MethodViz:
         # holosoma: native solved qpos + reproduced preprocessing stages.
         native = run_headless(cfg=cfg)
@@ -268,11 +289,10 @@ def view(cfg: ViewStagesConfig) -> None:
             # Contact-cloud colour = strongest proximity across both channels (mirrors
             # human_dist), so a G1 point near the floor colours from the floor channel.
             mv.g1_dist = np.minimum(res.human_obj_dist, res.human_flr_dist)[:, res.human_idx]
-        # Object reference the SOLVE actually used on its scaled stages (per-method:
-        # GMR centres it by smpl_scale, TEST keeps it raw via scale_*_object=1.0). Drives
-        # the object placement for this method's scaled stages; None -> global fallback.
-        obj_mj = getattr(rt, "_obj_poses_mj", None)
-        mv.object_pose_scaled = None if obj_mj is None else obj_mj[:T]
+        # Object placement for THIS method on its scaled stages (GMR centres it by
+        # smpl_scale, TEST keeps it raw). Derived from the raw object pose + the method's
+        # object knobs, so it is correct even when the solve-only _obj_poses_mj is None.
+        mv.object_pose_scaled = _method_object_pose(key)
         # Solve diagnostics: the method's SOLVED object pose + CoM / momentum / slip.
         mv.solved_object_poses = res.solved_object_poses
         mv.com = res.com
