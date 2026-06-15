@@ -393,10 +393,17 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         d0 = float(fflr.distance[i])
         x0 = np.asarray(fflr.witness[i], dtype=float)     # world-frame floor witness
 
-        # D: sqrt(lambda_d * w) * n0^T Ji  vs  sqrt(lambda_d * w) * (d_ref - d0)
+        # D: sqrt(lambda_d * w) * g^T Ji  vs  sqrt(lambda_d * w) * (d_ref - d0)
+        # The floor signed distance is exactly z, so the gradient of the SIGNED
+        # distance is the constant +z axis everywhere. We must linearize with this
+        # gradient, NOT n0 = fflr.direction (surface->point), which flips to -z
+        # below the floor and would invert the distance-matching attractor into a
+        # repeller for penetrating points (runaway sinking to ~-500 m). The X term
+        # below is unaffected: Pi0 = I - n0 n0^T is invariant to the sign of n0.
         if lambda_d > 0:
+            g_flr = np.array([0.0, 0.0, 1.0])   # ∇(signed dist to z=0 plane)
             sw = float(np.sqrt(lambda_d * w))
-            A_d_flr_rows.append(sw * (n0 @ Ji))               # (nv_a,)
+            A_d_flr_rows.append(sw * (g_flr @ Ji))            # (nv_a,)
             c_d_flr_rows.append(sw * float(d_flr_ref[i] - d0))
 
         # X: sqrt(lambda_x * w) * Pi0 Ji  vs  sqrt(lambda_x * w) * Pi0(x_ref - x0)

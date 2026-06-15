@@ -131,6 +131,62 @@ def test_solver_with_dx_weights_runs():
     assert res.qpos.shape[0] == 4
 
 
+def test_floor_d_term_lifts_point_below_floor():
+    """Regression: the floor D term must LIFT a penetrating control point, not sink it.
+
+    The floor signed distance is exactly z, so its gradient is the constant +z axis
+    everywhere. floor_field.direction is the surface->point convention, which flips to
+    -z below the floor; using it as the D linearization gradient inverts the
+    distance-matching attractor into a repeller for penetrating points and drives the
+    robot downward without bound (observed: base sinking to ~-500 m).
+
+    With the base lowered so floor control points penetrate z=0, the optimal floor-D
+    step must give those points a POSITIVE world-z displacement (lift them out).
+    """
+    import cvxpy as cp
+    rt = _rt()
+    if rt.correspondence is None:
+        pytest.skip("assets not present")
+    from HoloNew.src.test_socp.interaction import (
+        build_dx_terms, robot_control_points, query_entities, frame_references,
+        _activation)
+
+    # Isolate the floor channel: drop the object SDF so only floor D contributes.
+    rt.object_sdf = None
+    rt.lambda_d = 1.0
+
+    # Lower the floating base so some floor control points sink below z = 0.
+    q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36]).copy()
+    q_pin[2] -= 0.4
+    P = robot_control_points(rt, q_pin)
+
+    dqa = cp.Variable(rt.nv_a)
+    terms = build_dx_terms(rt, q_pin, dqa, 0, None, lambda_d=1.0, lambda_x=0.0)
+    if not terms:
+        pytest.skip("no active floor D points in this configuration")
+    prob = cp.Problem(cp.Minimize(cp.sum(terms) + 1e-6 * cp.sum_squares(dqa)),
+                      [cp.SOC(0.2, dqa)])
+    prob.solve(solver=cp.CLARABEL)
+    assert prob.status in ("optimal", "optimal_inaccurate")
+
+    # Penetrating, floor-active control points (robot z < 0 and human ref active).
+    L = rt.smplx_ground_probe.margin
+    _, _, d_flr_ref, _, _ = frame_references(rt, 0)
+    _, fflr = query_entities(rt, P, None, margin=L)
+    corr = rt.correspondence
+    below = [i for i in range(corr.link_idx.shape[0])
+             if bool(fflr.active[i]) and float(fflr.distance[i]) < 0.0
+             and _activation(float(d_flr_ref[i]), L) > 0]
+    if not below:
+        pytest.skip("no penetrating active floor points in this configuration")
+
+    link_names = [corr.link_names[corr.link_idx[i]] for i in below]
+    offsets = corr.offset_local[below]
+    jacs = [J[:, rt.v_a_indices] for J in rt.pin.point_jacobians(q_pin, link_names, offsets)]
+    dz = np.array([(J @ dqa.value)[2] for J in jacs])
+    assert np.all(dz > 0), f"floor D term pushes penetrating points DOWN: dz={dz}"
+
+
 # ---------------------------------------------------------------------------
 # Task 5: P (contact persistence) term
 # ---------------------------------------------------------------------------
