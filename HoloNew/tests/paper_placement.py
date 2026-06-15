@@ -22,7 +22,7 @@ PAPER_PLACEMENT = dict(
     # Contact terms that place the body/feet + temporal regularization.
     activate_wd=True, activate_wx=True, activate_persistence=True, activate_wr=True,
     # Movable object, placed by contacts (no position anchor).
-    activate_movable=True, activate_wo=True,
+    activate_tm=True, activate_wo=True,
     # Weak centroidal W^c / W^L fills the residual / flight.
     activate_wc=True, activate_wl=True,
     # Floor as a contact entity + object<->floor contact, with the required

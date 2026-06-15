@@ -296,7 +296,9 @@ def view(cfg: ViewStagesConfig) -> None:
         # Solve diagnostics: the method's SOLVED object pose + CoM / momentum / slip.
         mv.solved_object_poses = res.solved_object_poses
         mv.com = res.com
+        mv.com_ref = res.com_ref
         mv.angular_momentum = res.angular_momentum
+        mv.angular_momentum_ref = res.angular_momentum_ref
         mv.foot_slip = res.foot_slip
         return mv
 

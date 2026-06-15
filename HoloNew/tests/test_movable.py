@@ -211,7 +211,7 @@ def test_bilateral_dx_object_channel_numpy_equivalence():
 
 
 def test_movable_when_enabled_stays_finite():
-    """W^o is opt-in: activate_movable (object variable) + activate_wo (the W^o cost).
+    """W^o is opt-in: activate_tm (object variable) + activate_wo (the W^o cost).
     The solve must stay finite and the object must not drift from the reference.
     """
     import pytest
@@ -223,13 +223,13 @@ def test_movable_when_enabled_stays_finite():
         task_type="object_interaction",
         task_name="sub3_largebox_003",
         data_format="smplh",
-        retargeter=TestSocpRetargeterConfig(activate_movable=True, activate_wo=True),
+        retargeter=TestSocpRetargeterConfig(activate_tm=True, activate_wo=True),
     ))
     if rt.correspondence is None or rt.object_sdf is None:
         pytest.skip("contact assets not present")
 
     # W^o on with its tuned weights.
-    assert rt.activate_movable is True
+    assert rt.activate_tm is True
     assert rt.lambda_o == 1.0
     assert rt.lambda_omega == 1.0
 
@@ -250,7 +250,7 @@ def test_movable_when_enabled_stays_finite():
 
 
 def test_movable_with_interaction_bilateral_solve():
-    """Task 3: activate_movable=True + D/X on gives a finite 6-frame solve.
+    """Task 3: activate_tm=True + D/X on gives a finite 6-frame solve.
 
     Exercises the bilateral coupling path (dxi passed to build_dx_terms) and
     verifies: (1) qpos is finite; (2) solved object poses are finite; (3) the
@@ -269,7 +269,7 @@ def test_movable_with_interaction_bilateral_solve():
         pytest.skip("contact assets not present")
 
     # Enable movable + bilateral D/X.
-    rt.activate_movable = True
+    rt.activate_tm = True
     rt.lambda_o = 1.0
     rt.lambda_omega = 1.0
     rt.lambda_d = 1.0

@@ -27,5 +27,7 @@ class RetargetResult:
     solved_object_poses: np.ndarray | None = None  # (T, 7)  TEST's SOLVED object pose [qw,qx,qy,qz,x,y,z]
                                                    #         (movable/inertia) vs the reference object pose
     com: np.ndarray | None = None                  # (T, 3)  robot CoM (centroidal diagnostic)
+    com_ref: np.ndarray | None = None              # (T, 3)  W^c_pos target CoM (grounded reference)
     angular_momentum: np.ndarray | None = None     # (T, 3)  centroidal angular momentum L (W^L diagnostic)
+    angular_momentum_ref: np.ndarray | None = None # (T, 3)  W^L reference angular momentum (grounded target)
     foot_slip: np.ndarray | None = None            # (T,)    mean tangential foot slip at floor contacts (no-slip)

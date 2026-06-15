@@ -92,7 +92,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         lambda_l: float = 0.0,
         activate_wl_track: bool = False,
         lambda_l_track: float = 1.0,
-        activate_movable: bool = False,
+        activate_qa: bool = True,
+        activate_tb: bool = True,
+        activate_tm: bool = False,
         lambda_o: float = 0.0,
         lambda_omega: float = 0.0,
         lambda_o_pos: float = 0.0,
@@ -288,7 +290,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.lambda_l = lambda_l
 
         # Brick 5 — Movable entities W^o (default off; parity preserved).
-        self.activate_movable = activate_movable
+        # §1 Variables: q_a (joints) and T_B (base) are free by default; setting their
+        # flag False freezes that block of the tangent step (dqa). T_m (object) becomes a
+        # variable only when activate_tm (handled where dxi_obj is created).
+        self.activate_qa = activate_qa
+        self.activate_tb = activate_tb
+        self.activate_tm = activate_tm
         self.lambda_o = lambda_o
         self.lambda_omega = lambda_omega
         self.lambda_o_pos = lambda_o_pos
@@ -516,6 +523,17 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                         obj_terms.append(w_r * cp.sum_squares(Jr_body @ dqa - e))
 
         constraints = [cp.SOC(self.step_size, dqa)]
+        # §1 Variables: freeze q_a (joints) or T_B (base) by pinning their tangent block
+        # to zero. dqa is indexed by self.v_a_indices; tangent index < 6 is the floating
+        # base, >= 6 are the actuated joints.
+        if not self.activate_tb:
+            _base = np.where(self.v_a_indices < 6)[0]
+            if _base.size:
+                constraints.append(dqa[_base] == 0)
+        if not self.activate_qa:
+            _joints = np.where(self.v_a_indices >= 6)[0]
+            if _joints.size:
+                constraints.append(dqa[_joints] == 0)
         if self.activate_joint_limits:
             # Tangent-space joint limit box: precomputed absolute bounds minus
             # current joint values.  For hinge/slide joints, the pinocchio tangent
@@ -609,7 +627,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # share the SAME dxi_obj variable.  The trust-region SOC is added here so
         # the step size is bounded regardless of which downstream terms use dxi_obj.
         dxi_obj = None
-        if self.activate_movable and obj_pose is not None:
+        if self.activate_tm and obj_pose is not None:
             dxi_obj = cp.Variable(6, name="dxi_obj")
             constraints.append(cp.SOC(self.step_size, dxi_obj))
 
@@ -917,6 +935,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         _pelvis_init = self.pin.body_position(_q_init_pin, "pelvis")
         _com_pelvis_offset = _com_init - _pelvis_init  # (3,) structural offset
         _c_ref_all = _g_pelvis + _com_pelvis_offset     # (T, 3) reference CoM positions
+        # Keep the grounded CoM target around for the viewer diagnostics (the W^c_pos
+        # anchor target), so the solved-vs-target CoM gap can be shown geometrically.
+        self._c_ref_all = _c_ref_all
 
         # Previous two solved CoMs for W^c finite-difference stencil.
         # Initialised to the init-config CoM so the warm-up frames are stable.
@@ -941,7 +962,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         _obj_prev = None   # solved object pose at t-1
         _obj_prev2 = None  # solved object pose at t-2
         self._obj_solved_poses = []
-        if self.activate_movable and getattr(self, "_obj_poses_raw", None) is not None:
+        if self.activate_tm and getattr(self, "_obj_poses_raw", None) is not None:
             from HoloNew.src.test_socp.movable import pose_to_se3
             _V_ref_obj = [np.zeros(6)] * T
             for _t in range(1, T):
@@ -1064,7 +1085,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 _c_prev = _c_new     # t-1 slot <- newly solved t
 
             # Update solved object pose history for W^o (shift two-frame window).
-            if self.activate_movable and _frame_solved_obj is not None:
+            if self.activate_tm and _frame_solved_obj is not None:
                 _obj_prev2 = _obj_prev
                 _obj_prev = _frame_solved_obj
 
@@ -1133,6 +1154,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 L[t] = (self.pin.centroidal_map(q_pin) @ v)[3:6]
         res.com = com
         res.angular_momentum = L
+        # Targets used by the centroidal weights, for the viewer to draw alongside the
+        # solved quantities (the grounded reference CoM and the W^L reference L).
+        res.com_ref = getattr(self, "_c_ref_all", None)
+        res.angular_momentum_ref = getattr(self, "_L_ref_all", None)
         # Foot slip needs the floor probe + correspondence (object tasks / floor_as_entity).
         if (getattr(self, "smplx_ground_probe", None) is not None
                 and getattr(self, "correspondence", None) is not None):

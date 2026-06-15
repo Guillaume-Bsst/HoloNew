@@ -85,7 +85,9 @@ class MethodViz:
     # TEST-SOCP solve diagnostics.
     solved_object_poses: np.ndarray | None = None  # (T, 7) the method's SOLVED object pose [wxyz,xyz]
     com: np.ndarray | None = None                  # (T, 3) robot CoM
+    com_ref: np.ndarray | None = None              # (T, 3) grounded CoM target (W^c_pos reference)
     angular_momentum: np.ndarray | None = None     # (T, 3) centroidal angular momentum L
+    angular_momentum_ref: np.ndarray | None = None # (T, 3) grounded L target (W^L reference)
     foot_slip: np.ndarray | None = None            # (T,)   mean tangential foot slip (no-slip diagnostic)
 
 
@@ -142,9 +144,12 @@ class Viewer:
         self._object_contact_handle = None
         self._floor_contact_handle = None
         self._sdf_floor_handle = None
-        # Persistent centroidal-diagnostic handles (CoM marker + its ground shadow).
+        # Persistent centroidal-diagnostic handles (CoM marker + its ground shadow),
+        # plus the grounded CoM target marker + shadow drawn alongside.
         self._com_handle = None
         self._com_shadow_handle = None
+        self._com_ref_handle = None
+        self._com_ref_shadow_handle = None
         self._dynamic_handles: list = []
         self.server = viser.ViserServer()
 
@@ -272,7 +277,7 @@ class Viewer:
 
         # TEST-SOCP solve diagnostics: the SOLVED object pose (movable/inertia) and
         # the per-frame CoM / foot-slip / angular-momentum readout.
-        with self.server.gui.add_folder("TEST diagnostics"):
+        with self.server.gui.add_folder("Test diagnostics"):
             self._tog_solved_obj = self.server.gui.add_checkbox("Solved object pose", True)
             self._tog_com = self.server.gui.add_checkbox("CoM + trail", False)
             self._tog_L = self.server.gui.add_checkbox("Angular momentum L", False)
@@ -506,26 +511,38 @@ class Viewer:
                 self._object_pts_handle.points = transform_points_local_to_world(
                     quat, trans, self.object_points_local).astype(np.float32)
                 self._object_pts_handle.visible = True
-        # (2) Solve-state readout: CoM height, foot slip (mm), |L|.
+        # (2) Solve-state readout: CoM height (solved vs grounded target), foot slip
+        # (mm), and |L| (solved vs reference). Targets shown as "(→tgt)" when present.
         parts = []
         if method.com is not None and frame < len(method.com):
-            parts.append(f"CoM z={method.com[frame][2]:.3f}m")
+            txt = f"CoM z={method.com[frame][2]:.3f}m"
+            if method.com_ref is not None and frame < len(method.com_ref):
+                txt += f" (→{method.com_ref[frame][2]:.3f})"
+            parts.append(txt)
         if method.foot_slip is not None and frame < len(method.foot_slip):
             parts.append(f"slip={method.foot_slip[frame] * 1000:.1f}mm")
         if method.angular_momentum is not None and frame < len(method.angular_momentum):
-            parts.append(f"|L|={np.linalg.norm(method.angular_momentum[frame]):.2f}")
-        self._diag_text.value = "  ".join(parts) if parts else "(no TEST diagnostics)"
+            txt = f"|L|={np.linalg.norm(method.angular_momentum[frame]):.2f}"
+            if method.angular_momentum_ref is not None and frame < len(method.angular_momentum_ref):
+                txt += f" (→{np.linalg.norm(method.angular_momentum_ref[frame]):.2f})"
+            parts.append(txt)
+        self._diag_text.value = "  ".join(parts) if parts else "(no Test diagnostics)"
 
     def _draw_centroidal(self, frame: int) -> None:
         """Make TEST's centroidal quantities geometric (they are otherwise only numbers).
-        "CoM + trail": a magenta CoM marker, its grey ground shadow (z=0), and the whole-clip
-        CoM polyline (the ballistic arc). "Angular momentum L": an arrow from the CoM along L,
-        scaled so the clip's peak |L| reads ~0.5 m. Both gate on method.com / .angular_momentum
-        being present; the marker/shadow are persistent (no flicker), trail/arrow are dynamic."""
+        "CoM + trail": a magenta SOLVED CoM marker + grey shadow + ballistic-arc polyline,
+        and the grounded CoM TARGET (W^c_pos reference) drawn alongside in green so the
+        solved-vs-target gap is visible. "Angular momentum L": a cyan arrow along the solved
+        L plus an orange arrow along the reference L (W^L target). The two L arrows are each
+        normalised to their OWN clip peak (~0.5 m): the reference is a lumped/orbital quantity
+        whose absolute scale differs from the full centroidal L, so only direction/trend is
+        comparable. All gate on the corresponding fields; markers/shadows are persistent (no
+        flicker), trails/arrows are dynamic."""
         method = self._methods.get(self._method_dd.value)
         com = None if method is None else method.com
+        com_ref = None if method is None else method.com_ref
         show_com = self._tog_com.value and com is not None and frame < len(com)
-        # Persistent CoM marker + ground shadow, updated in place.
+        # Persistent CoM marker + ground shadow, updated in place. Magenta = solved.
         if show_com:
             c = np.asarray(com[frame], dtype=np.float32)
             shadow = np.array([[c[0], c[1], 0.0]], dtype=np.float32)
@@ -549,20 +566,57 @@ class Viewer:
         elif self._com_handle is not None:
             self._com_handle.visible = False
             self._com_shadow_handle.visible = False
-        # Angular-momentum arrow from the CoM along L (dynamic single segment).
-        L = None if method is None else method.angular_momentum
-        if (self._tog_L.value and com is not None and L is not None
-                and frame < len(com) and frame < len(L)):
-            peak = float(np.linalg.norm(np.asarray(L), axis=1).max())
-            k = 0.5 / peak if peak > 1e-9 else 0.0
-            c = np.asarray(com[frame], dtype=np.float32)
-            tip = (c + k * np.asarray(L[frame], dtype=np.float32)).astype(np.float32)
-            seg = np.stack([c, tip])[None]
-            cols = np.broadcast_to((0, 180, 230), (1, 2, 3)).astype(np.uint8)
-            self._dynamic_handles.append(self.server.scene.add_line_segments(
-                "/test/L_arrow", seg, cols, line_width=4.0))
-            self._dynamic_handles.append(self.server.scene.add_point_cloud(
-                "/test/L_tip", tip[None], np.array([[0, 180, 230]], np.uint8), point_size=0.04))
+        # Grounded CoM TARGET marker + shadow + trail drawn alongside in green.
+        show_ref = self._tog_com.value and com_ref is not None and frame < len(com_ref)
+        if show_ref:
+            cr = np.asarray(com_ref[frame], dtype=np.float32)
+            shr = np.array([[cr[0], cr[1], 0.0]], dtype=np.float32)
+            if self._com_ref_handle is None:
+                self._com_ref_handle = self.server.scene.add_point_cloud(
+                    "/test/com_ref", cr[None], np.array([[40, 200, 90]], np.uint8), point_size=0.05)
+                self._com_ref_shadow_handle = self.server.scene.add_point_cloud(
+                    "/test/com_ref_shadow", shr, np.array([[60, 130, 80]], np.uint8), point_size=0.04)
+            else:
+                self._com_ref_handle.points = cr[None]
+                self._com_ref_handle.visible = True
+                self._com_ref_shadow_handle.points = shr
+                self._com_ref_shadow_handle.visible = True
+            if len(com_ref) > 1:
+                trr = np.asarray(com_ref, dtype=np.float32)
+                segsr = np.stack([trr[:-1], trr[1:]], axis=1)
+                colsr = np.broadcast_to((40, 200, 90), (len(segsr), 2, 3)).astype(np.uint8)
+                self._dynamic_handles.append(self.server.scene.add_line_segments(
+                    "/test/com_ref_trail", segsr, colsr, line_width=2.0))
+        elif self._com_ref_handle is not None:
+            self._com_ref_handle.visible = False
+            self._com_ref_shadow_handle.visible = False
+        # Angular-momentum arrows from the CoM: cyan = solved L, orange = reference L.
+        # Anchor both at the solved CoM when present, else the target CoM.
+        anchor = com if com is not None else com_ref
+        if self._tog_L.value and anchor is not None and frame < len(anchor):
+            c = np.asarray(anchor[frame], dtype=np.float32)
+            L = None if method is None else method.angular_momentum
+            if L is not None and frame < len(L):
+                peak = float(np.linalg.norm(np.asarray(L), axis=1).max())
+                k = 0.5 / peak if peak > 1e-9 else 0.0
+                tip = (c + k * np.asarray(L[frame], dtype=np.float32)).astype(np.float32)
+                seg = np.stack([c, tip])[None]
+                cols = np.broadcast_to((0, 180, 230), (1, 2, 3)).astype(np.uint8)
+                self._dynamic_handles.append(self.server.scene.add_line_segments(
+                    "/test/L_arrow", seg, cols, line_width=4.0))
+                self._dynamic_handles.append(self.server.scene.add_point_cloud(
+                    "/test/L_tip", tip[None], np.array([[0, 180, 230]], np.uint8), point_size=0.04))
+            L_ref = None if method is None else method.angular_momentum_ref
+            if L_ref is not None and frame < len(L_ref):
+                peak_r = float(np.linalg.norm(np.asarray(L_ref), axis=1).max())
+                k_r = 0.5 / peak_r if peak_r > 1e-9 else 0.0
+                tip_r = (c + k_r * np.asarray(L_ref[frame], dtype=np.float32)).astype(np.float32)
+                seg_r = np.stack([c, tip_r])[None]
+                cols_r = np.broadcast_to((255, 150, 0), (1, 2, 3)).astype(np.uint8)
+                self._dynamic_handles.append(self.server.scene.add_line_segments(
+                    "/test/L_ref_arrow", seg_r, cols_r, line_width=4.0))
+                self._dynamic_handles.append(self.server.scene.add_point_cloud(
+                    "/test/L_ref_tip", tip_r[None], np.array([[255, 150, 0]], np.uint8), point_size=0.04))
 
     def _draw_g1_points(self, frame: int) -> None:
         """Holosoma's G1 morphological-graph keypoints (the robot links the interaction

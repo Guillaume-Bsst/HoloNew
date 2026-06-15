@@ -90,9 +90,11 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["lambda_l"] = sc.lambda_l if sc.activate_wl else 0.0
     kwargs["activate_wl_track"] = sc.activate_wl_track
     kwargs["lambda_l_track"] = sc.lambda_l_track
-    # Movable: activate_movable (§1) makes the object a variable; the three W^o weights
-    # are each switched independently.
-    kwargs["activate_movable"] = sc.activate_movable
+    # §1 Variables: q_a / T_B are free (frozen when their flag is False); activate_tm (§1)
+    # makes the object a variable. The three W^o weights are each switched independently.
+    kwargs["activate_qa"] = sc.activate_qa
+    kwargs["activate_tb"] = sc.activate_tb
+    kwargs["activate_tm"] = sc.activate_tm
     kwargs["lambda_o"] = sc.lambda_o if sc.activate_wo else 0.0
     kwargs["lambda_omega"] = sc.lambda_omega if sc.activate_wo else 0.0
     kwargs["lambda_o_pos"] = sc.lambda_o_pos if sc.activate_wo_pos else 0.0
@@ -130,12 +132,12 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
             "require activate_obj_non_penetration=True (without it the D term drives the "
             "floating base through the floor).")
     # 3) The movable W^o weights act on the object pose variable, which only exists when
-    #    activate_movable is on.
+    #    activate_tm is on.
     if (sc.activate_wo or sc.activate_wo_pos or sc.activate_wo_floor) \
-            and not sc.activate_movable:
+            and not sc.activate_tm:
         raise ValueError(
             "TEST-SOCP config: activate_wo / activate_wo_pos / activate_wo_floor act on "
-            "the object pose variable; set activate_movable=True (object is a variable).")
+            "the object pose variable; set activate_tm=True (object is a variable).")
     rt = cls(**kwargs)
 
     # Load raw joint positions + per-joint quaternions. Two sources:

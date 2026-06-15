@@ -1,6 +1,6 @@
 """Validation metric for W^o movable-entity bilateral coupling (Brick 5, Task 4).
 
-Compares activate_movable=False (A) vs activate_movable=True (B) on
+Compares activate_tm=False (A) vs activate_tm=True (B) on
 object_interaction sub3_largebox_003 over 30 frames and asserts:
 
   1. Finite + sane: all robot qpos finite; pelvis z in [0.35, 1.0] m.
@@ -18,14 +18,14 @@ offsets the (acceleration-only-regularized, position-blind) object and it drifts
 ~0.27 m. The lambda_o_pos=10 anchor (default) pins the absolute object position
 to the reference path, which also improves contact tracking (the gap was being
 measured against a drifted object pose):
-  (A) activate_movable=False: mean obj pos err=0.0000 m (driven),
+  (A) activate_tm=False: mean obj pos err=0.0000 m (driven),
       mean contact gap~0.072 m
-  (B) activate_movable=True, lambda_o=1.0, lambda_omega=1.0 (lambda_o_pos=10):
+  (B) activate_tm=True, lambda_o=1.0, lambda_omega=1.0 (lambda_o_pos=10):
       mean obj pos err~0.0005 m, mean contact gap~0.054 m
   --> object stays within ~0.003 m of reference across 30 frames; contact gap
       is better with movable+anchor on. (With lambda_o_pos=0 the object drifts
       0.27 m and this test fails — the anchor is required.)
-  Decision: ENABLED by default (activate_movable=True, lambda_o=1.0,
+  Decision: ENABLED by default (activate_tm=True, lambda_o=1.0,
   lambda_omega=1.0, lambda_o_pos=10.0 in TestSocpRetargeterConfig).
 """
 import numpy as np
@@ -38,7 +38,7 @@ _PELVIS_Z_LO = 0.35          # m
 _PELVIS_Z_HI = 1.0           # m
 
 
-def _build_rt(activate_movable, lambda_o=0.0, lambda_omega=0.0):
+def _build_rt(activate_tm, lambda_o=0.0, lambda_omega=0.0):
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
@@ -48,9 +48,9 @@ def _build_rt(activate_movable, lambda_o=0.0, lambda_omega=0.0):
         task_name="sub3_largebox_003",
         data_format="smplh",
         retargeter=TestSocpRetargeterConfig(
-            activate_movable=activate_movable,
+            activate_tm=activate_tm,
             # W^o is switched by activate_wo now; enable it when a weight was set.
-            activate_wo=activate_movable and (lambda_o > 0 or lambda_omega > 0),
+            activate_wo=activate_tm and (lambda_o > 0 or lambda_omega > 0),
             lambda_o=lambda_o,
             lambda_omega=lambda_omega,
         ),
@@ -88,7 +88,7 @@ def _contact_gap(rt, qpos_all, solved_obj_poses, n_frames):
 
 def test_movable_metric():
     """Validate W^o movable-entity bilateral coupling on a 30-frame clip."""
-    rt_a = _build_rt(activate_movable=False)
+    rt_a = _build_rt(activate_tm=False)
     if rt_a.correspondence is None or rt_a.object_sdf is None:
         pytest.skip("contact assets not present")
 
@@ -110,8 +110,8 @@ def test_movable_metric():
 
     gap_a = _contact_gap(rt_a, res_a.qpos, solved_a, _MAX_FRAMES)
 
-    # (B) activate_movable=True with tuned lambda_o=1.0, lambda_omega=1.0.
-    rt_b = _build_rt(activate_movable=True, lambda_o=1.0, lambda_omega=1.0)
+    # (B) activate_tm=True with tuned lambda_o=1.0, lambda_omega=1.0.
+    rt_b = _build_rt(activate_tm=True, lambda_o=1.0, lambda_omega=1.0)
     res_b = rt_b.retarget(max_frames=_MAX_FRAMES)
     assert np.all(np.isfinite(res_b.qpos)), "(B) qpos contains non-finite values"
     z_lo_b = float(res_b.qpos[:, 2].min())
