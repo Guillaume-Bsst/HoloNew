@@ -111,7 +111,7 @@ def test_dx_terms_assemble_and_solve():
     # Use real frame-0 object pose if available, else identity.
     obj_pose = getattr(rt, "_obj_poses_raw", None)
     obj_pose = obj_pose[0] if obj_pose is not None else np.array([1., 0, 0, 0, 0, 0, 0])
-    terms = build_dx_terms(rt, q_pin, dqa, 0, obj_pose, lambda_D=1.0, lambda_X=1.0)
+    terms = build_dx_terms(rt, q_pin, dqa, 0, obj_pose, lambda_d=1.0, lambda_x=1.0)
     assert isinstance(terms, list)
     prob = cp.Problem(cp.Minimize(cp.sum(terms) + cp.sum_squares(dqa)), [cp.SOC(0.2, dqa)])
     prob.solve(solver=cp.CLARABEL)
@@ -122,8 +122,8 @@ def test_solver_with_dx_weights_runs():
     rt = _rt()
     if rt.correspondence is None or rt.object_sdf is None:
         pytest.skip("assets not present")
-    rt.lambda_D = 1.0
-    rt.lambda_X = 1.0
+    rt.lambda_d = 1.0
+    rt.lambda_x = 1.0
     # Solve a few frames only: the D/X assembly builds many cvxpy terms per SQP
     # iteration, so a full clip is slow; a short run exercises the wiring.
     res = rt.retarget(max_frames=4)
@@ -174,7 +174,7 @@ def test_p_terms_assemble():
     }
 
     terms = build_p_terms(rt, q_pin, dqa, t=1, obj_pose=obj_pose,
-                          lambda_P=1.0, sigma_v=0.05, dt=1.0 / 30.0)
+                          lambda_p=1.0, sigma_v=0.05, dt=1.0 / 30.0)
     assert isinstance(terms, list)
     # The assembled problem must be solvable regardless of how many active points.
     base = cp.sum_squares(dqa)
@@ -196,9 +196,9 @@ def test_p_persistence_runs():
     rt = _rt()
     if rt.correspondence is None or rt.object_sdf is None:
         pytest.skip("assets not present")
-    rt.lambda_D = 0.0
-    rt.lambda_X = 0.0
-    rt.lambda_P = 1.0
+    rt.lambda_d = 0.0
+    rt.lambda_x = 0.0
+    rt.lambda_p = 1.0
     rt.activate_obj_non_penetration = False
     res = rt.retarget(max_frames=3)
     assert np.all(np.isfinite(res.qpos)), "Non-finite qpos with P term enabled"

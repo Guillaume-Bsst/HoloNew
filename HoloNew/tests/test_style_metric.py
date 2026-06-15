@@ -1,11 +1,11 @@
 """Validation metrics for the pelvis-relative Style objective (Brick 3).
 
-Runs a 30-frame retarget on robot_only sub3_largebox_003 with activate_style=True
+Runs a 30-frame retarget on robot_only sub3_largebox_003 with activate_ws=True
 and checks:
   1. Finite + no pose collapse: all qpos finite; pelvis z in [0.4, 1.0] m.
   2. Joint-orientation fidelity: mean pelvis-relative orientation error over
      tracked non-pelvis bodies is comparable to (or better than) the same
-     metric from world-frame tracking (activate_style=False).
+     metric from world-frame tracking (activate_ws=False).
   3. Base-xy drift: on object_interaction sub3_largebox_003, 30 frames, the
      default config (pelvis_anchor_weight=10.0) keeps mean xy-drift below
      0.12 m.  Guards against the position scaffold silently weakening again.
@@ -43,14 +43,14 @@ TASK_NAME = "sub3_largebox_003"
 DATA_FORMAT = "smplh"
 
 
-def _make_rt(activate_style: bool) -> TestSocpRetargeter:
+def _make_rt(activate_ws: bool) -> TestSocpRetargeter:
     cfg = RetargetingConfig(
         task_type=TASK_TYPE,
         task_name=TASK_NAME,
         data_format=DATA_FORMAT,
     )
     rt = TestSocpRetargeter.from_config(cfg)
-    rt.activate_style = activate_style
+    rt.activate_ws = activate_ws
     return rt
 
 
@@ -108,7 +108,7 @@ def _pelvis_relative_fidelity(rt: TestSocpRetargeter, qpos: np.ndarray) -> float
 
 
 def test_style_finite_no_collapse_and_fidelity():
-    """Validate activate_style=True over 30 frames: finite, sane pelvis z,
+    """Validate activate_ws=True over 30 frames: finite, sane pelvis z,
     comparable pelvis-relative joint fidelity to world-frame tracking.
 
     Observed on sub3_largebox_003 (2026-06-13):
@@ -117,7 +117,7 @@ def test_style_finite_no_collapse_and_fidelity():
         pelvis z range             : [0.562, 0.800] m
     """
     # --- Style solve ---
-    rt_style = _make_rt(activate_style=True)
+    rt_style = _make_rt(activate_ws=True)
     res_style = rt_style.retarget(max_frames=MAX_FRAMES)
 
     # 1. Finite + no pose collapse.
@@ -131,7 +131,7 @@ def test_style_finite_no_collapse_and_fidelity():
     )
 
     # --- World-frame solve (reference) ---
-    rt_world = _make_rt(activate_style=False)
+    rt_world = _make_rt(activate_ws=False)
     res_world = rt_world.retarget(max_frames=MAX_FRAMES)
 
     # 2. Pelvis-relative fidelity comparison.

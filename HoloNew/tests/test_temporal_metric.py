@@ -42,7 +42,7 @@ def _solve(lr, sq, sV, K=_K):
         task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh",
         retargeter=TestSocpRetargeterConfig(activate_wr=lr > 0, lambda_r=lr,
                                             sigma_qddot=sq, sigma_Vdot=sV,
-                                            activate_style=False)))
+                                            activate_ws=False)))
     res = rt.retarget(max_frames=K)
     # Mean absolute third finite difference of joint angles (columns 7: = actuated joints).
     jerk = float(np.mean(np.abs(np.diff(res.qpos[:, 7:], n=3, axis=0))))

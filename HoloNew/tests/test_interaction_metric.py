@@ -1,7 +1,7 @@
 """Brick 1 acceptance metric: the D/X interaction costs reduce the robot-side
 OBJECT contact gap versus the reference, in the full default pipeline.
 
-D/X are enabled by default (lambda_D=lambda_X=5.0, with the auto-coupled ground
+D/X are enabled by default (lambda_d=lambda_x=5.0, with the auto-coupled ground
 non-penetration that keeps them stable). This test is the acceptance gate:
 turning them off must make the mean OBJECT contact gap worse (on < off).
 
@@ -50,7 +50,7 @@ def test_dx_reduces_object_contact_gap():
     rt_on = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="object_interaction", task_name="sub3_largebox_003", data_format="smplh",
         retargeter=TestSocpRetargeterConfig(
-            activate_d=True, activate_x=True, activate_obj_non_penetration=True)))
+            activate_wd=True, activate_wx=True, activate_obj_non_penetration=True)))
     if rt_on.correspondence is None or rt_on.object_sdf is None:
         pytest.skip("correspondence/object_sdf assets not present")
     # OFF: interaction switches off (the GMR baseline default).

@@ -86,7 +86,7 @@ def test_lref_tracking_reproduces_cartwheel_spin():
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="robot_only", task_name="0007_Cartwheel001",
         data_format="smplx", data_path=clip.parent,
-        retargeter=TestSocpRetargeterConfig(track_L_ref=True, lambda_L_track=5.0)))
+        retargeter=TestSocpRetargeterConfig(activate_wl_track=True, lambda_l_track=5.0)))
     frames, masses = mapped_frame_masses_and_names(rt)
     Lref = reference_orbital_angular_momentum(rt.gmr_ground["pos"], masses, dt)[:N]
     res = rt.retarget(max_frames=N)

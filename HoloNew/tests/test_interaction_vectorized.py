@@ -38,7 +38,7 @@ def _skip_if_missing(rt):
 
 def _pointwise_dx_objective(rt, q_pin: np.ndarray, val: np.ndarray,
                              t: int, obj_pose: np.ndarray,
-                             lambda_D: float, lambda_X: float) -> float:
+                             lambda_d: float, lambda_x: float) -> float:
     """Per-point numpy ground truth for build_dx_terms evaluated at dqa=val.
 
     Replicates every coefficient from the spec:
@@ -47,8 +47,8 @@ def _pointwise_dx_objective(rt, q_pin: np.ndarray, val: np.ndarray,
       - weight w = alpha / (L^2 * N_k)
       - object channel: residuals in object-local frame (Robj.T @ Ji)
       - floor channel: residuals in world frame (Ji directly)
-      - D: (n0^T J dqa - (d_ref - d0))^2  * lambda_D * w
-      - X: || Pi0 J dqa - Pi0(x_ref - x0) ||^2  * lambda_X * w
+      - D: (n0^T J dqa - (d_ref - d0))^2  * lambda_d * w
+      - X: || Pi0 J dqa - Pi0(x_ref - x0) ||^2  * lambda_x * w
     """
     from HoloNew.src.test_socp.interaction import (
         robot_control_points, query_entities, frame_references,
@@ -99,15 +99,15 @@ def _pointwise_dx_objective(rt, q_pin: np.ndarray, val: np.ndarray,
         d0 = float(fobj.distance[i])
         x0 = np.asarray(fobj.witness[i], dtype=float)
 
-        if lambda_D > 0:
+        if lambda_d > 0:
             res_d = n0 @ (Jloc @ val) - float(d_obj_ref[i] - d0)
-            total += (lambda_D * w) * res_d ** 2
+            total += (lambda_d * w) * res_d ** 2
 
-        if lambda_X > 0:
+        if lambda_x > 0:
             Pi0 = I3 - np.outer(n0, n0)
             rhs_x = Pi0 @ (np.asarray(x_obj_ref[i], dtype=float) - x0)
             res_x = Pi0 @ (Jloc @ val) - rhs_x
-            total += (lambda_X * w) * float(res_x @ res_x)
+            total += (lambda_x * w) * float(res_x @ res_x)
 
     # Floor channel.
     for i in np.where(active_flr)[0]:
@@ -118,22 +118,22 @@ def _pointwise_dx_objective(rt, q_pin: np.ndarray, val: np.ndarray,
         d0 = float(fflr.distance[i])
         x0 = np.asarray(fflr.witness[i], dtype=float)
 
-        if lambda_D > 0:
+        if lambda_d > 0:
             res_d = n0 @ (Ji @ val) - float(d_flr_ref[i] - d0)
-            total += (lambda_D * w) * res_d ** 2
+            total += (lambda_d * w) * res_d ** 2
 
-        if lambda_X > 0:
+        if lambda_x > 0:
             Pi0 = I3 - np.outer(n0, n0)
             rhs_x = Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0)
             res_x = Pi0 @ (Ji @ val) - rhs_x
-            total += (lambda_X * w) * float(res_x @ res_x)
+            total += (lambda_x * w) * float(res_x @ res_x)
 
     return total
 
 
 def _pointwise_p_objective(rt, q_pin: np.ndarray, val: np.ndarray,
                             t: int, obj_pose: np.ndarray,
-                            lambda_P: float, sigma_v: float, dt: float) -> float:
+                            lambda_p: float, sigma_v: float, dt: float) -> float:
     """Per-point numpy ground truth for build_p_terms evaluated at dqa=val."""
     from HoloNew.src.test_socp.interaction import (
         robot_control_points, query_entities, frame_references,
@@ -146,7 +146,7 @@ def _pointwise_p_objective(rt, q_pin: np.ndarray, val: np.ndarray,
     L = rt.smplx_ground_probe.margin
     # P is normalized by the field range L^2 (same scale as X), not (sigma_v*dt)^2
     # — see the note in interaction.build_p_terms. sigma_v/dt are unused.
-    scale_sq = lambda_P / L ** 2
+    scale_sq = lambda_p / L ** 2
 
     n_links = len(corr.link_names)
     link_counts = np.zeros(n_links, dtype=float)
@@ -259,9 +259,9 @@ def test_dx_vectorized_matches_pointwise_numpy():
     dqa = cp.Variable(rt.nv_a)
     dqa.value = val
 
-    lambda_D, lambda_X = 2.0, 3.0
+    lambda_d, lambda_x = 2.0, 3.0
     terms = build_dx_terms(rt, q_pin, dqa, 0, obj_pose,
-                           lambda_D=lambda_D, lambda_X=lambda_X)
+                           lambda_d=lambda_d, lambda_x=lambda_x)
 
     if len(terms) == 0:
         pytest.skip("no active D/X points at frame 0 — cannot test equivalence")
@@ -270,7 +270,7 @@ def test_dx_vectorized_matches_pointwise_numpy():
     vec_obj = float(sum(float(tm.value) for tm in terms))
 
     # Independent ground truth.
-    gt = _pointwise_dx_objective(rt, q_pin, val, 0, obj_pose, lambda_D, lambda_X)
+    gt = _pointwise_dx_objective(rt, q_pin, val, 0, obj_pose, lambda_d, lambda_x)
 
     np.testing.assert_allclose(vec_obj, gt, rtol=1e-8, atol=1e-10,
                                err_msg="vectorized D/X objective mismatch vs numpy ground truth")
@@ -315,9 +315,9 @@ def test_p_vectorized_matches_pointwise_numpy():
     dqa = cp.Variable(rt.nv_a)
     dqa.value = val
 
-    lambda_P, sigma_v, dt = 2.0, 0.05, 1.0 / 30.0
+    lambda_p, sigma_v, dt = 2.0, 0.05, 1.0 / 30.0
     terms = build_p_terms(rt, q_pin, dqa, t=1, obj_pose=obj_pose,
-                          lambda_P=lambda_P, sigma_v=sigma_v, dt=dt)
+                          lambda_p=lambda_p, sigma_v=sigma_v, dt=dt)
 
     if len(terms) == 0:
         pytest.skip("no active P points — cannot test equivalence")
@@ -325,7 +325,7 @@ def test_p_vectorized_matches_pointwise_numpy():
     vec_obj = float(sum(float(tm.value) for tm in terms))
 
     gt = _pointwise_p_objective(rt, q_pin, val, 1, obj_pose,
-                                lambda_P, sigma_v, dt)
+                                lambda_p, sigma_v, dt)
 
     np.testing.assert_allclose(vec_obj, gt, rtol=1e-8, atol=1e-10,
                                err_msg="vectorized P objective mismatch vs numpy ground truth")

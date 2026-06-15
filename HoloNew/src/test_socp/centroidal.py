@@ -42,7 +42,7 @@ def reference_orbital_angular_momentum(ref_pos, masses, dt):
     which W^L should track instead of driving to zero. The lumped mass set (the 14
     mapped links) under-represents the total mass, but the SAME masses build the
     current momentum in build_lumped_L_term, so the tracked residual is consistent;
-    the absolute scale is absorbed by lambda_L_track.
+    the absolute scale is absorbed by lambda_l_track.
 
     Args:
         ref_pos: (T, K, 3) reference world positions of the mapped bodies.
@@ -65,8 +65,8 @@ def reference_orbital_angular_momentum(ref_pos, masses, dt):
 
 
 def build_lumped_L_term(rt, q_pin, q_pin_prev, dqa, frames, masses, L_ref_t,
-                        lambda_L, dt):
-    """W^L tracking: lambda_L * ||L_lumped(dqa) - L_ref_t||^2.
+                        lambda_l, dt):
+    """W^L tracking: lambda_l * ||L_lumped(dqa) - L_ref_t||^2.
 
     Current lumped orbital angular momentum, linearized in dqa with the moment arms
     held at the current config (mirroring how A_G(q0) @ v fixes q0):
@@ -96,12 +96,12 @@ def build_lumped_L_term(rt, q_pin, q_pin_prev, dqa, frames, masses, L_ref_t,
         A_L += masses[k] * (_skew(arm) @ Jrel)
         b_L0 += masses[k] * np.cross(arm, v_rel0)
 
-    r = np.sqrt(lambda_L) * (A_L @ dqa + (b_L0 - np.asarray(L_ref_t, dtype=np.float64)))
+    r = np.sqrt(lambda_l) * (A_L @ dqa + (b_L0 - np.asarray(L_ref_t, dtype=np.float64)))
     return cp.sum_squares(r)
 
 
 def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
-                            lambda_c, lambda_c_pos, lambda_L, dt):
+                            lambda_c, lambda_c_pos, lambda_l, dt):
     """Assemble W^c (CoM accel) + W^c_pos (CoM position) + W^L (angular momentum -> 0).
 
     W^c = lambda_c * ||c_ddot - cddot_ref||^2
@@ -112,7 +112,7 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
         c_ref: reference CoM position for this frame (absolute anchor).
         Prevents the constant-velocity drift that W^c alone cannot constrain.
 
-    W^L = lambda_L * ||L||^2
+    W^L = lambda_l * ||L||^2
         L = (A_G @ v)[3:6],  v = difference(q_tm1, q_t0) + Jd[:, v_a_indices] @ dqa
         A_G = centroidal_map(q_t0)
 
@@ -134,7 +134,7 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
         dqa: cvxpy Variable (nv_a,), the active-joint tangent increment.
         lambda_c: weight for W^c (CoM acceleration tracking).
         lambda_c_pos: weight for W^c_pos (CoM absolute position anchor).
-        lambda_L: weight for W^L (angular momentum -> 0).
+        lambda_l: weight for W^L (angular momentum -> 0).
         dt: time step in seconds.
 
     Returns:
@@ -178,13 +178,13 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
     # dominated by the contacts). We have neither, so W^L is kept as a weak
     # spin-toward-zero regularizer — sane for the grounded manipulation/climb clips
     # available. True L_ref tracking is deferred (see the inertia-mode design doc).
-    if lambda_L > 0:
+    if lambda_l > 0:
         Ag = rt.pin.centroidal_map(q_t0)                       # (6, nv)
         v0, Jd = rt.pin.difference_and_jac(q_tm1, q_t0)       # v0: (nv,), Jd: (nv, nv)
         AgL = Ag[3:6, :]                                       # (3, nv)
         # v_active contribution via Jd columns for active joints
-        A_L = np.sqrt(lambda_L) * (AgL @ Jd[:, rt.v_a_indices])  # (3, nv_a)
-        b_L = np.sqrt(lambda_L) * (AgL @ v0)                   # (3,)
+        A_L = np.sqrt(lambda_l) * (AgL @ Jd[:, rt.v_a_indices])  # (3, nv_a)
+        b_L = np.sqrt(lambda_l) * (AgL @ v0)                   # (3,)
         terms.append(cp.sum_squares(A_L @ dqa + b_L))
 
     return terms

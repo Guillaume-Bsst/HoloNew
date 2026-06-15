@@ -74,29 +74,29 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         foot_sticking_tolerance: float = 1e-3,
         foot_lock=None,            # FootLockConfig | None
         self_collision=None,       # SelfCollisionConfig | None
-        lambda_D: float = 0.0,
-        lambda_X: float = 0.0,
-        lambda_P: float = 0.0,
+        lambda_d: float = 0.0,
+        lambda_x: float = 0.0,
+        lambda_p: float = 0.0,
         sigma_v: float = 0.05,
         lambda_r: float = 0.0,
         sigma_qddot: float = 1.0,
         sigma_Vdot: float = 1.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
-        activate_style: bool = False,
+        activate_ws: bool = False,
         pelvis_anchor_weight: float = 1.0,
         style_pelvis_relative: bool = False,
         activate_centroidal: bool = False,
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
-        lambda_L: float = 0.0,
-        track_L_ref: bool = False,
-        lambda_L_track: float = 1.0,
+        lambda_l: float = 0.0,
+        activate_wl_track: bool = False,
+        lambda_l_track: float = 1.0,
         activate_movable: bool = False,
         lambda_o: float = 0.0,
         lambda_omega: float = 0.0,
         lambda_o_pos: float = 0.0,
-        lambda_object_floor: float = 0.0,
+        lambda_o_floor: float = 0.0,
         activate_obj_surface_nonpen: bool = False,
         obj_surface_nonpen_tol: float = 0.005,
         load_object_scene: bool = True,
@@ -257,9 +257,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.foot_sticking_sequences: list = []
 
         # Interaction D/X/P cost weights (default 0.0 = off; solve is unchanged).
-        self.lambda_D = lambda_D
-        self.lambda_X = lambda_X
-        self.lambda_P = lambda_P
+        self.lambda_d = lambda_d
+        self.lambda_x = lambda_x
+        self.lambda_p = lambda_p
         self.sigma_v = sigma_v
 
         # Temporal regularization weights (default 0.0 = off; solve is unchanged).
@@ -272,10 +272,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.activate_pos_tracking = activate_pos_tracking
         self.activate_rot_tracking = activate_rot_tracking
         # Brick 3 — Pelvis-relative Style objective (default off; parity preserved).
-        self.activate_style = activate_style
+        self.activate_ws = activate_ws
         self.pelvis_anchor_weight = pelvis_anchor_weight
         # style_pelvis_relative gates the Style objective's reference frame (only used
-        # when activate_style is True): True keeps the pelvis-relative joint orientations
+        # when activate_ws is True): True keeps the pelvis-relative joint orientations
         # + weak pelvis position scaffold (paper placement); False makes the joint
         # orientations world-frame and the pelvis position a full world target (GMR-like),
         # while keeping the yaw-free pelvis tilt and the dropped joint-position terms.
@@ -285,18 +285,18 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.activate_centroidal = activate_centroidal
         self.lambda_c = lambda_c
         self.lambda_c_pos = lambda_c_pos
-        self.lambda_L = lambda_L
+        self.lambda_l = lambda_l
 
         # Brick 5 — Movable entities W^o (default off; parity preserved).
         self.activate_movable = activate_movable
         self.lambda_o = lambda_o
         self.lambda_omega = lambda_omega
         self.lambda_o_pos = lambda_o_pos
-        self.lambda_object_floor = lambda_object_floor
+        self.lambda_o_floor = lambda_o_floor
         self.activate_obj_surface_nonpen = activate_obj_surface_nonpen
         self.obj_surface_nonpen_tol = obj_surface_nonpen_tol
-        self.track_L_ref = track_L_ref
-        self.lambda_L_track = lambda_L_track
+        self.activate_wl_track = activate_wl_track
+        self.lambda_l_track = lambda_l_track
         # Solved object pose history: updated by retarget() when movable is on.
         self._obj_solved_poses: list = []
 
@@ -436,7 +436,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         dqa = cp.Variable(self.nv_a, name="dqa")
 
         obj_terms = []
-        if not self.activate_style:
+        if not self.activate_ws:
             # World-frame tracking (default): each frame tracked in world coordinates.
             for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
                 body = self.robot_link_names[frame]
@@ -615,7 +615,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
 
         # D + X interaction terms (default off; only active when weights > 0 and
         # the required assets are present).
-        if (self.lambda_D > 0 or self.lambda_X > 0) \
+        if (self.lambda_d > 0 or self.lambda_x > 0) \
                 and getattr(self, "correspondence", None) is not None \
                 and (getattr(self, "object_sdf", None) is not None
                      or getattr(self, "floor_as_entity", False)) \
@@ -625,12 +625,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             # Pass dxi_obj for bilateral coupling when the object is a variable.
             # When dxi_obj is None (movable off), behaviour is unchanged.
             obj_terms += build_dx_terms(self, q_pin, dqa, frame_idx, obj_pose,
-                                        self.lambda_D, self.lambda_X,
+                                        self.lambda_d, self.lambda_x,
                                         dxi=dxi_obj)
 
         # P (contact persistence) terms (default off; requires cross-frame state
         # from the previous solved frame, so only active at frame >= 1).
-        if self.lambda_P > 0 \
+        if self.lambda_p > 0 \
                 and getattr(self, "correspondence", None) is not None \
                 and (getattr(self, "object_sdf", None) is not None
                      or getattr(self, "floor_as_entity", False)) \
@@ -640,7 +640,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             from HoloNew.src.test_socp.interaction import build_p_terms
             q_pin = _q_pin
             obj_terms += build_p_terms(self, q_pin, dqa, frame_idx, obj_pose,
-                                       self.lambda_P, self.sigma_v, self._dt)
+                                       self.lambda_p, self.sigma_v, self._dt)
 
         # Contact persistence hard tangential band constraint (default off).
         # Enforces no-slip per carrier instead of the soft P cost. Requires the
@@ -687,7 +687,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # W^c_pos only needs c_ref and fires at any frame when active.
         # Guard: activate_centroidal and at least one lambda > 0.
         if self.activate_centroidal \
-                and (self.lambda_c > 0 or self.lambda_c_pos > 0 or self.lambda_L > 0) \
+                and (self.lambda_c > 0 or self.lambda_c_pos > 0 or self.lambda_l > 0) \
                 and c_ref is not None:
             # W^c / W^L require the two-step CoM history; only activate from frame 2.
             _lam_c_eff = self.lambda_c if (
@@ -695,7 +695,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and c_tm1 is not None and c_tm2 is not None
                 and cddot_ref is not None and q_t_last is not None
             ) else 0.0
-            _lam_L_eff = self.lambda_L if (
+            _lam_L_eff = self.lambda_l if (
                 frame_idx >= 2
                 and c_tm1 is not None and c_tm2 is not None
                 and q_t_last is not None
@@ -718,7 +718,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # W^L reference tracking (opt-in): track the lumped reference angular
         # momentum instead of driving L to 0. Needs the previous solved config for
         # the velocity finite difference, so fires from frame_idx >= 1.
-        if (self.track_L_ref
+        if (self.activate_wl_track
                 and getattr(self, "_L_ref_all", None) is not None
                 and frame_idx >= 1 and q_t_last is not None):
             from HoloNew.src.test_socp.centroidal import build_lumped_L_term
@@ -727,7 +727,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             obj_terms.append(build_lumped_L_term(
                 self, q_pin_cur, q_pin_prev, dqa, self._lumped_frames,
                 self._lumped_masses, self._L_ref_all[frame_idx],
-                self.lambda_L_track, self._dt))
+                self.lambda_l_track, self._dt))
 
         # W^o object motion regularization (Brick 5, default off).
         # dxi_obj was already created above; the W^o cost is added when the two
@@ -771,13 +771,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # the object is lifted (then placed by object<->robot + ballistic W^o).
         if (dxi_obj is not None
                 and obj_pose is not None
-                and self.lambda_object_floor > 0
+                and self.lambda_o_floor > 0
                 and getattr(self, "object_surface_local", None) is not None):
             from HoloNew.src.test_socp.movable import build_object_floor_terms
             _L_floor = (self.smplx_ground_probe.margin
                         if self.smplx_ground_probe is not None else 0.1)
             obj_terms += build_object_floor_terms(
-                self, dxi_obj, obj_pose, self.lambda_object_floor, _L_floor)
+                self, dxi_obj, obj_pose, self.lambda_o_floor, _L_floor)
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
@@ -966,7 +966,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # d_prev_obj/flr (M,): previous SOLVED robot-side distances (α̂^{t-1}).
         # a_prev_obj/flr (M,): previous source activations α^{t-1}.
         # Initialised to "no previous contact": d_prev=+inf, a_prev=0.
-        if (self.lambda_P > 0 or self.activate_persistence) \
+        if (self.lambda_p > 0 or self.activate_persistence) \
                 and getattr(self, "correspondence", None) is not None \
                 and (getattr(self, "object_sdf", None) is not None
                      or getattr(self, "floor_as_entity", False)):

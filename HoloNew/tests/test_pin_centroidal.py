@@ -70,6 +70,6 @@ def test_centroidal_default_off_and_runs_on():
     rt.activate_centroidal = True
     rt.lambda_c = 1.0
     rt.lambda_c_pos = 2.0
-    rt.lambda_L = 0.1
+    rt.lambda_l = 0.1
     res = rt.retarget(max_frames=8)
     assert np.all(np.isfinite(res.qpos))

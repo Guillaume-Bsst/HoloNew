@@ -1,13 +1,13 @@
 """Validation metrics for the centroidal W^c / W^c_pos / W^L objective (Brick 4).
 
-Runs a 30-frame retarget on robot_only sub3_largebox_003 with activate_style=True
+Runs a 30-frame retarget on robot_only sub3_largebox_003 with activate_ws=True
 (default) and compares:
   A — activate_centroidal=False (baseline, Style on, pelvis_anchor_weight=1.0)
-  B — activate_centroidal=True  (lambda_c=3.0, lambda_c_pos=5.0, lambda_L=0.5,
+  B — activate_centroidal=True  (lambda_c=3.0, lambda_c_pos=5.0, lambda_l=0.5,
                                   pelvis_anchor_weight=1.0)
 
 Chosen parameters (tuned 2026-06-14, sub3_largebox_003, robot_only, smplh, 30 frames):
-  lambda_c=3.0, lambda_c_pos=5.0, lambda_L=0.5, pelvis_anchor_weight=1.0
+  lambda_c=3.0, lambda_c_pos=5.0, lambda_l=0.5, pelvis_anchor_weight=1.0
 
 Observed numbers:
   A (off):  CoM-accel err~7.90 m/s^2, pelvis z=[0.562, 0.800] m, xy drift max~0.022 m
@@ -22,7 +22,7 @@ lambda_c=3 and dt=1/30, this is ~2.4M, which overwhelms any practical lambda_c_p
 Setting lambda_c_pos >> lambda_c/dt^4 would eliminate the acceleration benefit.
 
 The W^c_pos term IS correct and useful when W^c is off (lambda_c=0):
-  lambda_c=0, lambda_c_pos=5, lambda_L=0.3, paw=1.0 → drift=0.018 m (near baseline)
+  lambda_c=0, lambda_c_pos=5, lambda_l=0.3, paw=1.0 → drift=0.018 m (near baseline)
   but this gives no CoM-accel improvement (accel_err stays ~7.5 m/s^2).
 
 Conclusion: centroidal W^c/W^c_pos/W^L is LEFT OFF by default (DONE_WITH_CONCERNS).
@@ -52,7 +52,7 @@ _PELVIS_ANCHOR_WEIGHT = 1.0
 
 
 def _make_rt(activate_centroidal: bool, lambda_c: float, lambda_c_pos: float,
-             lambda_L: float, pelvis_anchor_weight: float) -> TestSocpRetargeter:
+             lambda_l: float, pelvis_anchor_weight: float) -> TestSocpRetargeter:
     cfg = RetargetingConfig(
         task_type=TASK_TYPE,
         task_name=TASK_NAME,
@@ -64,10 +64,10 @@ def _make_rt(activate_centroidal: bool, lambda_c: float, lambda_c_pos: float,
             lambda_c=lambda_c,
             activate_wc_pos=activate_centroidal and lambda_c_pos > 0,
             lambda_c_pos=lambda_c_pos,
-            activate_wl=activate_centroidal and lambda_L > 0,
-            lambda_L=lambda_L,
+            activate_wl=activate_centroidal and lambda_l > 0,
+            lambda_l=lambda_l,
             pelvis_anchor_weight=pelvis_anchor_weight,
-            activate_style=True,   # keep default; isolates centroidal effect
+            activate_ws=True,   # keep default; isolates centroidal effect
         ),
     )
     return TestSocpRetargeter.from_config(cfg)
@@ -114,12 +114,12 @@ def test_centroidal_reduces_com_accel_error_and_pelvis_sane():
     """
     # A: baseline (centroidal off), Style on.
     rt_A = _make_rt(activate_centroidal=False, lambda_c=0.0, lambda_c_pos=0.0,
-                    lambda_L=0.0, pelvis_anchor_weight=_PELVIS_ANCHOR_WEIGHT)
+                    lambda_l=0.0, pelvis_anchor_weight=_PELVIS_ANCHOR_WEIGHT)
     res_A = rt_A.retarget(max_frames=MAX_FRAMES)
 
     # B: centroidal on with tuned weights including position anchor.
     rt_B = _make_rt(activate_centroidal=True, lambda_c=_LAMBDA_C,
-                    lambda_c_pos=_LAMBDA_C_POS, lambda_L=_LAMBDA_L,
+                    lambda_c_pos=_LAMBDA_C_POS, lambda_l=_LAMBDA_L,
                     pelvis_anchor_weight=_PELVIS_ANCHOR_WEIGHT)
     res_B = rt_B.retarget(max_frames=MAX_FRAMES)
 
@@ -160,7 +160,7 @@ def test_centroidal_reduces_com_accel_error_and_pelvis_sane():
         f"  pelvis_z=[{pelvis_z.min():.3f}, {pelvis_z.max():.3f}] m"
         f"  xy_drift_max={xy_drift.max():.4f} m  (baseline ~0.022 m)"
         f"\n  lambda_c={_LAMBDA_C}  lambda_c_pos={_LAMBDA_C_POS}"
-        f"  lambda_L={_LAMBDA_L}  pelvis_anchor_weight={_PELVIS_ANCHOR_WEIGHT}"
+        f"  lambda_l={_LAMBDA_L}  pelvis_anchor_weight={_PELVIS_ANCHOR_WEIGHT}"
         f"\n  NOTE: W^c_pos implemented but cannot cure drift when W^c active."
         f" W^c effective weight ~lambda_c/dt^4 = {_LAMBDA_C * (30**4):.0f}x"
         f" vs lambda_c_pos = {_LAMBDA_C_POS}."

@@ -52,53 +52,53 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # (the weight defaults to its tuned value); a term applies iff its activate_* is True.
     # All default OFF (GMR baseline).
     # =====================================================================
-    # W^s — Style. activate_style swaps plain world-frame tracking for the Style objective
+    # W^s — Style. activate_ws swaps plain world-frame tracking for the Style objective
     # (pelvis orientation = roll/pitch tilt only; joint positions dropped).
-    # style_pelvis_relative (only when activate_style): True = joint orientations re-based
+    # style_pelvis_relative (only when activate_ws): True = joint orientations re-based
     # by the current pelvis + weak pelvis scaffold (pelvis_anchor_weight*w_p); False = world
     # frame + full world pelvis position (GMR-like, pelvis_anchor_weight unused).
-    activate_style: bool = False
+    activate_ws: bool = False
     style_pelvis_relative: bool = False
     pelvis_anchor_weight: float = 10.0
 
     # W^D / W^X / W^P — Interaction. D = normal proximity, X = tangential placement,
     # P = soft persistence (prefer the hard constraint in §4). Need an object/floor entity
-    # + non-penetration. sigma_v scales P. (lambda_P untuned placeholder.)
-    activate_d: bool = False
-    lambda_D: float = 20.0
-    activate_x: bool = False
-    lambda_X: float = 20.0
-    activate_p: bool = False
-    lambda_P: float = 20.0
+    # + non-penetration. sigma_v scales P. (lambda_p untuned placeholder.)
+    activate_wd: bool = False
+    lambda_d: float = 20.0
+    activate_wx: bool = False
+    lambda_x: float = 20.0
+    activate_wp: bool = False
+    lambda_p: float = 20.0
     sigma_v: float = 0.05
 
     # W^c / W^L — Centroidal (frame >= 2 for W^c/W^L; W^c_pos from frame 0):
     #   W^c     = lambda_c     * ||c_ddot - c_ddot_ref||^2   (CoM accel)
     #   W^c_pos = lambda_c_pos * ||c - c_ref||^2             (CoM position anchor)
-    #   W^L     = lambda_L     * ||L||^2                      (angular momentum -> 0)
-    # track_L_ref: track the reference momentum L_ref instead of driving L->0 (flight);
-    # lambda_L_track weights ||L_lumped - L_ref||^2. (lambda_c_pos untuned placeholder.)
+    #   W^L     = lambda_l     * ||L||^2                      (angular momentum -> 0)
+    # activate_wl_track: track the reference momentum L_ref instead of driving L->0 (flight);
+    # lambda_l_track weights ||L_lumped - L_ref||^2. (lambda_c_pos untuned placeholder.)
     activate_wc: bool = False
     lambda_c: float = 1e-5
     activate_wc_pos: bool = False
     lambda_c_pos: float = 1.0
     activate_wl: bool = False
-    lambda_L: float = 1e-4
-    track_L_ref: bool = False
-    lambda_L_track: float = 5.0
+    lambda_l: float = 1e-4
+    activate_wl_track: bool = False
+    lambda_l_track: float = 5.0
 
     # W^o — Movable object (object tasks only; needs activate_movable in §1):
     #   W^o = lambda_o * ||vdot_obj - vdot_ref||^2 + lambda_omega * ||omega_obj - omega_ref||^2
-    # activate_o_pos / lambda_o_pos: absolute object-position anchor (analogue of W^c_pos).
-    # activate_object_floor / lambda_object_floor: place the object by its floor contact
+    # activate_wo_pos / lambda_o_pos: absolute object-position anchor (analogue of W^c_pos).
+    # activate_wo_floor / lambda_o_floor: place the object by its floor contact
     # (paper's object<->env pair). All three require activate_movable (§1).
     activate_wo: bool = False
     lambda_o: float = 1.0
     lambda_omega: float = 1.0
-    activate_o_pos: bool = False
+    activate_wo_pos: bool = False
     lambda_o_pos: float = 10.0
-    activate_object_floor: bool = False
-    lambda_object_floor: float = 5.0
+    activate_wo_floor: bool = False
+    lambda_o_floor: float = 5.0
 
     # W^r — Temporal regularization (tangent-space acceleration). sigma_* = per-DOF noise
     # scale for joints / base.

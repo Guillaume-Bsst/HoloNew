@@ -18,10 +18,10 @@ def test_default_is_gmr_baseline():
     # The flat default is the bare GMR objective: no Style, no centroidal, no floor
     # channel, no contact terms — added back explicitly per test.
     rt = _robot_only()
-    assert rt.activate_style is False
+    assert rt.activate_ws is False
     assert rt.activate_centroidal is False
     assert getattr(rt, "floor_as_entity", False) is False
-    assert rt.lambda_D == 0.0 and rt.lambda_X == 0.0
+    assert rt.lambda_d == 0.0 and rt.lambda_x == 0.0
 
 
 def test_paper_placement_fields_pass_through():
@@ -32,7 +32,7 @@ def test_paper_placement_fields_pass_through():
     assert rt.pelvis_anchor_weight == 0.0
     assert rt.style_pelvis_relative is True
     assert rt.activate_centroidal is True
-    assert rt.lambda_c > 0 and rt.lambda_L > 0
+    assert rt.lambda_c > 0 and rt.lambda_l > 0
     assert rt.correspondence is not None
     assert rt.smplx_ground_probe is not None
 

@@ -18,16 +18,16 @@ from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 # OFF: the body and object are placed by contacts.
 PAPER_PLACEMENT = dict(
     # Style objective, pelvis-relative frame (the paper-placement frame).
-    activate_style=True, style_pelvis_relative=True, pelvis_anchor_weight=0.0,
+    activate_ws=True, style_pelvis_relative=True, pelvis_anchor_weight=0.0,
     # Contact terms that place the body/feet + temporal regularization.
-    activate_d=True, activate_x=True, activate_persistence=True, activate_wr=True,
+    activate_wd=True, activate_wx=True, activate_persistence=True, activate_wr=True,
     # Movable object, placed by contacts (no position anchor).
     activate_movable=True, activate_wo=True,
     # Weak centroidal W^c / W^L fills the residual / flight.
     activate_wc=True, activate_wl=True,
     # Floor as a contact entity + object<->floor contact, with the required
     # non-penetration constraint (enforced in from_config).
-    floor_as_entity=True, activate_object_floor=True, activate_obj_non_penetration=True,
+    floor_as_entity=True, activate_wo_floor=True, activate_obj_non_penetration=True,
 )
 
 

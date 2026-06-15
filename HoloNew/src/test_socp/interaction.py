@@ -235,7 +235,7 @@ def build_obj_surface_nonpen_constraints(rt, q_pin: np.ndarray, dqa, t: int,
 
 def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
                    obj_pose: np.ndarray,
-                   lambda_D: float, lambda_X: float,
+                   lambda_d: float, lambda_x: float,
                    dxi=None) -> list:
     """Build cvxpy D (normal proximity) and X (tangential placement) residual terms.
 
@@ -271,8 +271,8 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         dqa: cvxpy Variable of shape (nv_a,) — the active-tangent step.
         t: Frame index (for frame_references).
         obj_pose: (7,) [qw, qx, qy, qz, x, y, z] object pose.
-        lambda_D: Weight for the normal-proximity (D) term.
-        lambda_X: Weight for the tangential-placement (X) term.
+        lambda_d: Weight for the normal-proximity (D) term.
+        lambda_x: Weight for the tangential-placement (X) term.
         dxi: Optional cvxpy Variable of shape (6,) — the object SE(3) tangent
             step (world-frame left perturbation). When None (default), the
             object channel is robot-only (current behaviour).
@@ -367,17 +367,17 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         if dxi is not None:
             Bobj_i = Robj.T @ np.hstack([I3, -_skew(P[i])])  # (3, 6)
 
-        # D: sqrt(lambda_D * w) * n0^T Jloc  vs  sqrt(lambda_D * w) * (d_ref - d0)
-        if lambda_D > 0:
-            sw = float(np.sqrt(lambda_D * w))
+        # D: sqrt(lambda_d * w) * n0^T Jloc  vs  sqrt(lambda_d * w) * (d_ref - d0)
+        if lambda_d > 0:
+            sw = float(np.sqrt(lambda_d * w))
             A_d_obj_rows.append(sw * (n0 @ Jloc))             # (nv_a,)
             c_d_obj_rows.append(sw * float(d_obj_ref[i] - d0))
             if dxi is not None:
                 Adxi_d_rows.append(sw * (n0 @ Bobj_i))        # (6,)
 
-        # X: sqrt(lambda_X * w) * Pi0 Jloc  vs  sqrt(lambda_X * w) * Pi0(x_ref - x0)
-        if lambda_X > 0:
-            sw = float(np.sqrt(lambda_X * w))
+        # X: sqrt(lambda_x * w) * Pi0 Jloc  vs  sqrt(lambda_x * w) * Pi0(x_ref - x0)
+        if lambda_x > 0:
+            sw = float(np.sqrt(lambda_x * w))
             Pi0 = I3 - np.outer(n0, n0)
             B_x_obj_rows.append(sw * (Pi0 @ Jloc))            # (3, nv_a)
             r_x_obj_rows.append(sw * Pi0 @ (np.asarray(x_obj_ref[i], dtype=float) - x0))
@@ -393,15 +393,15 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         d0 = float(fflr.distance[i])
         x0 = np.asarray(fflr.witness[i], dtype=float)     # world-frame floor witness
 
-        # D: sqrt(lambda_D * w) * n0^T Ji  vs  sqrt(lambda_D * w) * (d_ref - d0)
-        if lambda_D > 0:
-            sw = float(np.sqrt(lambda_D * w))
+        # D: sqrt(lambda_d * w) * n0^T Ji  vs  sqrt(lambda_d * w) * (d_ref - d0)
+        if lambda_d > 0:
+            sw = float(np.sqrt(lambda_d * w))
             A_d_flr_rows.append(sw * (n0 @ Ji))               # (nv_a,)
             c_d_flr_rows.append(sw * float(d_flr_ref[i] - d0))
 
-        # X: sqrt(lambda_X * w) * Pi0 Ji  vs  sqrt(lambda_X * w) * Pi0(x_ref - x0)
-        if lambda_X > 0:
-            sw = float(np.sqrt(lambda_X * w))
+        # X: sqrt(lambda_x * w) * Pi0 Ji  vs  sqrt(lambda_x * w) * Pi0(x_ref - x0)
+        if lambda_x > 0:
+            sw = float(np.sqrt(lambda_x * w))
             Pi0 = I3 - np.outer(n0, n0)
             B_x_flr_rows.append(sw * (Pi0 @ Ji))              # (3, nv_a)
             r_x_flr_rows.append(sw * Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0))
@@ -453,7 +453,7 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
 
 def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
                   obj_pose: np.ndarray,
-                  lambda_P: float, sigma_v: float, dt: float) -> list:
+                  lambda_p: float, sigma_v: float, dt: float) -> list:
     """Build cvxpy contact persistence (P) residual terms.
 
     P penalises tangential slip at contact points across consecutive frames.
@@ -477,7 +477,7 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
         dqa: cvxpy Variable of shape (nv_a,).
         t: Current frame index (must be >= 1).
         obj_pose: (7,) [qw, qx, qy, qz, x, y, z] current object pose.
-        lambda_P: Weight for the persistence term.
+        lambda_p: Weight for the persistence term.
         sigma_v: Accepted for API compatibility; no longer used in the scale (see
             the normalization note below).
         dt: Accepted for API compatibility; no longer used in the scale.
@@ -490,8 +490,8 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     dt = 1/30 that scale is ~1.7 mm, giving a weight ~3.6e5 — ~3600x the D/X terms
     (normalized by the field range L^2 ~ 0.01), which wrecks CLARABEL's
     conditioning and makes the solve fail once P engages. P is a tangential
-    meter-residual exactly like X, so we normalize it by the SAME L^2: lambda_P is
-    then directly comparable to lambda_X, and no-slip is enforced as a gentle
+    meter-residual exactly like X, so we normalize it by the SAME L^2: lambda_p is
+    then directly comparable to lambda_x, and no-slip is enforced as a gentle
     tangential prior (the per-frame slide is already bounded by the SQP trust
     region). This keeps the paper's intent (reproduce the source's tangential
     slide) while staying numerically well-conditioned.
@@ -502,7 +502,7 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
     L = rt.smplx_ground_probe.margin
-    scale_sq = (lambda_P / L ** 2)
+    scale_sq = (lambda_p / L ** 2)
 
     # Per-link point counts for 1/N_k normalisation.
     n_links = len(corr.link_names)

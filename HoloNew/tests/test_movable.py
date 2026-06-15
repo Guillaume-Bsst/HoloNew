@@ -114,8 +114,8 @@ def test_bilateral_dx_object_channel_numpy_equivalence():
     q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
     obj_pose = rt._obj_poses_raw[0]
 
-    lambda_D = 2.0
-    lambda_X = 3.0
+    lambda_d = 2.0
+    lambda_x = 3.0
     L = rt.smplx_ground_probe.margin
 
     # Set fixed random decision-variable values.
@@ -128,7 +128,7 @@ def test_bilateral_dx_object_channel_numpy_equivalence():
     dxi_var.value = dxi_v
 
     terms = build_dx_terms(rt, q_pin, dqa_var, 0, obj_pose,
-                           lambda_D, lambda_X, dxi=dxi_var)
+                           lambda_d, lambda_x, dxi=dxi_var)
     assert len(terms) > 0, "No active object points found — test cannot validate"
 
     cvxpy_val = float(sum(float(t.value) for t in terms))
@@ -172,13 +172,13 @@ def test_bilateral_dx_object_channel_numpy_equivalence():
         # Bilateral relative displacement in object-local frame.
         delta_local = Jloc @ dqa_v - Bobj_i @ dxi_v   # (3,)
 
-        if lambda_D > 0:
-            sw = np.sqrt(lambda_D * w)
+        if lambda_d > 0:
+            sw = np.sqrt(lambda_d * w)
             res_d = sw * (n0 @ delta_local - float(d_obj_ref[i] - d0))
             gt += res_d ** 2
 
-        if lambda_X > 0:
-            sw = np.sqrt(lambda_X * w)
+        if lambda_x > 0:
+            sw = np.sqrt(lambda_x * w)
             Pi0 = I3 - np.outer(n0, n0)
             ref_x = np.asarray(x_obj_ref[i], dtype=float)
             res_x = sw * (Pi0 @ delta_local - Pi0 @ (ref_x - x0))
@@ -193,13 +193,13 @@ def test_bilateral_dx_object_channel_numpy_equivalence():
         d0 = float(fflr.distance[i])
         x0 = np.asarray(fflr.witness[i], dtype=float)
 
-        if lambda_D > 0:
-            sw = np.sqrt(lambda_D * w)
+        if lambda_d > 0:
+            sw = np.sqrt(lambda_d * w)
             res_d = sw * (n0 @ (Ji @ dqa_v) - float(d_flr_ref[i] - d0))
             gt += res_d ** 2
 
-        if lambda_X > 0:
-            sw = np.sqrt(lambda_X * w)
+        if lambda_x > 0:
+            sw = np.sqrt(lambda_x * w)
             Pi0 = I3 - np.outer(n0, n0)
             ref_x = np.asarray(x_flr_ref[i], dtype=float)
             res_x = sw * (Pi0 @ (Ji @ dqa_v) - Pi0 @ (ref_x - x0))
@@ -272,8 +272,8 @@ def test_movable_with_interaction_bilateral_solve():
     rt.activate_movable = True
     rt.lambda_o = 1.0
     rt.lambda_omega = 1.0
-    rt.lambda_D = 1.0
-    rt.lambda_X = 1.0
+    rt.lambda_d = 1.0
+    rt.lambda_x = 1.0
     # The D/X terms require ground non-penetration to stay stable.
     rt.activate_obj_non_penetration = True
 

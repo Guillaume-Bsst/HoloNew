@@ -21,7 +21,7 @@ MAX_FRAMES = 30
 
 def _make_rt(activate_persistence: bool = False,
              persistence_tol: float = 0.005,
-             lambda_P: float = 0.0):
+             lambda_p: float = 0.0):
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
@@ -33,10 +33,10 @@ def _make_rt(activate_persistence: bool = False,
         retargeter=TestSocpRetargeterConfig(
             activate_persistence=activate_persistence,
             persistence_tol=persistence_tol,
-            activate_p=lambda_P > 0,
-            lambda_P=lambda_P,
+            activate_wp=lambda_p > 0,
+            lambda_p=lambda_p,
             # Interaction/persistence require the non-penetration constraint explicitly now.
-            activate_obj_non_penetration=activate_persistence or lambda_P > 0,
+            activate_obj_non_penetration=activate_persistence or lambda_p > 0,
         ),
     )
     rt = TestSocpRetargeter.from_config(cfg)
