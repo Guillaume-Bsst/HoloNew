@@ -35,11 +35,16 @@ _MINK = Path(__file__).parent / "golden" / "gmr_mink_qpos.npz"
 @pytest.mark.skipif(not _MINK.exists(), reason="mink GMR reference not present")
 def test_gmr_socp_is_close_to_mink():
     from HoloNew.examples.robot_retarget import RetargetingConfig
+    from HoloNew.src.gmr_socp.config import GmrSocpRetargeterConfig
     from HoloNew.src.gmr_socp.gmr_socp import GmrSocpRetargeter
 
     mink = np.load(_MINK)["qpos"]
+    # The mink reference preserves the raw root XY, whereas GMR-SOCP defaults to the
+    # holosoma scale factor (~0.68, pulling the root toward the origin) — a deliberate
+    # divergence. Compare on the same frame by setting scale_xy_robot=1.0 (raw XY).
     rt = GmrSocpRetargeter.from_config(
-        RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
+        RetargetingConfig(task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh",
+                          retargeter=GmrSocpRetargeterConfig(scale_xy_robot=1.0)))
     holonew = rt.retarget().qpos
 
     T = min(len(mink), len(holonew))

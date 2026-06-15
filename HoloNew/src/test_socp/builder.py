@@ -208,17 +208,18 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     else:
         toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
     rt.gmr_grounded = ground_to_floor(raw_joints, toe_indices)
-    # Keep the GMR base XY at the RAW grounded pelvis (root_xy_scale=1.0), NOT
-    # holosoma's globally-scaled placement. Holosoma pulls the root toward the
-    # world centre by ROBOT_HEIGHT/human_height (~0.68 here), which shifts the
-    # base ~0.3 m toward the origin. The contact references (SmplxGroundProbe)
-    # place the human at the raw grounded pelvis, so the holosoma scale would
-    # put the GMR targets and the contact field in inconsistent world frames
-    # (~raw_xy*(1-scale) apart). The TEST-SOCP pipeline keeps both at raw_xy so
-    # the targets and the interaction fields agree. Morphological body
-    # proportions and the Z floor-drop are still applied inside compute_stages.
+    # Place the GMR base via sc.scale_xy_robot / sc.scale_z_robot (TEST defaults: XY
+    # 1.0 = RAW grounded pelvis, Z None = native morphological scaling), NOT holosoma's
+    # globally-scaled placement. Holosoma pulls the root toward the world centre by
+    # ROBOT_HEIGHT/human_height (~0.68), shifting the base ~0.3 m toward the origin. The
+    # contact references (SmplxGroundProbe) place the human at the raw grounded pelvis,
+    # so a <1 XY scale would put the GMR targets and the contact field in inconsistent
+    # world frames (~raw_xy*(1-scale) apart); 1.0 keeps both at raw_xy so they agree.
+    # The placement is applied inside scale(); proportions and the Z floor-drop are
+    # unaffected. The object is placed independently below (scale_xy/z_object).
     rt.gmr_stages = compute_stages(
-        rt.gmr_grounded, human_quat, anchor_root_xy=True, root_xy_scale=1.0
+        rt.gmr_grounded, human_quat,
+        scale_xy=sc.scale_xy_robot, scale_z=sc.scale_z_robot,
     )
     rt.gmr_ground = rt.gmr_stages["ground"]
     ground = rt.gmr_ground
@@ -256,7 +257,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         from HoloNew.examples.robot_retarget import convert_object_poses_to_mujoco_order
         from HoloNew.src.utils import load_intermimic_data
         _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
-        obj_poses = obj_poses[:T]
+        obj_poses = obj_poses[:T].copy()
+        # Place the object independently of the robot (no-op at the TEST defaults 1.0).
+        obj_poses[:, 4:6] *= sc.scale_xy_object   # XY
+        obj_poses[:, 6] *= sc.scale_z_object      # Z
         # Convert from [qw,qx,qy,qz,x,y,z] to MuJoCo order [x,y,z,qw,qx,qy,qz]
         rt._obj_poses_mj = convert_object_poses_to_mujoco_order(obj_poses)
 
@@ -321,8 +325,13 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         # build_dx_terms can access them; floor-only mode has no object channel.
         if rt.object_sdf is not None:
             _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
-            rt._obj_poses_raw = obj_poses[:T]
-            _obj_poses_arg = obj_poses[:T]
+            obj_poses = obj_poses[:T].copy()
+            # Place the object independently (no-op at the TEST defaults 1.0); the D/X
+            # interaction and movable terms read these poses.
+            obj_poses[:, 4:6] *= sc.scale_xy_object   # XY
+            obj_poses[:, 6] *= sc.scale_z_object      # Z
+            rt._obj_poses_raw = obj_poses
+            _obj_poses_arg = obj_poses
         else:
             rt._obj_poses_raw = None
             _obj_poses_arg = None

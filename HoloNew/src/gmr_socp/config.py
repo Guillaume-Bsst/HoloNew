@@ -26,3 +26,16 @@ class GmrSocpRetargeterConfig(RetargeterConfig):
     activate_obj_non_penetration: bool = False
     activate_foot_sticking: bool = False
     activate_self_collision: bool = False
+
+    # World placement applied inside the preprocess scale stage, independently for the
+    # robot root and the object, in XY and Z. Each is a multiplier on the RAW grounded
+    # axis (1.0 = raw). None keeps GMR-SOCP's native behaviour, resolved per axis in
+    # from_config: XY -> the per-clip holosoma scale factor (ROBOT_HEIGHT/human_height,
+    # ~0.68, pulling the root toward the world centre, matching holosoma); robot Z ->
+    # the native morphological scaling; object Z -> raw (1.0, GMR never scaled it). Pass
+    # a float to override any axis (e.g. scale_xy_robot=1.0 to keep the raw root XY and
+    # match mink-GMR). Body proportions (pelvis-local) are unaffected by all four.
+    scale_xy_robot: float | None = None
+    scale_z_robot: float | None = None
+    scale_xy_object: float | None = None
+    scale_z_object: float | None = None

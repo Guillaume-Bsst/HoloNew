@@ -27,6 +27,19 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_foot_sticking: bool = False
     activate_self_collision: bool = False
 
+    # World placement applied inside the preprocess scale stage, independently for the
+    # robot root and the object, in XY and Z. Each is a multiplier on the RAW grounded
+    # axis (1.0 = raw; <1 pulls toward the origin / floor like holosoma). None means the
+    # native morphological scaling (HUMAN_SCALE_TABLE[root]*height_ratio) for that axis.
+    # TEST defaults keep the RAW grounded pelvis XY (1.0) so the GMR targets and the
+    # SmplxGroundProbe contact field agree (see the lambda_D/X note below); the robot Z
+    # keeps its native morphological scaling (None); the object is left raw (1.0).
+    # Body proportions (pelvis-local) are unaffected by all four.
+    scale_xy_robot: float = 1.0
+    scale_z_robot: float | None = None
+    scale_xy_object: float = 1.0
+    scale_z_object: float = 1.0
+
     # Interaction cost weights. D (normal proximity) + X (tangential placement)
     # are enabled by default on object tasks; robot_only (no object SDF) is
     # unchanged. The interaction costs REQUIRE the non-penetration constraint to
@@ -37,7 +50,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # Weights jointly re-tuned. The interaction must outweigh the other objective
     # terms (Style + W^r + persistence + movable) to actually reduce the contact
     # gap. Re-tuned again 2026-06-14 from 5.0 to 20.0 after removing the holosoma
-    # root-XY scale (root_xy_scale=1.0 in from_config): aligning the GMR targets to
+    # root-XY scale (scale_xy_robot=1.0): aligning the GMR targets to
     # the raw pelvis XY (so targets and interaction fields share one world frame)
     # shifted the contact geometry, and the old lambda=5 no longer beat D/X off.
     # Sweep on sub3_largebox_003 (K=30, aligned frame), object mean contact gap:

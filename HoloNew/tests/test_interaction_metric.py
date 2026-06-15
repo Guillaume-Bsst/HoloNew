@@ -11,7 +11,7 @@ contact's no-slip is owned by the persistence hard constraint
 (activate_persistence), which D/X cannot beat on the floor at any weight
 (D/X off + persistence on gives floor gap ~0.0107 m). D/X's enduring,
 non-redundant job is the OBJECT (manipulation) contact channel, where at the
-re-tuned lambda=20.0 (aligned frame, root_xy_scale=1.0) it cuts the gap ~15%
+re-tuned lambda=20.0 (aligned frame, scale_xy_robot=1.0) it cuts the gap ~15%
 (object ~0.0276 on vs ~0.0323 off on sub3_largebox_003, K=30). See the lambda
 sweep recorded in config.py.
 """

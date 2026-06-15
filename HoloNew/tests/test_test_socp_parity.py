@@ -5,7 +5,7 @@ default solve stays numerically stable to 1e-6 as default-off constraint code
 is added.
 
 Baseline re-recorded 2026-06-14 after removing the holosoma root-XY scale
-(root_xy_scale=1.0 in from_config): the base now sits at the RAW grounded pelvis
+(scale_xy_robot=1.0): the base now sits at the RAW grounded pelvis
 XY (~0.93, 1.23) instead of the globally-scaled placement (~0.63, 0.83 = raw*0.68),
 so the GMR targets agree with the interaction-field references. Only the base XY
 shifted; the base Z, orientation, and all joints are unchanged.

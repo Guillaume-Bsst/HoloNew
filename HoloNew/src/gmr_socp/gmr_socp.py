@@ -960,13 +960,20 @@ class GmrSocpRetargeter:
         # grounded input and the 'Grounded' display stage is the real chain input.
         toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
         rt.gmr_grounded = ground_to_floor(raw_joints, toe_indices)
-        # Pull the root toward the world centre by holosoma's scale factor
-        # (ROBOT_HEIGHT / human_height) so the GMR base XY matches holosoma's
-        # globally-scaled placement. compute_stages applies this as a rigid XY
-        # translation, preserving GMR's body proportions and the Z floor-drop.
+        # Place the root (and the object below) via the four scale knobs, applied inside
+        # scale() (preserving GMR's body proportions and the Z floor-drop). None resolves
+        # to GMR's native default per axis: XY -> holosoma's scale factor (ROBOT_HEIGHT /
+        # human_height) to match holosoma's globally-scaled placement; robot Z -> native
+        # morphological scaling (pass None straight through to scale()); object Z -> raw
+        # (1.0). A float overrides any axis (e.g. scale_xy_robot=1.0 keeps the raw root
+        # XY and matches mink-GMR). Robot and object are placed independently.
         smpl_scale = calculate_scale_factor(cfg.task_name, constants.ROBOT_HEIGHT)
+        _rob_xy = sc.scale_xy_robot if sc.scale_xy_robot is not None else smpl_scale
+        _rob_z = sc.scale_z_robot                       # None -> native base in scale()
+        _obj_xy = sc.scale_xy_object if sc.scale_xy_object is not None else smpl_scale
+        _obj_z = sc.scale_z_object if sc.scale_z_object is not None else 1.0
         rt.gmr_stages = compute_stages(
-            rt.gmr_grounded, human_quat, anchor_root_xy=True, root_xy_scale=smpl_scale
+            rt.gmr_grounded, human_quat, scale_xy=_rob_xy, scale_z=_rob_z
         )
         rt.gmr_ground = rt.gmr_stages["ground"]
         ground = rt.gmr_ground
@@ -982,7 +989,11 @@ class GmrSocpRetargeter:
             from HoloNew.examples.robot_retarget import convert_object_poses_to_mujoco_order
             from HoloNew.src.utils import load_intermimic_data
             _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
-            obj_poses = obj_poses[:T]
+            obj_poses = obj_poses[:T].copy()
+            # Place the object independently of the robot (defaults: XY -> smpl_scale to
+            # match the robot frame, Z -> raw).
+            obj_poses[:, 4:6] *= _obj_xy   # XY
+            obj_poses[:, 6] *= _obj_z      # Z
             # Convert from [qw,qx,qy,qz,x,y,z] to MuJoCo order [x,y,z,qw,qx,qy,qz]
             rt._obj_poses_mj = convert_object_poses_to_mujoco_order(obj_poses)
 

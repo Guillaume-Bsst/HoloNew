@@ -25,10 +25,25 @@ from .tables import (
 HumanData = dict[str, tuple[np.ndarray, np.ndarray]]  # {body: (pos, quat_wxyz)}
 
 
-def scale(human_data: HumanData, ratio: float) -> HumanData:
-    """Scale each body in pelvis-local frame by HUMAN_SCALE_TABLE[body] * ratio."""
+def scale(human_data: HumanData, ratio: float,
+          scale_xy: float | None = None, scale_z: float | None = None) -> HumanData:
+    """Scale each body in pelvis-local frame by HUMAN_SCALE_TABLE[body] * ratio.
+
+    ``scale_xy`` / ``scale_z`` decide the absolute world placement of the root (every
+    body is anchored on the scaled root, so this rigidly places the whole skeleton).
+    Each axis group is independent:
+      - None  -> native GMR scaling: the axis is scaled by HUMAN_SCALE_TABLE[root]*ratio
+                 like the body proportions (back-compatible default).
+      - float -> the axis is placed at ``raw_root_axis * value`` (1.0 = raw root axis,
+                 <1 pulls toward the world origin / floor like holosoma).
+    Body proportions (pelvis-local) are unchanged in all cases. This is the single
+    place the targets' world frame is decided (the old rigid post-translation in
+    compute_stages is folded in here)."""
     root_pos, root_quat = human_data[HUMAN_ROOT_NAME]
-    scaled_root = HUMAN_SCALE_TABLE[HUMAN_ROOT_NAME] * ratio * root_pos
+    base = HUMAN_SCALE_TABLE[HUMAN_ROOT_NAME] * ratio
+    sx = base if scale_xy is None else scale_xy
+    sz = base if scale_z is None else scale_z
+    scaled_root = np.array([root_pos[0] * sx, root_pos[1] * sx, root_pos[2] * sz])
     out: HumanData = {HUMAN_ROOT_NAME: (scaled_root, root_quat)}
     for name, (pos, quat) in human_data.items():
         if name == HUMAN_ROOT_NAME:
@@ -80,8 +95,8 @@ def compute_stages(
     positions: np.ndarray,
     quats_wxyz: np.ndarray,
     human_height: float = HUMAN_HEIGHT_ASSUMPTION,
-    anchor_root_xy: bool = True,
-    root_xy_scale: float = 1.0,
+    scale_xy: float | None = 1.0,
+    scale_z: float | None = None,
 ) -> dict[str, dict[str, np.ndarray]]:
     """positions (T,52,3), quats_wxyz (T,52,4) ->
     {stage: {'pos': (T,B,3), 'quat': (T,B,4)}} for stages mapped/scaled/offset/ground.
@@ -91,12 +106,10 @@ def compute_stages(
     (the lowest mapped-body z over the WHOLE sequence, on the offset-stage targets) is
     subtracted from every frame so the sequence's lowest body rests on the floor.
 
-    When `anchor_root_xy` is True, each stage is rigidly translated in XY so its
-    pelvis sits at ``raw_pelvis_xy * root_xy_scale`` (GMR scales the absolute root
-    toward the origin; this restores the raw root XY while keeping the Z floor-drop).
-    With the default ``root_xy_scale=1.0`` the raw root XY is preserved; pass the
-    holosoma scale factor to pull the root toward the world centre like holosoma.
-    Set `anchor_root_xy` False for the literal GMR-scaled positions.
+    ``scale_xy`` / ``scale_z`` set the targets' world frame inside ``scale`` (per axis
+    group; None = native morphological scaling, float = raw_root_axis * value). The
+    scaled / offset / ground stages carry the placement; the 'mapped' stage is the raw
+    mapped bodies (pre-scale), so it is not re-placed.
     """
     T = positions.shape[0]
     ratio = human_height / HUMAN_HEIGHT_ASSUMPTION
@@ -114,7 +127,7 @@ def compute_stages(
 
     for t in range(T):
         hd = {name: (pos_mapped[t, i], quats_mapped[t, i]) for i, name in enumerate(names)}
-        sd = scale(hd, ratio)
+        sd = scale(hd, ratio, scale_xy, scale_z)
         od = offset(sd)
         for stage, data in (("mapped", hd), ("scaled", sd), ("offset", od)):
             for bi, n in enumerate(names):
@@ -126,12 +139,4 @@ def compute_stages(
     out["ground"]["pos"][:] = out["offset"]["pos"]
     out["ground"]["pos"][:, :, 2] -= ground_offset
     out["ground"]["quat"][:] = out["offset"]["quat"]
-
-    if anchor_root_xy:
-        pelvis_bi = names.index(HUMAN_ROOT_NAME)
-        raw_pelvis_xy = positions[:, HUMAN_BODY_TO_IDX[HUMAN_ROOT_NAME], :2] * root_xy_scale  # (T, 2)
-        for s in stage_names:
-            stage_pelvis_xy = out[s]["pos"][:, pelvis_bi, :2]                # (T, 2)
-            shift = (raw_pelvis_xy - stage_pelvis_xy)[:, None, :]            # (T, 1, 2)
-            out[s]["pos"][:, :, :2] += shift
     return out

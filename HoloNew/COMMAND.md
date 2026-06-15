@@ -113,6 +113,13 @@ in `src/test_socp/config.py` and are set on `TestSocpRetargeterConfig`:
 | `track_L_ref` (`False`) / `lambda_L_track` (`5.0`) | track the lumped reference orbital angular momentum `L^ref` (opt-in; can suppress jumps at high weight) |
 | `lambda_object_floor` (`0.0`) | object↔floor contact term (object inertia) |
 | `activate_obj_surface_nonpen` (`False`) | object surface non-penetration (opt-in; slow) |
+| `scale_xy_robot` (`1.0`) / `scale_z_robot` (`None`) | world placement of the robot root inside the preprocess scale stage: multiplier on the raw grounded axis (1.0 = raw; `<1` pulls toward the origin/floor like holosoma). `None` = native morphological scaling. TEST keeps raw XY so targets and the contact field share one frame |
+| `scale_xy_object` (`1.0`) / `scale_z_object` (`1.0`) | same, applied independently to the object pose (XY / Z). Defaults leave the object raw |
+
+> GMR-SOCP carries the same four knobs on `GmrSocpRetargeterConfig`, all defaulting to
+> `None` = GMR's native behaviour (XY → the holosoma scale factor `~0.68`; robot Z →
+> native morphological; object Z → raw). Set `scale_xy_robot=1.0` to keep the raw root
+> XY (this is what makes GMR-SOCP match the mink-GMR reference).
 
 ```python
 from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
