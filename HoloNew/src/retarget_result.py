@@ -20,6 +20,7 @@ class RetargetResult:
     human_obj_dist: np.ndarray | None = None       # (T, N)    signed dist to object (SDF)
     human_flr_dist: np.ndarray | None = None       # (T, N)    signed dist to floor (analytic)
     human_witness: np.ndarray | None = None        # (T, N, 3) object-local witness for the object channel
+    human_flr_witness: np.ndarray | None = None    # (T, N, 3) WORLD-frame floor witness (probe projected to z=0)
     g1_transport_pts: np.ndarray | None = None     # (T, M, 3) correspondence points on the solved robot
     human_idx: np.ndarray | None = None            # (M,)      human point driving each G1 point
     # Diagnostics for analysing the TEST-SOCP solve in the viewer (None elsewhere).

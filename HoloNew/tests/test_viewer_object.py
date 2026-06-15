@@ -32,6 +32,29 @@ def test_object_pose_selects_scaled_vs_raw(robot_urdf):
     v.close()
 
 
+def test_object_pose_uses_active_method_scaled(robot_urdf):
+    # On a scaled stage the object follows the ACTIVE method's own placement, so a
+    # method that keeps the object raw (TEST-SOCP: scale_*_object=1.0) shows the raw
+    # trajectory, not the global holosoma/GMR-centred pose. Unscaled stages stay raw.
+    kw = _obj_kwargs()
+    # GMR places the object at the centred pose; TEST keeps it raw.
+    gmr = MethodViz(label="GMR-SOCP", robot_key="gmr_socp", qpos=np.zeros((3, 36)),
+                    stages={"Original": np.zeros((3, 5, 3)), "Scaled": np.zeros((3, 5, 3))},
+                    object_pose_scaled=kw["object_pose_scaled"])
+    test = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((3, 36)),
+                     stages={"Original": np.zeros((3, 5, 3)), "Scaled": np.zeros((3, 5, 3))},
+                     object_pose_scaled=kw["object_pose_raw"])   # raw == no centring
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp", "test_socp"), **kw)
+    v.bind_methods([gmr, test])
+    v._method_dd.value = "GMR-SOCP"
+    np.testing.assert_array_equal(v._object_pose("Scaled"), kw["object_pose_scaled"])
+    v._method_dd.value = "TEST-SOCP"
+    np.testing.assert_array_equal(v._object_pose("Scaled"), kw["object_pose_raw"])
+    np.testing.assert_array_equal(v._object_pose("Original"), kw["object_pose_raw"])
+    v.close()
+
+
 def test_redraw_with_object_runs_for_each_stage(robot_urdf):
     kw = _obj_kwargs()
     m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp",

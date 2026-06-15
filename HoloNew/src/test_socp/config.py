@@ -31,10 +31,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # robot root and the object, in XY and Z. Each is a multiplier on the RAW grounded
     # axis (1.0 = raw; <1 pulls toward the origin / floor like holosoma). None means the
     # native morphological scaling (HUMAN_SCALE_TABLE[root]*height_ratio) for that axis.
-    # TEST defaults keep the RAW grounded pelvis XY (1.0) so the GMR targets and the
-    # SmplxGroundProbe contact field agree (see the lambda_D/X note below); the robot Z
-    # keeps its native morphological scaling (None); the object is left raw (1.0).
-    # Body proportions (pelvis-local) are unaffected by all four.
+    # TEST defaults: only the robot base Z is scaled (None = native morphological, exactly
+    # like GMR), so the robot sits at its own height; everything else stays RAW (1.0) -
+    # robot XY at the raw grounded pelvis and the object at its native XY/Z, so the GMR
+    # targets, the object, and the SmplxGroundProbe contact field share one world frame
+    # (see the lambda_D/X note below). Body proportions (pelvis-local) are unaffected.
     scale_xy_robot: float = 1.0
     scale_z_robot: float | None = None
     scale_xy_object: float = 1.0

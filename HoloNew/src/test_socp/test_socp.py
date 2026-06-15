@@ -926,7 +926,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             _obj_prev = self._obj_poses_raw[0].copy()
             _obj_prev2 = self._obj_poses_raw[0].copy()
 
-        probe_pts, probe_obj, probe_flr, probe_wit, g1_pts = [], [], [], [], []
+        probe_pts, probe_obj, probe_flr, probe_wit, probe_flr_wit, g1_pts = [], [], [], [], [], []
         urdf = None
         if self.smplx_ground_probe is not None:
             from HoloNew.src.test_socp.contact.backends.floor import floor_field
@@ -982,7 +982,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 probe_pts.append(pf.points)
                 probe_obj.append(pf.field.distance.copy())
                 probe_wit.append(pf.field.witness.copy())
-                probe_flr.append(floor_field(pf.points, self.smplx_ground_probe.margin).distance.copy())
+                _flr_field = floor_field(pf.points, self.smplx_ground_probe.margin)
+                probe_flr.append(_flr_field.distance.copy())
+                probe_flr_wit.append(_flr_field.witness.copy())  # world-frame (probe projected to z=0)
             # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
@@ -1067,6 +1069,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             res.human_obj_dist = np.stack(probe_obj)
             res.human_flr_dist = np.stack(probe_flr)
             res.human_witness = np.stack(probe_wit)
+            res.human_flr_witness = np.stack(probe_flr_wit)
             if g1_pts:
                 res.g1_transport_pts = np.stack(g1_pts)
                 res.human_idx = self.correspondence.human_idx

@@ -66,14 +66,22 @@ class MethodViz:
     stage_quats: dict = field(default_factory=dict)
     robot_quats: np.ndarray | None = None
     g1_points: np.ndarray | None = None
+    # The object placement THIS method actually used on its scaled stages (MuJoCo order
+    # [xyz, wxyz]); the object follows the active method here (GMR centres it by
+    # smpl_scale, TEST keeps it raw). None falls back to the viewer's global scaled pose.
+    object_pose_scaled: np.ndarray | None = None
     human_probe_pts: np.ndarray | None = None   # (T, N, 3) Grounded-pose SMPL-X probes
     human_dist: np.ndarray | None = None        # (T, N)    signed distance (min(object, floor))
     g1_transport_pts: np.ndarray | None = None  # (T, M, 3) transported points on the robot
-    g1_dist: np.ndarray | None = None           # (T, M)    each G1 point's human-source distance
+    g1_dist: np.ndarray | None = None           # (T, M)    contact colour distance = min(object, floor)
     human_witness: np.ndarray | None = None     # (T, N, 3) object-local witness per human probe
+    human_flr_witness: np.ndarray | None = None # (T, N, 3) WORLD-frame floor witness (probe projected to z=0)
     human_obj_dist: np.ndarray | None = None    # (T, N)    signed distance to the object (SDF)
     human_flr_dist: np.ndarray | None = None    # (T, N)    signed distance to the floor (analytic)
-    g1_witness: np.ndarray | None = None        # (T, M, 3) object-local witness per G1 point
+    g1_obj_witness: np.ndarray | None = None    # (T, M, 3) object-local witness per G1 point
+    g1_obj_dist: np.ndarray | None = None       # (T, M)    each G1 point's human-source object distance
+    g1_flr_dist: np.ndarray | None = None       # (T, M)    each G1 point's human-source floor distance
+    g1_flr_witness: np.ndarray | None = None    # (T, M, 3) WORLD-frame floor witness per G1 point
     # TEST-SOCP solve diagnostics.
     solved_object_poses: np.ndarray | None = None  # (T, 7) the method's SOLVED object pose [wxyz,xyz]
     com: np.ndarray | None = None                  # (T, 3) robot CoM
@@ -257,7 +265,8 @@ class Viewer:
             self._tog_sdf_floor = self.server.gui.add_checkbox("SDF Floor", False)
             self._tog_human = self.server.gui.add_checkbox("Human contact", False)
             self._tog_g1_transport = self.server.gui.add_checkbox("G1 transport", False)
-            self._tog_directions = self.server.gui.add_checkbox("Directions", False)
+            self._tog_dir_object = self.server.gui.add_checkbox("Object directions", False)
+            self._tog_dir_floor = self.server.gui.add_checkbox("Floor directions", False)
             self._tog_object_contact = self.server.gui.add_checkbox("Object contact", False)
             self._tog_floor_contact = self.server.gui.add_checkbox("Floor contact", False)
 
@@ -269,7 +278,7 @@ class Viewer:
             self._tog_L = self.server.gui.add_checkbox("Angular momentum L", False)
             self._diag_text = self.server.gui.add_text("Solve state", initial_value="", disabled=True)
         for _cb in (self._tog_sdf, self._tog_sdf_floor, self._tog_human,
-                    self._tog_g1_transport, self._tog_directions,
+                    self._tog_g1_transport, self._tog_dir_object, self._tog_dir_floor,
                     self._tog_object_contact, self._tog_floor_contact,
                     self._tog_solved_obj, self._tog_com, self._tog_L):
             @_cb.on_update
@@ -426,10 +435,15 @@ class Viewer:
             self._smplx_handle.visible = True
 
     def _object_pose(self, stage: str):
-        """Object pose for the given stage: the centred pose on a scaled stage, else the
-        raw pose. The object keeps its native size in both (holosoma scales the object's
-        position toward the centre, not its geometry); only the placement changes."""
+        """Object pose for the given stage: the active method's placed pose on a scaled
+        stage (GMR centres it by smpl_scale, TEST keeps it raw), else the raw pose. The
+        object keeps its native size in both; only the placement changes."""
         if stage in self.object_scaled_stages:
+            methods = getattr(self, "_methods", None)
+            if methods is not None:
+                method = methods.get(self._method_dd.value)
+                if method is not None and method.object_pose_scaled is not None:
+                    return method.object_pose_scaled
             return self.object_pose_scaled
         return self.object_pose_raw
 
@@ -659,33 +673,59 @@ class Viewer:
         self._dynamic_handles.append(h)
 
     def _draw_directions(self, frame: int) -> None:
-        """Probe -> witness lines for the ACTIVE probes: human (Grounded), G1 (Robot).
-        The witness is object-local, so an object pose is required to lift it to world."""
-        if not self._tog_directions.value:
+        """Probe -> witness lines for the ACTIVE probes, split into two independent
+        channels. Object directions (human hands / G1) lift an object-local witness by
+        the object pose; floor directions use the world-frame floor witness directly
+        (probe projected to z=0), so feet point along the ground normal, not at the object."""
+        show_obj = self._tog_dir_object.value
+        show_flr = self._tog_dir_floor.value
+        if not (show_obj or show_flr):
             return
         method = self._methods.get(self._method_dd.value)
         if method is None:
             return
         stage = self._stage_dd.value
         pose = self._object_pose(stage)
-        if pose is None:
-            return
-        if (stage == "Grounded" and method.human_probe_pts is not None
-                and method.human_witness is not None and method.human_dist is not None):
-            d = method.human_dist[frame]
-            a = d < CONTACT_MARGIN_M
-            if a.any():
-                wit = transform_points_local_to_world(
-                    pose[frame, 3:7], pose[frame, :3], method.human_witness[frame][a])
-                self._draw_segments("/test/dir_human", method.human_probe_pts[frame][a], wit, d[a])
-        if (stage == ROBOT_STAGE and method.g1_transport_pts is not None
-                and method.g1_witness is not None and method.g1_dist is not None):
-            d = method.g1_dist[frame]
-            a = d < CONTACT_MARGIN_M
-            if a.any():
-                wit = transform_points_local_to_world(
-                    pose[frame, 3:7], pose[frame, :3], method.g1_witness[frame][a])
-                self._draw_segments("/test/dir_g1", method.g1_transport_pts[frame][a], wit, d[a])
+        if stage == "Grounded" and method.human_probe_pts is not None:
+            probes = method.human_probe_pts[frame]
+            # Object channel: object-local witness, lifted by the object pose.
+            if (show_obj and pose is not None and method.human_witness is not None
+                    and method.human_obj_dist is not None):
+                d_obj = method.human_obj_dist[frame]
+                a_obj = d_obj < CONTACT_MARGIN_M
+                if a_obj.any():
+                    wit = transform_points_local_to_world(
+                        pose[frame, 3:7], pose[frame, :3], method.human_witness[frame][a_obj])
+                    self._draw_segments("/test/dir_human_obj", probes[a_obj], wit, d_obj[a_obj])
+            # Floor channel: world-frame witness, NOT lifted by the object pose.
+            if (show_flr and method.human_flr_witness is not None
+                    and method.human_flr_dist is not None):
+                d_flr = method.human_flr_dist[frame]
+                a_flr = d_flr < CONTACT_MARGIN_M
+                if a_flr.any():
+                    self._draw_segments("/test/dir_human_flr", probes[a_flr],
+                                        method.human_flr_witness[frame][a_flr], d_flr[a_flr])
+        # G1 transport is a correspondence onto the solved robot; it has both an object
+        # and a floor channel, each gated on its own toggle (mirrors the human probes).
+        if stage == ROBOT_STAGE and method.g1_transport_pts is not None:
+            g1 = method.g1_transport_pts[frame]
+            # Object channel: object-local witness, lifted by the object pose.
+            if (show_obj and pose is not None and method.g1_obj_witness is not None
+                    and method.g1_obj_dist is not None):
+                d = method.g1_obj_dist[frame]
+                a = d < CONTACT_MARGIN_M
+                if a.any():
+                    wit = transform_points_local_to_world(
+                        pose[frame, 3:7], pose[frame, :3], method.g1_obj_witness[frame][a])
+                    self._draw_segments("/test/dir_g1_obj", g1[a], wit, d[a])
+            # Floor channel: world-frame witness, NOT lifted by the object pose.
+            if (show_flr and method.g1_flr_witness is not None
+                    and method.g1_flr_dist is not None):
+                d = method.g1_flr_dist[frame]
+                a = d < CONTACT_MARGIN_M
+                if a.any():
+                    self._draw_segments("/test/dir_g1_flr", g1[a],
+                                        method.g1_flr_witness[frame][a], d[a])
 
     def _draw_sdf_floor(self) -> None:
         """Static analytic floor SDF band (world), toggled visible/invisible."""

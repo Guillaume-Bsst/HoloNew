@@ -257,11 +257,22 @@ def view(cfg: ViewStagesConfig) -> None:
             mv.human_obj_dist = res.human_obj_dist
             mv.human_flr_dist = res.human_flr_dist
             mv.human_witness = res.human_witness
+            mv.human_flr_witness = res.human_flr_witness
             mv.human_dist = np.minimum(res.human_obj_dist, res.human_flr_dist)
         if res.g1_transport_pts is not None:
             mv.g1_transport_pts = res.g1_transport_pts
-            mv.g1_dist = res.human_obj_dist[:, res.human_idx]      # each G1 reads its human's object dist
-            mv.g1_witness = res.human_witness[:, res.human_idx]    # and its human's object witness
+            mv.g1_obj_dist = res.human_obj_dist[:, res.human_idx]  # each G1 reads its human's object dist
+            mv.g1_obj_witness = res.human_witness[:, res.human_idx]  # and its human's object witness
+            mv.g1_flr_dist = res.human_flr_dist[:, res.human_idx]  # and its human's floor distance
+            mv.g1_flr_witness = res.human_flr_witness[:, res.human_idx]  # world-frame floor witness
+            # Contact-cloud colour = strongest proximity across both channels (mirrors
+            # human_dist), so a G1 point near the floor colours from the floor channel.
+            mv.g1_dist = np.minimum(res.human_obj_dist, res.human_flr_dist)[:, res.human_idx]
+        # Object reference the SOLVE actually used on its scaled stages (per-method:
+        # GMR centres it by smpl_scale, TEST keeps it raw via scale_*_object=1.0). Drives
+        # the object placement for this method's scaled stages; None -> global fallback.
+        obj_mj = getattr(rt, "_obj_poses_mj", None)
+        mv.object_pose_scaled = None if obj_mj is None else obj_mj[:T]
         # Solve diagnostics: the method's SOLVED object pose + CoM / momentum / slip.
         mv.solved_object_poses = res.solved_object_poses
         mv.com = res.com
@@ -281,10 +292,11 @@ def view(cfg: ViewStagesConfig) -> None:
         m.stages["Original"] = raw_joints[:T, :, :]
 
     keys = tuple(m.robot_key for m in methods)
-    # Stages whose skeleton lives in the centred (smpl_scale-translated) world: the object
-    # is shown at its centred pose there, and at its raw pose on the unscaled stages
-    # (Original, Grounded). Native object size on every stage.
-    object_scaled_stages = ("Scaled", "Mapped", "Offset", "Floor", ROBOT_STAGE)
+    # Stages whose skeleton lives in the placed (scaled) world: the object follows the
+    # active method's own placement there, and stays at its raw pose on the unscaled
+    # stages. 'Mapped' is now the raw pre-scale bodies (commit ccadf61), so it is raw
+    # too — only Scaled/Offset/Floor/Robot carry the placement. Native size on every stage.
+    object_scaled_stages = ("Scaled", "Offset", "Floor", ROBOT_STAGE)
     viewer = Viewer(
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
         object_model_path=None,
