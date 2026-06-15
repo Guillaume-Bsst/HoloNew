@@ -223,6 +223,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
             smpl_scale = _robot_h / (cfg.motion_data_config.default_human_height or 1.78)
     _rob_xy = sc.scale_xy_robot if sc.scale_xy_robot is not None else smpl_scale
     _rob_z = sc.scale_z_robot if sc.scale_z_robot is not None else smpl_scale
+    # Object placement uses the same convention (None -> AUTO = smpl_scale). Our defaults
+    # keep the object raw (1.0 / 1.0) so its trajectory is unchanged.
+    _obj_xy = sc.scale_xy_object if sc.scale_xy_object is not None else smpl_scale
+    _obj_z = sc.scale_z_object if sc.scale_z_object is not None else smpl_scale
     rt.gmr_stages = compute_stages(
         rt.gmr_grounded, human_quat, scale_xy=_rob_xy, scale_z=_rob_z,
     )
@@ -262,8 +266,8 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
         obj_poses = obj_poses[:T].copy()
         # Place the object independently of the robot (no-op at the TEST defaults 1.0).
-        obj_poses[:, 4:6] *= sc.scale_xy_object   # XY
-        obj_poses[:, 6] *= sc.scale_z_object      # Z
+        obj_poses[:, 4:6] *= _obj_xy   # XY
+        obj_poses[:, 6] *= _obj_z      # Z
         # Convert from [qw,qx,qy,qz,x,y,z] to MuJoCo order [x,y,z,qw,qx,qy,qz]
         rt._obj_poses_mj = convert_object_poses_to_mujoco_order(obj_poses)
 
@@ -331,8 +335,8 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
             obj_poses = obj_poses[:T].copy()
             # Place the object independently (no-op at the TEST defaults 1.0); the D/X
             # interaction and movable terms read these poses.
-            obj_poses[:, 4:6] *= sc.scale_xy_object   # XY
-            obj_poses[:, 6] *= sc.scale_z_object      # Z
+            obj_poses[:, 4:6] *= _obj_xy   # XY
+            obj_poses[:, 6] *= _obj_z      # Z
             rt._obj_poses_raw = obj_poses
             _obj_poses_arg = obj_poses
         else:

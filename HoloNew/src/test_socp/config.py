@@ -26,18 +26,19 @@ from HoloNew.config_types.retargeter import RetargeterConfig
 class TestSocpRetargeterConfig(RetargeterConfig):
     # =====================================================================
     # §0 — PREPROCESS (world placement, applied in the scale stage upstream of the solve)
-    # Robot-root placement, per axis:
+    # Robot-root and object placement, per axis (same convention for both):
     #   None  -> AUTO: from_config computes ROBOT_HEIGHT / human_height (per clip), the
-    #            physically-correct scale that puts the robot root at its own height.
+    #            physically-correct scale that puts the body/object at robot scale.
     #            Nothing hardcoded — the height comes from the clip + the robot model.
     #   float -> explicit multiplier on the raw grounded axis (1.0 = raw).
-    # Default: robot base Z auto (None); robot XY raw (1.0) so the GMR targets and the
-    # contact field share one world frame. The object stays raw (handled separately).
+    # Defaults: robot base Z auto (None); robot XY raw (1.0) so the GMR targets and the
+    # contact field share one world frame. The object is kept raw (1.0 / 1.0) for our
+    # case so its trajectory is unchanged; set None on an axis to scale it like the robot.
     # =====================================================================
     scale_xy_robot: float | None = 1.0
     scale_z_robot: float | None = None
-    scale_xy_object: float = 1.0
-    scale_z_object: float = 1.0
+    scale_xy_object: float | None = 1.0
+    scale_z_object: float | None = 1.0
 
     # =====================================================================
     # §1 — VARIABLES (the decision variables of the solve, as in the article)
