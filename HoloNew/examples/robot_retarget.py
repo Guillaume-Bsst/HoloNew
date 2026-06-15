@@ -647,6 +647,13 @@ def main(cfg: RetargetingConfig) -> RetargetResult | None:
         task_type, data_format, data_path, task_name, constants, cfg.motion_data_config
     )
 
+    # Optional frame cap (the stage viewer sets it via ViewStagesConfig.max_frames to
+    # bound long scenes); getattr keeps base RetargetingConfig unaffected when unset.
+    _max_frames = getattr(cfg, "max_frames", None)
+    if _max_frames is not None:
+        human_joints = human_joints[: int(_max_frames)]
+        object_poses = object_poses[: int(_max_frames)]
+
     # Get toe names from motion data config (depends only on data_format)
     toe_names = cfg.motion_data_config.toe_names
 

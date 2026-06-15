@@ -812,11 +812,15 @@ class GmrSocpRetargeter:
             last = cost
         return q_n, cost
 
-    def retarget(self):
+    def retarget(self, max_frames: int | None = None):
         """Run the full two-pass GMR solve over all frames.
 
         Requires from_config to have been called first (sets self.gmr_ground,
         self.q_init_full).
+
+        Args:
+            max_frames: optional cap on the number of solved frames (the viewer uses
+                it to bound long scenes); None solves the whole clip.
 
         Returns:
             RetargetResult with qpos (T, 7+DOF) trajectory.
@@ -830,6 +834,8 @@ class GmrSocpRetargeter:
         gpos = self.gmr_ground["pos"]
         gquat = self.gmr_ground["quat"]
         T = gpos.shape[0]
+        if max_frames is not None:
+            T = min(T, int(max_frames))
         q = np.copy(self.q_init_full)
         out = []
         # q_prev: previous-frame foot anchor for foot-sticking; both passes use the same anchor,

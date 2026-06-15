@@ -68,6 +68,10 @@ class ViewStagesConfig(RetargetingConfig):
     # so the correct subject shape loads automatically; pass another path to override
     # (a missing/absent file degrades gracefully to the neutral shape).
     omomo_dir: Path | None = Path(OMOMO_DIR_DEFAULT)
+    # Cap the number of solved/displayed frames. Long scenes (SFU dance, OMOMO
+    # manipulation) run to several hundred frames; capping keeps the solve short
+    # when you only want to inspect the motion. None solves the whole clip.
+    max_frames: int | None = None
 
 
 def view(cfg: ViewStagesConfig) -> None:
@@ -226,15 +230,15 @@ def view(cfg: ViewStagesConfig) -> None:
         # viewer (no-op for GMR-SOCP, which lacks the flag).
         if hasattr(rt, "collect_diagnostics"):
             rt.collect_diagnostics = True
-        res = rt.retarget()
+        res = rt.retarget(max_frames=cfg.max_frames)
         T = res.qpos.shape[0]
         # GMR's own floor correction is labelled "Floor" so the early input-grounding
         # stage can use holosoma's "Grounded" name without collision.
         gmr_labels = {"mapped": "Mapped", "scaled": "Scaled", "offset": "Offset", "ground": "Floor"}
-        stages = {gmr_labels[name]: rt.gmr_stages[name]["pos"]
+        stages = {gmr_labels[name]: rt.gmr_stages[name]["pos"][:T]
                   for name in ("mapped", "scaled", "offset", "ground")}
         # Per-joint orientations of the mapped bodies, so their joint frames can be drawn.
-        sq = {gmr_labels[name]: rt.gmr_stages[name]["quat"]
+        sq = {gmr_labels[name]: rt.gmr_stages[name]["quat"][:T]
               for name in ("mapped", "scaled", "offset", "ground")}
         # The 52-joint raw source skeleton, then the exact grounded input the GMR chain
         # consumed (rt.gmr_grounded), so Mapped/Scaled/Offset/Floor stay consistent with it.
