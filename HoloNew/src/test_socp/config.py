@@ -1,19 +1,16 @@
 """TEST-SOCP retargeter config.
 
-Flat and explicit: every field maps 1:1 to one solver effect. The builder passes them
-through unchanged (no hidden presets/rewrites); illegal combinations raise a ValueError
-in from_config instead of being silently fixed.
+Flat and explicit: every field maps 1:1 to one solver effect; the builder passes them
+through unchanged. Defaults = GMR baseline (position + orientation tracking + joint
+limits); every other brick defaults OFF, add them back one at a time.
 
-Organised by family, following the article's formulation:
-    §0 Preprocess               world placement (scale stage), upstream of the solve
-    §1 Variables                what the solve optimises: q_a, T_B, T_m
-    §2 Weights                  GMR tracking → Holosoma (TODO) → our article terms
-    §3 Constraints              Holosoma → GMR → our customs
-    §4 Solver                   SQP mechanics
+PROVENANCE — each field is tagged by where it comes from:
+    [GMR]   baseline tracking objective, inherited from GMR-SOCP
+    [HOLO]  ported / inherited from Holosoma (machinery in holosoma_constraints.py)
+    [TEST]  TEST-SOCP's own: the article terms + our customs
 
-Defaults are the GMR BASELINE: the bare GMR-SOCP objective (per-point position +
-orientation tracking, §2) + joint limits, nothing else. Every brick below defaults OFF;
-add them back one at a time. Re-enable hints carry the tuned value.
+Layout follows the solve pipeline (§0 preprocess → §1 variables → §2 weights →
+§3 constraints → §4 solver), so a section can mix tags; read the tag per field.
 """
 from __future__ import annotations
 
@@ -24,64 +21,39 @@ from HoloNew.config_types.retargeter import RetargeterConfig
 
 @dataclass(frozen=True)
 class TestSocpRetargeterConfig(RetargeterConfig):
-    # =====================================================================
-    # §0 — PREPROCESS (world placement, applied in the scale stage upstream of the solve)
-    # Robot-root and object placement, per axis (same convention for both):
-    #   None  -> AUTO: from_config computes ROBOT_HEIGHT / human_height (per clip), the
-    #            physically-correct scale that puts the body/object at robot scale.
-    #            Nothing hardcoded — the height comes from the clip + the robot model.
-    #   float -> explicit multiplier on the raw grounded axis (1.0 = raw).
-    # Defaults: robot base Z auto (None); robot XY raw (1.0) so the GMR targets and the
-    # contact field share one world frame. The object is kept raw (1.0 / 1.0) for our
-    # case so its trajectory is unchanged; set None on an axis to scale it like the robot.
-    # =====================================================================
+    # === §0 PREPROCESS — world placement (scale stage, upstream of the solve) ===
+    # [TEST] per axis, robot and object share the convention: None = AUTO
+    # (ROBOT_HEIGHT/human_height from the clip), float = multiplier on the raw axis (1.0 = raw).
     scale_xy_robot: float | None = 1.0
     scale_z_robot: float | None = None
     scale_xy_object: float | None = 1.0
     scale_z_object: float | None = 1.0
 
-    # =====================================================================
-    # §1 — VARIABLES (the decision variables of the solve, as in the article)
-    #   q_a : actuated joints       — activate_qa (False freezes the joints: dqa_joints = 0)
-    #   T_B : pelvis / floating base — activate_tb (False freezes the base: dqa_base = 0)
-    #   T_m : movable object pose    — activate_tm (True makes the object a variable; its
-    #         W^o weights live in §2). Object-as-interaction-entity is handled separately.
-    # =====================================================================
+    # === §1 VARIABLES — what the solve optimises ===
+    # [TEST] article formulation: q_a actuated joints / T_B floating base / T_m movable
+    # object pose. False freezes each; activate_tm makes the object a variable (W^o in §2).
     activate_qa: bool = True
     activate_tb: bool = True
     activate_tm: bool = False
 
-    # =====================================================================
-    # §2 — WEIGHTS (GMR tracking → Holosoma → our article terms)
-    # =====================================================================
-    # --- GMR: per-point position (w_p) / orientation (w_r) tracking. Toggle each channel
-    # on/off; the weight VALUES stay in IK_MATCH_TABLE1/2. On by default (core objective).
+    # === §2 WEIGHTS ===
+    # [GMR] per-point position / orientation tracking (values in IK_MATCH_TABLE1/2). Core objective.
     activate_pos_tracking: bool = True
     activate_rot_tracking: bool = True
 
-    # --- Holosoma: TODO — not yet computed by TEST-SOCP. Port the Laplacian interaction-
-    # mesh deformation, nominal tracking, Q_diag joint regularization, and 1st-order
-    # smoothness as optional bricks, then expose their weights here.
+    # [HOLO] TODO, not yet ported: Laplacian mesh deformation, nominal tracking, Q_diag reg, smoothness.
 
-    # --- Our article terms (LaTeX order). Each has its own activate_w<sym> switch and a
-    # lowercase lambda_<sym> weight; the switch alone decides (weight = tuned value when
-    # on). All default OFF (GMR baseline).
-    #
-    # W^s — Style. activate_ws swaps plain world-frame tracking for the Style objective
-    # (pelvis orientation = roll/pitch tilt only; joint positions dropped).
-    # style_pelvis_relative (only when activate_ws): True = joint orientations re-based by
-    # the current pelvis + weak pelvis scaffold (pelvis_anchor_weight*w_p); False = world
-    # frame + full world pelvis position (GMR-like, pelvis_anchor_weight unused).
+    # [TEST] W^s Style: swaps world-frame tracking for pelvis tilt-only orientation (joint
+    # positions dropped). style_pelvis_relative: re-base joint orientations on the current
+    # pelvis + weak scaffold (pelvis_anchor_weight*w_p); False = world frame + full pelvis position.
     activate_ws: bool = False
     style_pelvis_relative: bool = False
     pelvis_anchor_weight: float = 10.0
 
-    # W^D / W^X / W^P — Interaction. Control points on the CARRIERS query the precomputed
-    # signed field of each TARGET entity. Targets: the floor (ALWAYS) and the object. The
-    # robot is always a carrier; the object is a carrier too (it optimises its own floor
-    # contact, see activate_obj_floor below). D = normal proximity, X = tangential
-    # placement, P = soft persistence (prefer the hard constraint in §3). The robot channel
-    # (robot -> {floor, object}) shares lambda_d / lambda_x. sigma_v scales P.
+    # [TEST] W^D/W^X/W^P Interaction: carrier control points query each target's signed field.
+    # Targets = floor (always) + object; carriers = robot (always) + object. D = normal
+    # proximity, X = tangential placement, P = soft persistence (prefer the §3 hard constraint).
+    # Robot channel shares lambda_d/lambda_x; sigma_v scales P.
     activate_wd: bool = False
     lambda_d: float = 20.0
     activate_wx: bool = False
@@ -89,18 +61,13 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wp: bool = False
     lambda_p: float = 20.0
     sigma_v: float = 0.05
-    # Object carrier -> floor (the paper's object<->environment pair): the object optimises
-    # its own floor contact, like the robot. SEPARATE weight from the robot channel above.
-    # Needs the object to be a variable (activate_tm, §1).
+    # [TEST] object carrier → floor (object<->environment pair); separate weight, needs activate_tm.
     activate_obj_floor: bool = False
     lambda_obj_floor: float = 5.0
 
-    # W^c / W^L — Centroidal (frame >= 2 for W^c/W^L; W^c_pos from frame 0):
-    #   W^c     = lambda_c     * ||c_ddot - c_ddot_ref||^2   (CoM accel)
-    #   W^c_pos = lambda_c_pos * ||c - c_ref||^2             (CoM position anchor)
-    #   W^L     = lambda_l     * ||L||^2                      (angular momentum -> 0)
-    # activate_wl_track: track the reference momentum L_ref instead of driving L->0;
-    # lambda_l_track weights ||L_lumped - L_ref||^2. (lambda_c_pos untuned placeholder.)
+    # [TEST] W^c/W^L Centroidal (W^c/W^L from frame >= 2, W^c_pos from frame 0):
+    # W^c = ||c_ddot - c_ddot_ref||^2, W^c_pos = ||c - c_ref||^2, W^L = ||L||^2.
+    # activate_wl_track: track L_ref (||L_lumped - L_ref||^2) instead of driving L->0.
     activate_wc: bool = False
     lambda_c: float = 1e-5
     activate_wc_pos: bool = False
@@ -110,62 +77,50 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wl_track: bool = False
     lambda_l_track: float = 5.0
 
-    # W^o — Movable object MOTION regularization only (needs activate_tm in §1):
-    #   W^o = lambda_o * ||vdot_obj - vdot_ref||^2 + lambda_omega * ||omega_obj - omega_ref||^2
-    # activate_wo_pos / lambda_o_pos: absolute object-position anchor (analogue of W^c_pos).
-    # (The object<->floor CONTACT is not a motion weight; it lives with the interaction
-    # above as activate_obj_floor.)
+    # [TEST] W^o Movable-object motion reg (needs activate_tm):
+    # lambda_o*||vdot - vdot_ref||^2 + lambda_omega*||omega - omega_ref||^2.
+    # activate_wo_pos: absolute object-position anchor. (object<->floor contact = activate_obj_floor.)
     activate_wo: bool = False
     lambda_o: float = 1.0
     lambda_omega: float = 1.0
     activate_wo_pos: bool = False
     lambda_o_pos: float = 10.0
 
-    # W^r — Temporal regularization (tangent-space acceleration). sigma_* = per-DOF noise
-    # scale for joints / base.
+    # [TEST] W^r Temporal reg (tangent-space accel); sigma_* = per-DOF noise scale (joints / base).
     activate_wr: bool = False
     lambda_r: float = 0.2
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
 
-    # =====================================================================
-    # §3 — CONSTRAINTS (Holosoma → GMR → our customs)
-    # =====================================================================
-    # Holosoma-style (need their companion config to act): self-collision needs
-    # self_collision=SelfCollisionConfig(...); foot-sticking needs foot_lock + sequences
-    # (self_collision, foot_lock, foot_sticking_tolerance are inherited).
+    # === §3 CONSTRAINTS ===
+    # [HOLO] need their companion config: self_collision=SelfCollisionConfig(...),
+    # foot-sticking needs foot_lock + sequences (both inherited).
     activate_self_collision: bool = False
     activate_foot_sticking: bool = False
-    # non-penetration d_ij >= 0 (signed distance kept above -tolerance). Holosoma-style:
-    # phi comes from MuJoCo collision (mj_collision prefilter + mj_geomDistance) on the
-    # geometries in the loaded model, with our object/ground pair filter on top. Inherited
-    # from RetargeterConfig (penetration_tolerance inherited). Required by the interaction
-    # costs. See load_object_scene below for which geometry MuJoCo measures against.
+
+    # [HOLO] non-penetration d_ij >= -tolerance: phi from MuJoCo collision (mj_collision +
+    # mj_geomDistance) on the loaded geometry, with our object/ground pair filter. Inherited
+    # from RetargeterConfig. load_object_scene is an addon selecting the geometry MuJoCo
+    # measures against (xml swap): True = object<->robot (full object xml), False = ground only.
     activate_obj_non_penetration: bool = False
-    # GMR: actuated joint limits q_a^- <= q_a <= q_a^+.
-    activate_joint_limits: bool = True
-    # Our customs: load_object_scene selects the geometry the Holosoma non-pen measures
-    # against (swaps the loaded xml): with non-pen + a real object, True = object<->robot
-    # non-pen (full geometry from the object-scene xml), False = ground non-pen only.
-    # activate_obj_surface_nonpen: hard d_ij>=0 on the object surface, from the SDF/contact
-    # field (not MuJoCo), the article's d_{i,j} (SLOW).
-    # activate_persistence: hard tangential no-slip band (the article's P as a constraint);
-    # persistence_tol = band half-width (m). Needs an interaction entity.
     load_object_scene: bool = True
+
+    # [GMR] actuated joint limits.
+    activate_joint_limits: bool = True
+    
+    # [TEST] obj_surface_nonpen = hard d_ij>=0 on the object surface from the SDF/contact
+    # field (not MuJoCo; SLOW). persistence = hard tangential no-slip band (article's P as a
+    # constraint, tol = band half-width m, needs an interaction entity).
     activate_obj_surface_nonpen: bool = False
     obj_surface_nonpen_tol: float = 0.005
     activate_persistence: bool = False
     persistence_tol: float = 0.005
-    # NOTE: the floor is ALWAYS an interaction target (the ground field is always built);
-    # there is no floor_as_entity flag — every carrier (robot, object) can contact it.
+    # The floor is ALWAYS an interaction target (no floor_as_entity flag); every carrier contacts it.
 
-    # =====================================================================
-    # §4 — SOLVER (SQP mechanics)
-    # fps -> frame timestep dt = 1/fps (every temporal term). n_iter_first /
-    # n_iter_per_frame: inner SQP iterations on the first frame vs the rest (per pass).
-    # iterate_step_tol: early-stop when the actuated step norm drops below it (0 disables).
-    # (step_size is inherited from RetargeterConfig.)
-    # =====================================================================
+    # === §4 SOLVER (SQP mechanics) ===
+    # [TEST] fps -> dt = 1/fps. n_iter_first / n_iter_per_frame: inner SQP iterations on frame
+    # 0 vs rest. iterate_step_tol: early-stop when the actuated step norm drops below it (0 off).
+    # (step_size is inherited from Holosoma's RetargeterConfig.)
     fps: float = 30.0
     n_iter_first: int = 50
     n_iter_per_frame: int = 10
