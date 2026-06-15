@@ -98,7 +98,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["lambda_o"] = sc.lambda_o if sc.activate_wo else 0.0
     kwargs["lambda_omega"] = sc.lambda_omega if sc.activate_wo else 0.0
     kwargs["lambda_o_pos"] = sc.lambda_o_pos if sc.activate_wo_pos else 0.0
-    kwargs["lambda_o_floor"] = sc.lambda_o_floor if sc.activate_wo_floor else 0.0
+    kwargs["lambda_obj_floor"] = sc.lambda_obj_floor if sc.activate_obj_floor else 0.0
     kwargs["activate_obj_surface_nonpen"] = sc.activate_obj_surface_nonpen
     kwargs["obj_surface_nonpen_tol"] = sc.obj_surface_nonpen_tol
     kwargs["activate_persistence"] = sc.activate_persistence
@@ -107,9 +107,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["n_iter_per_frame"] = sc.n_iter_per_frame
     kwargs["iterate_step_tol"] = sc.iterate_step_tol
     # Floor-as-entity and object-scene loading pass straight through, like every other
-    # field: the builder applies NO hidden rewrites or presets. Illegal combinations are
-    # rejected below with a clear error instead of being silently "fixed".
-    kwargs["floor_as_entity"] = sc.floor_as_entity
+    # field: the builder applies NO hidden rewrites or presets.
     kwargs["load_object_scene"] = sc.load_object_scene
 
     # No config policing: the builder passes everything through as-is. Physically
@@ -301,8 +299,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # object SDF is available: sample the subject SMPL-X surface once. The human is
     # placed at its Grounded pose in retarget(); the object pose is used as-is (the
     # raw human floats, the object sits correctly, so only the human is grounded).
-    _floor_entity = getattr(rt, "floor_as_entity", False)
-    if rt.object_sdf is not None or _floor_entity:
+    # The floor is ALWAYS an interaction target, so the SMPL-X ground field is always
+    # built (floor-only when there is no object). Needs the task's SMPL data, present for
+    # every TEST clip.
+    if True:
         from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
         from HoloNew.src.test_socp.contact.smplx_field import build_smplx_ground_probe
         from HoloNew.src.test_socp.correspondence.human_body import PointCloudCache

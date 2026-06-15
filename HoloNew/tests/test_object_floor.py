@@ -4,7 +4,7 @@ In inertia mode the OBJECT, like the body, is placed by contacts — not a
 positional target: object surface points carried by T_obj query the floor field
 and resist breaking the near-floor contact (vanishing when the object is lifted,
 so it is then placed by object<->robot contact + ballistic W^o). The bundle sets
-lambda_o_pos=0 (drop the anchor) and lambda_o_floor>0.
+lambda_o_pos=0 (drop the anchor) and lambda_obj_floor>0.
 
 Validated 2026-06-14 on sub3_largebox_003 (30 frames): with the floor term and NO
 anchor the solved object stays near its reference (pos err ~16 mm mean, ~92 mm max
@@ -31,7 +31,7 @@ def test_inertia_bundle_object_placed_by_contacts():
     if rt.correspondence is None:
         pytest.skip("assets not present")
     assert rt.lambda_o_pos == 0.0, "inertia mode must drop the object position anchor"
-    assert rt.lambda_o_floor > 0.0, "inertia mode must enable object<->floor"
+    assert rt.lambda_obj_floor > 0.0, "inertia mode must enable object<->floor"
     assert rt.object_surface_local is not None and rt.object_surface_local.shape[1] == 3
 
 

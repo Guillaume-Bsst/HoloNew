@@ -76,9 +76,12 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     style_pelvis_relative: bool = False
     pelvis_anchor_weight: float = 10.0
 
-    # W^D / W^X / W^P — Interaction. D = normal proximity, X = tangential placement,
-    # P = soft persistence (prefer the hard constraint in §3). Need an interaction entity
-    # + non-penetration. sigma_v scales P. (lambda_p untuned placeholder.)
+    # W^D / W^X / W^P — Interaction. Control points on the CARRIERS query the precomputed
+    # signed field of each TARGET entity. Targets: the floor (ALWAYS) and the object. The
+    # robot is always a carrier; the object is a carrier too (it optimises its own floor
+    # contact, see activate_obj_floor below). D = normal proximity, X = tangential
+    # placement, P = soft persistence (prefer the hard constraint in §3). The robot channel
+    # (robot -> {floor, object}) shares lambda_d / lambda_x. sigma_v scales P.
     activate_wd: bool = True
     lambda_d: float = 20.0
     activate_wx: bool = False
@@ -86,6 +89,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wp: bool = False
     lambda_p: float = 20.0
     sigma_v: float = 0.05
+    # Object carrier -> floor (the paper's object<->environment pair): the object optimises
+    # its own floor contact, like the robot. SEPARATE weight from the robot channel above.
+    # Needs the object to be a variable (activate_tm, §1).
+    activate_obj_floor: bool = False
+    lambda_obj_floor: float = 5.0
 
     # W^c / W^L — Centroidal (frame >= 2 for W^c/W^L; W^c_pos from frame 0):
     #   W^c     = lambda_c     * ||c_ddot - c_ddot_ref||^2   (CoM accel)
@@ -102,18 +110,16 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wl_track: bool = False
     lambda_l_track: float = 5.0
 
-    # W^o — Movable object (needs activate_tm in §1):
+    # W^o — Movable object MOTION regularization only (needs activate_tm in §1):
     #   W^o = lambda_o * ||vdot_obj - vdot_ref||^2 + lambda_omega * ||omega_obj - omega_ref||^2
     # activate_wo_pos / lambda_o_pos: absolute object-position anchor (analogue of W^c_pos).
-    # activate_wo_floor / lambda_o_floor: place the object by its floor contact
-    # (paper's object<->env pair).
+    # (The object<->floor CONTACT is not a motion weight; it lives with the interaction
+    # above as activate_obj_floor.)
     activate_wo: bool = False
     lambda_o: float = 1.0
     lambda_omega: float = 1.0
     activate_wo_pos: bool = False
     lambda_o_pos: float = 10.0
-    activate_wo_floor: bool = False
-    lambda_o_floor: float = 5.0
 
     # W^r — Temporal regularization (tangent-space acceleration). sigma_* = per-DOF noise
     # scale for joints / base.
@@ -144,10 +150,8 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     obj_surface_nonpen_tol: float = 0.005
     activate_persistence: bool = False
     persistence_tol: float = 0.005
-    # floor_as_entity: add the floor to the interaction entities O (so D/X and the
-    # object<->floor contact can act on the floor). Object-as-interaction-entity is TBD;
-    # parked here for now. Requires activate_obj_non_penetration.
-    floor_as_entity: bool = False
+    # NOTE: the floor is ALWAYS an interaction target (the ground field is always built);
+    # there is no floor_as_entity flag — every carrier (robot, object) can contact it.
 
     # =====================================================================
     # §4 — SOLVER (SQP mechanics)

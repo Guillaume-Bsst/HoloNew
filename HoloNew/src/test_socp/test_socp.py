@@ -98,11 +98,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         lambda_o: float = 0.0,
         lambda_omega: float = 0.0,
         lambda_o_pos: float = 0.0,
-        lambda_o_floor: float = 0.0,
+        lambda_obj_floor: float = 0.0,
         activate_obj_surface_nonpen: bool = False,
         obj_surface_nonpen_tol: float = 0.005,
         load_object_scene: bool = True,
-        floor_as_entity: bool = False,
         activate_persistence: bool = False,
         persistence_tol: float = 0.005,
         **_ignored,
@@ -299,7 +298,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.lambda_o = lambda_o
         self.lambda_omega = lambda_omega
         self.lambda_o_pos = lambda_o_pos
-        self.lambda_o_floor = lambda_o_floor
+        self.lambda_obj_floor = lambda_obj_floor
         self.activate_obj_surface_nonpen = activate_obj_surface_nonpen
         self.obj_surface_nonpen_tol = obj_surface_nonpen_tol
         self.activate_wl_track = activate_wl_track
@@ -310,9 +309,6 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # Brick 1 — Contact persistence hard band constraint (default off).
         self.activate_persistence = activate_persistence
         self.persistence_tol = persistence_tol
-
-        # Inertia mode — floor as a permanent interaction entity (default off).
-        self.floor_as_entity = floor_as_entity
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -631,13 +627,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             dxi_obj = cp.Variable(6, name="dxi_obj")
             constraints.append(cp.SOC(self.step_size, dxi_obj))
 
-        # D + X interaction terms (default off; only active when weights > 0 and
-        # the required assets are present).
+        # D + X interaction terms (default off; only active when weights > 0). The floor
+        # is always a target, so the only asset needed is the ground field + correspondence;
+        # the object channel inside build_dx_terms is self-gated on obj_pose.
         if (self.lambda_d > 0 or self.lambda_x > 0) \
                 and getattr(self, "correspondence", None) is not None \
-                and (getattr(self, "object_sdf", None) is not None
-                     or getattr(self, "floor_as_entity", False)) \
-                and (obj_pose is not None or getattr(self, "floor_as_entity", False)):
+                and getattr(self, "smplx_ground_probe", None) is not None:
             from HoloNew.src.test_socp.interaction import build_dx_terms
             q_pin = _q_pin
             # Pass dxi_obj for bilateral coupling when the object is a variable.
@@ -650,9 +645,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # from the previous solved frame, so only active at frame >= 1).
         if self.lambda_p > 0 \
                 and getattr(self, "correspondence", None) is not None \
-                and (getattr(self, "object_sdf", None) is not None
-                     or getattr(self, "floor_as_entity", False)) \
-                and (obj_pose is not None or getattr(self, "floor_as_entity", False)) \
+                and getattr(self, "smplx_ground_probe", None) is not None \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
             from HoloNew.src.test_socp.interaction import build_p_terms
@@ -665,9 +658,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # same cross-frame _p_state as the soft P term; only fires at frame >= 1.
         if self.activate_persistence \
                 and getattr(self, "correspondence", None) is not None \
-                and (getattr(self, "object_sdf", None) is not None
-                     or getattr(self, "floor_as_entity", False)) \
-                and (obj_pose is not None or getattr(self, "floor_as_entity", False)) \
+                and getattr(self, "smplx_ground_probe", None) is not None \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
             from HoloNew.src.test_socp.interaction import build_p_constraints
@@ -789,13 +780,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # the object is lifted (then placed by object<->robot + ballistic W^o).
         if (dxi_obj is not None
                 and obj_pose is not None
-                and self.lambda_o_floor > 0
+                and self.lambda_obj_floor > 0
                 and getattr(self, "object_surface_local", None) is not None):
             from HoloNew.src.test_socp.movable import build_object_floor_terms
             _L_floor = (self.smplx_ground_probe.margin
                         if self.smplx_ground_probe is not None else 0.1)
             obj_terms += build_object_floor_terms(
-                self, dxi_obj, obj_pose, self.lambda_o_floor, _L_floor)
+                self, dxi_obj, obj_pose, self.lambda_obj_floor, _L_floor)
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
@@ -989,8 +980,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # Initialised to "no previous contact": d_prev=+inf, a_prev=0.
         if (self.lambda_p > 0 or self.activate_persistence) \
                 and getattr(self, "correspondence", None) is not None \
-                and (getattr(self, "object_sdf", None) is not None
-                     or getattr(self, "floor_as_entity", False)):
+                and getattr(self, "smplx_ground_probe", None) is not None:
             _M = self.correspondence.link_idx.shape[0]
             self._p_state = {
                 "p_prev_world": np.zeros((_M, 3), dtype=np.float64),
@@ -1158,7 +1148,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # solved quantities (the grounded reference CoM and the W^L reference L).
         res.com_ref = getattr(self, "_c_ref_all", None)
         res.angular_momentum_ref = getattr(self, "_L_ref_all", None)
-        # Foot slip needs the floor probe + correspondence (object tasks / floor_as_entity).
+        # Foot slip needs the floor probe + correspondence (the floor field is always built).
         if (getattr(self, "smplx_ground_probe", None) is not None
                 and getattr(self, "correspondence", None) is not None):
             from HoloNew.src.test_socp.interaction import (
