@@ -23,6 +23,22 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     ``foot_lock=FootLockConfig(enable=True, ...)`` to do anything.
     """
 
+    # ---------------------------------------------------------------------------
+    # GMR BASELINE (2026-06-15). The defaults below strip TEST-SOCP down to the bare
+    # GMR-SOCP objective: world-frame position + orientation tracking of every mapped
+    # body (activate_style=False) plus joint limits, and NOTHING else. Every TEST brick
+    # defaults OFF so we can add them back one at a time and see which one breaks the
+    # motion. Re-enable a brick by flipping its switch (tuned values kept in the
+    # comments below):
+    #   Style (pelvis-relative / world hybrid) : activate_style=True (+ inertia_mode)
+    #   Interaction D / X                      : lambda_D / lambda_X  (e.g. 20.0)
+    #   Temporal W^r                           : lambda_r             (e.g. 0.2)
+    #   Persistence no-slip (hard)             : activate_persistence=True
+    #   Movable W^o (accel/vel)                : activate_movable=True
+    #   Movable W^o position anchor            : lambda_o_pos         (e.g. 10.0)
+    #   Centroidal W^c / W^L                   : activate_centroidal=True (+ lambdas)
+    #   Inertia-mode bundle                    : inertia_mode=True
+    # ---------------------------------------------------------------------------
     activate_obj_non_penetration: bool = False
     activate_foot_sticking: bool = False
     activate_self_collision: bool = False
@@ -73,8 +89,8 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # behaviour is instead delivered by the HARD tangential band constraint
     # (activate_persistence, below), which is both fast and tight — prefer it. sigma_v
     # is kept for API compatibility and is unused by the hard constraint.
-    lambda_D: float = 20.0
-    lambda_X: float = 20.0
+    lambda_D: float = 0.0      # GMR baseline: off (tuned 20.0 — see note above)
+    lambda_X: float = 0.0      # GMR baseline: off (tuned 20.0)
     lambda_P: float = 0.0
     sigma_v: float = 0.05
 
@@ -97,7 +113,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     #   off (lambda_r=0): mean joint jerk=0.003640, pelvis track=0.040 m
     #   on  (0.2/20/20):  mean joint jerk=0.002990 (−17.9 %), track=0.049 m (+0.009 m)
     # Jerk is reduced without meaningful tracking degradation (< 0.01 m slack).
-    lambda_r: float = 0.2
+    lambda_r: float = 0.0      # GMR baseline: off (tuned 0.2 — see note above)
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
 
@@ -113,7 +129,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # to prevent the base from drifting off the reference trajectory.  Sweep on
     # sub3_largebox_003 (30 frames): paw=1 → mean xy-drift 0.243 m (too much),
     # paw=10 → mean xy-drift ~0.09 m, well within tolerance.
-    activate_style: bool = True
+    activate_style: bool = False   # GMR baseline: off (pure world-frame tracking = GMR)
     pelvis_anchor_weight: float = 10.0
 
     # Brick 4 — Centroidal W^c (CoM acceleration) + W^c_pos (CoM position) + W^L.
@@ -151,6 +167,12 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # contacts (feet pinned to the permanent floor entity) and a weak W^c filling
     # the residual/flight, with NO positional pelvis/CoM target. Default off so the
     # parity/golden tests stay bit-exact. See docs/specs/2026-06-14-inertia-mode-design.md.
+    # It ALSO gates the Style objective's reference frame (activate_style=True):
+    #   - inertia_mode=True  -> joint orientations re-based by the current pelvis
+    #     (pelvis-relative) + weak pelvis position scaffold (paper placement).
+    #   - inertia_mode=False -> joint orientations in WORLD frame + full world-position
+    #     pelvis target (GMR-like), keeping the yaw-free pelvis tilt and dropped joint
+    #     positions. So without inertia mode the Style solve tracks like GMR.
     inertia_mode: bool = False
     # floor_as_entity: load the floor interaction channel (correspondence + ground
     # probe + floor field) for ANY task, not only object tasks. Turned on by
@@ -170,7 +192,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # forced off by from_config, so its solve is bit-exact with the parity baseline.
     # persistence_tol: band half-width in metres (5 mm validated; raise to 1 cm if
     # a task geometry makes the 5 mm band infeasible).
-    activate_persistence: bool = True
+    activate_persistence: bool = False   # GMR baseline: off (was on)
     persistence_tol: float = 0.005
 
     # Brick 5 — Movable entities W^o (object motion regularization).
@@ -186,7 +208,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # Only active on object tasks (obj_pose is not None) from frame_idx >= 2.
     #   W^o = lambda_o     * ||vdot_obj - vdot_ref||^2  (linear acceleration tracking)
     #         + lambda_omega * ||omega_obj - omega_ref||^2  (angular velocity tracking)
-    activate_movable: bool = True
+    activate_movable: bool = False   # GMR baseline: off (was on)
     lambda_o: float = 1.0
     lambda_omega: float = 1.0
     # W^o position anchor. W^o (lambda_o/lambda_omega) regularizes only the
@@ -206,7 +228,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # the saturated regime. The persistence hard constraint pins the robot's
     # contact points, so without this anchor the bilateral D/X coupling offsets
     # the (position-blind) object instead; this term resolves that coupling.
-    lambda_o_pos: float = 10.0
+    lambda_o_pos: float = 0.0   # GMR baseline: off (tuned 10.0 — see note above)
     # Object<->floor contact (the paper's object-environment pair). Places the
     # object by its floor contact instead of a positional target: object surface
     # points carried by T_obj query the floor field, resisting any motion that

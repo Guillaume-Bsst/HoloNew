@@ -80,6 +80,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         sigma_Vdot: float = 1.0,
         activate_style: bool = False,
         pelvis_anchor_weight: float = 1.0,
+        inertia_mode: bool = False,
         activate_centroidal: bool = False,
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
@@ -261,6 +262,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # Brick 3 — Pelvis-relative Style objective (default off; parity preserved).
         self.activate_style = activate_style
         self.pelvis_anchor_weight = pelvis_anchor_weight
+        # Inertia mode gates the Style objective's reference frame: True keeps the
+        # pelvis-relative joint orientations + weak pelvis position scaffold (paper
+        # placement); False makes the joint orientations world-frame and the pelvis
+        # position a full world target (GMR-like), while keeping the yaw-free pelvis
+        # tilt and the dropped joint-position terms.
+        self.inertia_mode = inertia_mode
 
         # Brick 4 — Centroidal W^c / W^c_pos / W^L (default off; parity preserved).
         self.activate_centroidal = activate_centroidal
@@ -462,29 +469,39 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 body = self.robot_link_names[frame]
                 Jp, Jr = self._body_jac(q, body)
                 if body == pelvis_body:
-                    # Weak position scaffold: keeps pelvis from drifting vertically.
-                    if pelvis_w_p > 0 and self.pelvis_anchor_weight > 0:
+                    # Pelvis position. Inertia mode: weak scaffold (keeps the pelvis from
+                    # drifting; paw=0 there drops it entirely, the body being placed by
+                    # contacts). Non-inertia: full world-position target like GMR (weight
+                    # w_p, no anchor multiplier).
+                    if self.inertia_mode:
+                        if pelvis_w_p > 0 and self.pelvis_anchor_weight > 0:
+                            p_c = self.body_position(q, body)
+                            obj_terms.append(
+                                self.pelvis_anchor_weight * pelvis_w_p
+                                * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
+                            )
+                    elif pelvis_w_p > 0:
                         p_c = self.body_position(q, body)
                         obj_terms.append(
-                            self.pelvis_anchor_weight * pelvis_w_p
-                            * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
+                            pelvis_w_p * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
                         )
-                    # Roll/pitch tilt term replaces full pelvis orientation tracking.
+                    # Roll/pitch tilt term replaces full pelvis orientation tracking
+                    # (yaw-free) in BOTH modes.
                     if w_r > 0:
                         r0, A = pelvis_tilt_residual(self, q, R_Bref)
                         obj_terms.append(w_r * cp.sum_squares(A @ dqa - r0))
                 else:
-                    # Joint orientation re-based by the current pelvis (pelvis-relative).
-                    # R_t_rebased = R_B0 @ R_Bref^{-1} @ R_t tracks the joint
-                    # orientation in world frame under the current pelvis yaw.
+                    # Joint orientation target. Inertia mode: re-based by the current
+                    # pelvis (R_B0 @ R_Bref^{-1} @ R_t), so the joint tracks under the
+                    # robot's free pelvis yaw. Non-inertia: the world-frame target R_t
+                    # directly (GMR-like). Joint position tracking is dropped in both;
+                    # positions emerge from the orientation constraints.
                     if w_r > 0:
-                        R_t_rebased = R_B0 @ R_Bref.T @ R_t
+                        R_target = R_B0 @ R_Bref.T @ R_t if self.inertia_mode else R_t
                         R_c = self.body_rotation(q, body)
-                        e = Rotation.from_matrix(R_c.T @ R_t_rebased).as_rotvec()
+                        e = Rotation.from_matrix(R_c.T @ R_target).as_rotvec()
                         Jr_body = R_c.T @ Jr
                         obj_terms.append(w_r * cp.sum_squares(Jr_body @ dqa - e))
-                    # Joint position tracking intentionally dropped: positions
-                    # emerge from the orientation constraints.
 
         constraints = [cp.SOC(self.step_size, dqa)]
         if self.activate_joint_limits:

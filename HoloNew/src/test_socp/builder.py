@@ -77,6 +77,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["sigma_Vdot"] = sc.sigma_Vdot
     kwargs["activate_style"] = sc.activate_style
     kwargs["pelvis_anchor_weight"] = sc.pelvis_anchor_weight
+    kwargs["inertia_mode"] = sc.inertia_mode
     kwargs["activate_centroidal"] = sc.activate_centroidal
     kwargs["lambda_c"] = sc.lambda_c
     kwargs["lambda_c_pos"] = sc.lambda_c_pos
