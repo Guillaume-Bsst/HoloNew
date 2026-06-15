@@ -187,6 +187,84 @@ def test_floor_d_term_lifts_point_below_floor():
     assert np.all(dz > 0), f"floor D term pushes penetrating points DOWN: dz={dz}"
 
 
+class _PenetratingSDF:
+    """Stub object SDF whose every query point is inside the surface (d0 < 0).
+
+    direction is the surface->point unit normal, which for a penetrating point
+    points INWARD (-grad). Used to exercise the object D term's signed-distance
+    gradient handling without needing a geometric penetration to occur.
+    """
+    def __init__(self, normal_local, d0):
+        self.normal = np.asarray(normal_local, dtype=np.float64)
+        self.d0 = float(d0)
+
+    def query(self, pts_local, margin):
+        from HoloNew.src.test_socp.contact.contact_field import ContactField
+        n = len(pts_local)
+        direction = np.tile(self.normal, (n, 1))
+        distance = np.full(n, self.d0, dtype=np.float64)
+        witness = pts_local.astype(np.float64) - self.d0 * direction
+        active = np.ones(n, dtype=bool)
+        return ContactField(distance=distance, direction=direction,
+                            witness=witness, active=active)
+
+
+def test_object_d_term_pushes_penetrating_point_outward():
+    """Regression: the object D term must push a point INSIDE the object OUTWARD.
+
+    fobj.direction is surface->point, which points inward (-grad) for a penetrating
+    point. The D linearization must use the signed-distance gradient g = sign(d0)*n0
+    so that a point inside the object is pulled out toward d_ref instead of driven
+    deeper. With non-penetration off this is the same runaway failure mode as the
+    floor channel.
+    """
+    import cvxpy as cp
+    rt = _rt()
+    if rt.correspondence is None:
+        pytest.skip("assets not present")
+    from HoloNew.src.test_socp.interaction import (
+        build_dx_terms, robot_control_points, _robj_from_pose)
+
+    rt.lambda_d = 1.0
+    # Identity object pose => object-local frame == world frame (Robj = I).
+    obj_pose = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+    normal_local = np.array([0.0, 0.0, 1.0])   # surface->point (inward for d0 < 0)
+    d0 = -0.2
+    rt.object_sdf = _PenetratingSDF(normal_local, d0)
+
+    # Inject controlled source references: object active (d_ref small), floor
+    # inactive (d_ref >= margin) so only the object D channel contributes.
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L = rt.smplx_ground_probe.margin
+    rt._frame_ref_cache = {0: (
+        np.full(M, 0.05),            # d_obj_ref: active, and d_ref - d0 = 0.25 > 0
+        np.zeros((M, 3)),            # x_obj_ref (unused: lambda_x = 0)
+        np.full(M, L),               # d_flr_ref: alpha = 0 -> floor channel empty
+        np.zeros((M, 3)),            # x_flr_ref
+        np.zeros((M, 3)),            # p_ref
+    )}
+
+    q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
+    dqa = cp.Variable(rt.nv_a)
+    terms = build_dx_terms(rt, q_pin, dqa, 0, obj_pose, lambda_d=1.0, lambda_x=0.0)
+    assert terms, "expected active object D terms"
+    prob = cp.Problem(cp.Minimize(cp.sum(terms) + 1e-6 * cp.sum_squares(dqa)),
+                      [cp.SOC(0.2, dqa)])
+    prob.solve(solver=cp.CLARABEL)
+    assert prob.status in ("optimal", "optimal_inaccurate")
+
+    # True outward (signed-distance) gradient, recomputed independently here.
+    g_true = np.sign(d0) * normal_local        # = -normal_local for d0 < 0
+    Robj = _robj_from_pose(obj_pose)            # identity
+    link_names = [corr.link_names[corr.link_idx[i]] for i in range(M)]
+    jacs = [J[:, rt.v_a_indices]
+            for J in rt.pin.point_jacobians(q_pin, link_names, corr.offset_local)]
+    # Predicted change in signed distance for each point: g_true . (Jloc @ dqa).
+    dd = np.array([g_true @ (Robj.T @ J @ dqa.value) for J in jacs])
+    assert np.all(dd > 0), f"object D term drives penetrating points INWARD: dd={dd}"
+
+
 # ---------------------------------------------------------------------------
 # Task 5: P (contact persistence) term
 # ---------------------------------------------------------------------------

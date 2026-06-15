@@ -367,13 +367,22 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
         if dxi is not None:
             Bobj_i = Robj.T @ np.hstack([I3, -_skew(P[i])])  # (3, 6)
 
-        # D: sqrt(lambda_d * w) * n0^T Jloc  vs  sqrt(lambda_d * w) * (d_ref - d0)
+        # D: sqrt(lambda_d * w) * g^T Jloc  vs  sqrt(lambda_d * w) * (d_ref - d0)
+        # n0 = fobj.direction is the surface->point unit vector, which points
+        # INWARD (-grad) for a penetrating point (d0 < 0). The gradient of the
+        # SIGNED distance is g = sign(d0) * n0 (outward everywhere): for a point
+        # inside the object this flips n0 so the D term still pulls the point OUT
+        # toward d_ref instead of driving it deeper (same failure mode as the
+        # floor channel below). Outside the surface (d0 >= 0) g == n0, so the
+        # hard-non-penetration regime is unchanged. X is unaffected (Pi0 is
+        # invariant to the sign of n0).
         if lambda_d > 0:
+            g = float(np.sign(d0)) * n0       # signed-distance gradient (object-local)
             sw = float(np.sqrt(lambda_d * w))
-            A_d_obj_rows.append(sw * (n0 @ Jloc))             # (nv_a,)
+            A_d_obj_rows.append(sw * (g @ Jloc))              # (nv_a,)
             c_d_obj_rows.append(sw * float(d_obj_ref[i] - d0))
             if dxi is not None:
-                Adxi_d_rows.append(sw * (n0 @ Bobj_i))        # (6,)
+                Adxi_d_rows.append(sw * (g @ Bobj_i))         # (6,)
 
         # X: sqrt(lambda_x * w) * Pi0 Jloc  vs  sqrt(lambda_x * w) * Pi0(x_ref - x0)
         if lambda_x > 0:
