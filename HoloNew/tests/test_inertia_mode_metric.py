@@ -19,8 +19,8 @@ Observed (sub3_largebox_003, object_interaction, 30 frames, lambda_c=1e-5):
 import numpy as np
 import pytest
 from HoloNew.examples.robot_retarget import RetargetingConfig
-from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+from HoloNew.tests.paper_placement import paper_placement_config
 from HoloNew.src.test_socp.tables import IK_MATCH_TABLE1, ROBOT_ROOT_NAME
 from HoloNew.src.test_socp.targets import ground_frame_targets
 from HoloNew.src.test_socp.interaction import (
@@ -64,7 +64,7 @@ def _foot_slip_mm(rt, qpos, n):
 def test_inertia_mode_largebox_coherent_placement():
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="object_interaction", task_name="sub3_largebox_003",
-        data_format="smplh", retargeter=TestSocpRetargeterConfig(inertia_mode=True)))
+        data_format="smplh", retargeter=paper_placement_config()))
     if rt.correspondence is None:
         pytest.skip("assets not present")
     res = rt.retarget(max_frames=N)

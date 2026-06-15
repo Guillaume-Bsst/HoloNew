@@ -16,6 +16,7 @@ import pytest
 from HoloNew.examples.robot_retarget import RetargetingConfig
 from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+from HoloNew.tests.paper_placement import PAPER_PLACEMENT
 
 
 def _make(**kw):
@@ -26,7 +27,7 @@ def _make(**kw):
 
 def test_inertia_bundle_object_placed_by_contacts():
     """Inertia bundle drops the object anchor and turns on object<->floor."""
-    rt = _make(inertia_mode=True)
+    rt = _make(**PAPER_PLACEMENT)
     if rt.correspondence is None:
         pytest.skip("assets not present")
     assert rt.lambda_o_pos == 0.0, "inertia mode must drop the object position anchor"
@@ -37,7 +38,7 @@ def test_inertia_bundle_object_placed_by_contacts():
 def test_object_floor_term_assembles_finite():
     """build_object_floor_terms returns finite cvxpy terms at a test dxi."""
     from HoloNew.src.test_socp.movable import build_object_floor_terms
-    rt = _make(inertia_mode=True)
+    rt = _make(**PAPER_PLACEMENT)
     if rt.object_surface_local is None:
         pytest.skip("object surface not present")
     dxi = cp.Variable(6)
@@ -53,7 +54,7 @@ def test_object_floor_term_assembles_finite():
 
 def test_object_stays_near_reference_via_floor_contact():
     """With the floor term and NO anchor, the solved object stays near reference."""
-    rt = _make(inertia_mode=True)
+    rt = _make(**PAPER_PLACEMENT)
     if rt.correspondence is None:
         pytest.skip("assets not present")
     res = rt.retarget(max_frames=30)

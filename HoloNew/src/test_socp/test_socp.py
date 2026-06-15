@@ -64,6 +64,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         q_a_init_idx: int = -7,
         activate_joint_limits: bool = True,
         step_size: float = 0.2,
+        n_iter_first: int = 50,
+        n_iter_per_frame: int = 10,
+        iterate_step_tol: float = 0.01,
         activate_obj_non_penetration: bool = False,
         activate_self_collision: bool = False,
         activate_foot_sticking: bool = False,
@@ -78,9 +81,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         lambda_r: float = 0.0,
         sigma_qddot: float = 1.0,
         sigma_Vdot: float = 1.0,
+        activate_pos_tracking: bool = True,
+        activate_rot_tracking: bool = True,
         activate_style: bool = False,
         pelvis_anchor_weight: float = 1.0,
-        inertia_mode: bool = False,
+        style_pelvis_relative: bool = False,
         activate_centroidal: bool = False,
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
@@ -117,9 +122,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.task_constants = task_constants
         self.activate_joint_limits = activate_joint_limits
         self.step_size = step_size
+        # SQP inner iterations per pass: more on the first frame (cold start), fewer after.
+        self.n_iter_first = n_iter_first
+        self.n_iter_per_frame = n_iter_per_frame
         # SQP inner-loop early-stop: break when the actuated step norm falls below
         # this (catches passes plateauing at the trust-region boundary). 0 disables.
-        self._iterate_step_tol = 0.01
+        self._iterate_step_tol = iterate_step_tol
         self.visualize = False
         self.demo_joints = task_constants.DEMO_JOINTS
 
@@ -259,15 +267,19 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.sigma_qddot = sigma_qddot
         self.sigma_Vdot = sigma_Vdot
 
+        # GMR base tracking: per-point position / orientation cost (weights from the
+        # IK match tables). Toggle each channel on/off; the table values still apply.
+        self.activate_pos_tracking = activate_pos_tracking
+        self.activate_rot_tracking = activate_rot_tracking
         # Brick 3 — Pelvis-relative Style objective (default off; parity preserved).
         self.activate_style = activate_style
         self.pelvis_anchor_weight = pelvis_anchor_weight
-        # Inertia mode gates the Style objective's reference frame: True keeps the
-        # pelvis-relative joint orientations + weak pelvis position scaffold (paper
-        # placement); False makes the joint orientations world-frame and the pelvis
-        # position a full world target (GMR-like), while keeping the yaw-free pelvis
-        # tilt and the dropped joint-position terms.
-        self.inertia_mode = inertia_mode
+        # style_pelvis_relative gates the Style objective's reference frame (only used
+        # when activate_style is True): True keeps the pelvis-relative joint orientations
+        # + weak pelvis position scaffold (paper placement); False makes the joint
+        # orientations world-frame and the pelvis position a full world target (GMR-like),
+        # while keeping the yaw-free pelvis tilt and the dropped joint-position terms.
+        self.style_pelvis_relative = style_pelvis_relative
 
         # Brick 4 — Centroidal W^c / W^c_pos / W^L (default off; parity preserved).
         self.activate_centroidal = activate_centroidal
@@ -430,13 +442,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 body = self.robot_link_names[frame]
                 Jp, Jr = self._body_jac(q, body)
 
-                if w_p > 0:
+                if self.activate_pos_tracking and w_p > 0:
                     p_c = self.body_position(q, body)
                     obj_terms.append(
                         w_p * cp.sum_squares(Jp @ dqa - (p_t - p_c))
                     )
 
-                if w_r > 0:
+                if self.activate_rot_tracking and w_r > 0:
                     R_c = self.body_rotation(q, body)
                     # Orientation error in body frame; body-frame angular Jacobian.
                     # Convention (b): body-frame Jacobian = R_c.T @ Jr,
@@ -469,35 +481,35 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 body = self.robot_link_names[frame]
                 Jp, Jr = self._body_jac(q, body)
                 if body == pelvis_body:
-                    # Pelvis position. Inertia mode: weak scaffold (keeps the pelvis from
-                    # drifting; paw=0 there drops it entirely, the body being placed by
-                    # contacts). Non-inertia: full world-position target like GMR (weight
-                    # w_p, no anchor multiplier).
-                    if self.inertia_mode:
-                        if pelvis_w_p > 0 and self.pelvis_anchor_weight > 0:
-                            p_c = self.body_position(q, body)
-                            obj_terms.append(
-                                self.pelvis_anchor_weight * pelvis_w_p
-                                * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
-                            )
-                    elif pelvis_w_p > 0:
+                    # Pelvis position. Pelvis-relative Style: weak scaffold (keeps the
+                    # pelvis from drifting; paw=0 there drops it entirely, the body being
+                    # placed by contacts). World Style: full world-position target like
+                    # GMR (weight w_p, no anchor multiplier).
+                    if self.activate_pos_tracking and pelvis_w_p > 0:
                         p_c = self.body_position(q, body)
-                        obj_terms.append(
-                            pelvis_w_p * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
-                        )
+                        if self.style_pelvis_relative:
+                            if self.pelvis_anchor_weight > 0:
+                                obj_terms.append(
+                                    self.pelvis_anchor_weight * pelvis_w_p
+                                    * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
+                                )
+                        else:
+                            obj_terms.append(
+                                pelvis_w_p * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
+                            )
                     # Roll/pitch tilt term replaces full pelvis orientation tracking
                     # (yaw-free) in BOTH modes.
-                    if w_r > 0:
+                    if self.activate_rot_tracking and w_r > 0:
                         r0, A = pelvis_tilt_residual(self, q, R_Bref)
                         obj_terms.append(w_r * cp.sum_squares(A @ dqa - r0))
                 else:
-                    # Joint orientation target. Inertia mode: re-based by the current
-                    # pelvis (R_B0 @ R_Bref^{-1} @ R_t), so the joint tracks under the
-                    # robot's free pelvis yaw. Non-inertia: the world-frame target R_t
+                    # Joint orientation target. Pelvis-relative Style: re-based by the
+                    # current pelvis (R_B0 @ R_Bref^{-1} @ R_t), so the joint tracks under
+                    # the robot's free pelvis yaw. World Style: the world-frame target R_t
                     # directly (GMR-like). Joint position tracking is dropped in both;
                     # positions emerge from the orientation constraints.
-                    if w_r > 0:
-                        R_target = R_B0 @ R_Bref.T @ R_t if self.inertia_mode else R_t
+                    if self.activate_rot_tracking and w_r > 0:
+                        R_target = R_B0 @ R_Bref.T @ R_t if self.style_pelvis_relative else R_t
                         R_c = self.body_rotation(q, body)
                         e = Rotation.from_matrix(R_c.T @ R_target).as_rotvec()
                         Jr_body = R_c.T @ Jr
@@ -1016,14 +1028,15 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             # Object history for W^o.
             _vdot_ref_obj_t = _vdot_ref_obj_all[t]
             _omega_ref_obj_t = _omega_ref_obj_all[t]
-            q, _, _solved_obj1 = self.iterate(q, q, q_prev, tg1, n_iter=(50 if t == 0 else 10),
+            _n_iter = self.n_iter_first if t == 0 else self.n_iter_per_frame
+            q, _, _solved_obj1 = self.iterate(q, q, q_prev, tg1, n_iter=_n_iter,
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
                                 c_ref=_c_ref_t,
                                 obj_pose_tm1=_obj_prev, obj_pose_tm2=_obj_prev2,
                                 vdot_ref_obj=_vdot_ref_obj_t, omega_ref_obj=_omega_ref_obj_t)
-            q, _, _solved_obj2 = self.iterate(q, q, q_prev, tg2, n_iter=(50 if t == 0 else 10),
+            q, _, _solved_obj2 = self.iterate(q, q, q_prev, tg2, n_iter=_n_iter,
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,

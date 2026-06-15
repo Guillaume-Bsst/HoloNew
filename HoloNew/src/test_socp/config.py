@@ -1,9 +1,23 @@
-"""TEST-SOCP-specific retargeter config.
+"""TEST-SOCP retargeter config.
 
-Subclasses holosoma's RetargeterConfig but defaults the holosoma-style optional
-constraints OFF. These constraints are opt-in for TEST-SOCP: pass this config with
-the relevant flag set to True (e.g. TestSocpRetargeterConfig(activate_obj_non_penetration=True))
-to enable them. With the defaults below the solve is identical to the plain TEST-SOCP solve.
+Flat and explicit: every field maps 1:1 to one solver effect. The builder passes them
+through unchanged (no hidden presets/rewrites); illegal combinations raise a ValueError
+in from_config instead of being silently fixed.
+
+Defaults are the GMR BASELINE: the bare GMR-SOCP objective (world-frame position +
+orientation tracking of every mapped body) + joint limits, nothing else. Add the TEST
+bricks back one at a time via the switches below. Re-enable hints (tuned value):
+    Style objective        activate_style=True (+ style_pelvis_relative)
+    Interaction D / X      lambda_D / lambda_X  = 20.0
+    Temporal W^r           lambda_r             = 0.2
+    Persistence (no-slip)  activate_persistence=True
+    Movable W^o            activate_movable=True
+    W^o position anchor    lambda_o_pos         = 10.0
+    Centroidal W^c / W^L   activate_centroidal=True
+    Floor contact entity   floor_as_entity=True
+    Object<->floor contact lambda_object_floor  = 5.0
+The old `inertia_mode` preset is gone; for paper-faithful placement set those fields
+explicitly (see tests/paper_placement.py).
 """
 from __future__ import annotations
 
@@ -14,226 +28,96 @@ from HoloNew.config_types.retargeter import RetargeterConfig
 
 @dataclass(frozen=True)
 class TestSocpRetargeterConfig(RetargeterConfig):
-    """RetargeterConfig with holosoma-style constraints defaulting OFF for TEST-SOCP.
+    # --- Solve mechanics. fps -> frame timestep dt=1/fps (used by every temporal term).
+    # n_iter_first / n_iter_per_frame: SQP inner iterations on the first frame vs the rest
+    # (per pass). iterate_step_tol: early-stop when the actuated step norm drops below it
+    # (0 disables). (step_size, penetration_tolerance, foot_sticking_tolerance are inherited
+    # from RetargeterConfig.)
+    fps: float = 30.0
+    n_iter_first: int = 50
+    n_iter_per_frame: int = 10
+    iterate_step_tol: float = 0.01
 
-    The activate_* flags are gates: setting one to True is necessary but not sufficient.
-    ``activate_self_collision=True`` only takes effect when paired with
-    ``self_collision=SelfCollisionConfig(enable=True, pairs=[...])``.  Likewise,
-    ``activate_foot_sticking`` requires populated foot-sticking sequences and
-    ``foot_lock=FootLockConfig(enable=True, ...)`` to do anything.
-    """
-
-    # ---------------------------------------------------------------------------
-    # GMR BASELINE (2026-06-15). The defaults below strip TEST-SOCP down to the bare
-    # GMR-SOCP objective: world-frame position + orientation tracking of every mapped
-    # body (activate_style=False) plus joint limits, and NOTHING else. Every TEST brick
-    # defaults OFF so we can add them back one at a time and see which one breaks the
-    # motion. Re-enable a brick by flipping its switch (tuned values kept in the
-    # comments below):
-    #   Style (pelvis-relative / world hybrid) : activate_style=True (+ inertia_mode)
-    #   Interaction D / X                      : lambda_D / lambda_X  (e.g. 20.0)
-    #   Temporal W^r                           : lambda_r             (e.g. 0.2)
-    #   Persistence no-slip (hard)             : activate_persistence=True
-    #   Movable W^o (accel/vel)                : activate_movable=True
-    #   Movable W^o position anchor            : lambda_o_pos         (e.g. 10.0)
-    #   Centroidal W^c / W^L                   : activate_centroidal=True (+ lambdas)
-    #   Inertia-mode bundle                    : inertia_mode=True
-    # ---------------------------------------------------------------------------
+    # --- Constraints (opt-in; a True flag needs its companion config to do anything) ---
     activate_obj_non_penetration: bool = False
     activate_foot_sticking: bool = False
     activate_self_collision: bool = False
+    # With non-penetration on + a real object: True = object<->robot non-pen (full object
+    # geometry); False = ground non-pen only (plain model, what D/X interaction wants).
+    load_object_scene: bool = True
 
-    # World placement applied inside the preprocess scale stage, independently for the
-    # robot root and the object, in XY and Z. Each is a multiplier on the RAW grounded
-    # axis (1.0 = raw; <1 pulls toward the origin / floor like holosoma). None means the
-    # native morphological scaling (HUMAN_SCALE_TABLE[root]*height_ratio) for that axis.
-    # TEST defaults: only the robot base Z is scaled (None = native morphological, exactly
-    # like GMR), so the robot sits at its own height; everything else stays RAW (1.0) -
-    # robot XY at the raw grounded pelvis and the object at its native XY/Z, so the GMR
-    # targets, the object, and the SmplxGroundProbe contact field share one world frame
-    # (see the lambda_D/X note below). Body proportions (pelvis-local) are unaffected.
+    # --- World placement (preprocess scale stage), per axis, multiplier on raw grounded.
+    # 1.0 = raw; None = native morphological scaling. Default: only robot Z is scaled
+    # (None, like GMR); robot XY + object XY/Z stay raw so all share one world frame.
     scale_xy_robot: float = 1.0
     scale_z_robot: float | None = None
     scale_xy_object: float = 1.0
     scale_z_object: float = 1.0
 
-    # Interaction cost weights. D (normal proximity) + X (tangential placement)
-    # are enabled by default on object tasks; robot_only (no object SDF) is
-    # unchanged. The interaction costs REQUIRE the non-penetration constraint to
-    # be stable — from_config auto-enables ground non-penetration when interaction
-    # is active on an object task (without it the D term marches the floating base
-    # through the floor).
-    #
-    # Weights jointly re-tuned. The interaction must outweigh the other objective
-    # terms (Style + W^r + persistence + movable) to actually reduce the contact
-    # gap. Re-tuned again 2026-06-14 from 5.0 to 20.0 after removing the holosoma
-    # root-XY scale (scale_xy_robot=1.0): aligning the GMR targets to
-    # the raw pelvis XY (so targets and interaction fields share one world frame)
-    # shifted the contact geometry, and the old lambda=5 no longer beat D/X off.
-    # Sweep on sub3_largebox_003 (K=30, aligned frame), object mean contact gap:
-    #   lambda=0  (off): 0.0323
-    #   lambda=5:        0.0344   (worse than off)
-    #   lambda=10:       0.0344
-    #   lambda=20:       0.0276   <-- chosen (clear win, moderate weight)
-    #   lambda=50:       0.0235   (best, but aggressive)
-    # lambda=20 cuts the OBJECT (manipulation) contact gap ~15% below D/X off — D/X's
-    # primary job. The FLOOR channel is owned by the persistence no-slip hard
-    # constraint, so the acceptance metric tracks the object gap.
-    #
-    # P (contact persistence / no-slip): the SOFT cost form (lambda_P>0) is kept for
-    # reference but defaults OFF. It renormalizes the persistence residual by the field
-    # range L^2 (same scale as X — see interaction.build_p_terms; a deliberate divergence
-    # from the paper's (sigma_v*dt)^2 which is ~3600x larger and wrecks conditioning).
-    # Even at the L^2 scale its hundreds of near-parallel per-point rows make CLARABEL
-    # fail intermittently mid-clip, forcing a ~3x-slower SCS fallback. The no-slip
-    # behaviour is instead delivered by the HARD tangential band constraint
-    # (activate_persistence, below), which is both fast and tight — prefer it. sigma_v
-    # is kept for API compatibility and is unused by the hard constraint.
-    lambda_D: float = 0.0      # GMR baseline: off (tuned 20.0 — see note above)
-    lambda_X: float = 0.0      # GMR baseline: off (tuned 20.0)
-    lambda_P: float = 0.0
-    sigma_v: float = 0.05
+    # --- GMR base tracking: the per-point position (w_p) / orientation (w_r) cost, with
+    # the weight VALUES read from IK_MATCH_TABLE1/2 (unchanged). These toggle each channel
+    # on/off globally; the table values still apply when on. On by default (core objective).
+    activate_pos_tracking: bool = True
+    activate_rot_tracking: bool = True
 
-    # Object-surface non-penetration (paper's d_{i,j} >= 0 for the object entity).
-    # The D cost only discourages penetration softly; this adds the HARD inequality
-    # so robot control points cannot pass through the object surface. Implemented and
-    # validated (deepest penetration on sub3_largebox_003 cut -32.5 -> -10.3 mm), but
-    # it defaults OFF because it is SLOW: the many near-surface inequalities make
-    # CLARABEL fail and fall back to SCS (~13-26 s/frame vs ~1.1 baseline). Same
-    # speed/conditioning tradeoff as the soft P cost — kept as an explicit opt-in,
-    # not on by default. tol is the allowed signed-distance floor.
-    activate_obj_surface_nonpen: bool = False
-    obj_surface_nonpen_tol: float = 0.005
+    # --- Tracking objective. activate_style swaps plain world-frame tracking for the
+    # Style objective (pelvis orientation = roll/pitch tilt only; joint positions dropped).
+    # style_pelvis_relative (only when activate_style): True = joint orientations re-based
+    # by the current pelvis + weak pelvis scaffold (pelvis_anchor_weight*w_p); False = joint
+    # orientations in world frame + full world pelvis position (GMR-like).
+    activate_style: bool = False
+    style_pelvis_relative: bool = False
+    pelvis_anchor_weight: float = 10.0
 
-    # Temporal regularization (W^r): penalizes tangent-space acceleration across
-    # consecutive frames. sigma_qddot / sigma_Vdot set the per-DOF noise scale
-    # for joints and base, respectively (same units as temporal.py).
-    #
-    # Defaults tuned 2026-06-13 (Brick 2) on robot_only sub3_largebox_003 (K=30):
-    #   off (lambda_r=0): mean joint jerk=0.003640, pelvis track=0.040 m
-    #   on  (0.2/20/20):  mean joint jerk=0.002990 (−17.9 %), track=0.049 m (+0.009 m)
-    # Jerk is reduced without meaningful tracking degradation (< 0.01 m slack).
-    lambda_r: float = 0.0      # GMR baseline: off (tuned 0.2 — see note above)
+    # --- Temporal regularization W^r (tangent-space acceleration). sigma_* = per-DOF
+    # noise scale for joints / base. Only active when lambda_r > 0.
+    lambda_r: float = 0.0
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
 
-    # Brick 3 — Pelvis-relative Style objective.
-    # Enabled by default after validation (2026-06-13): 30-frame robot_only solve
-    # shows pelvis-relative fidelity 0.60 rad vs 0.82 rad for world tracking
-    # (~27 % improvement) and pelvis z in [0.562, 0.800] m — clean, no collapse.
-    # When on, joint orientation targets are re-based by the current pelvis,
-    # the pelvis orientation term becomes a roll/pitch-only tilt, joint position
-    # terms are dropped, and a position scaffold keeps the base on the reference path.
-    # pelvis_anchor_weight scales the scaffold relative to w_p.  Style frees the
-    # pelvis ORIENTATION (yaw), not its position; the scaffold must be strong enough
-    # to prevent the base from drifting off the reference trajectory.  Sweep on
-    # sub3_largebox_003 (30 frames): paw=1 → mean xy-drift 0.243 m (too much),
-    # paw=10 → mean xy-drift ~0.09 m, well within tolerance.
-    activate_style: bool = False   # GMR baseline: off (pure world-frame tracking = GMR)
-    pelvis_anchor_weight: float = 10.0
+    # --- Interaction costs. D = normal proximity, X = tangential placement (require an
+    # object/floor entity + non-penetration). lambda_P = soft persistence (prefer the hard
+    # activate_persistence instead). sigma_v: unused by the hard constraint (API compat).
+    lambda_D: float = 0.0
+    lambda_X: float = 0.0
+    lambda_P: float = 0.0
+    sigma_v: float = 0.05
 
-    # Brick 4 — Centroidal W^c (CoM acceleration) + W^c_pos (CoM position) + W^L.
-    # Default OFF (activate_centroidal=False, lambdas=0): solve is bit-exact with
-    # Brick 3 baseline. Enable only if validated stable (Task 4).
-    # When on, up to three quadratic terms are added per frame (frame_idx >= 2 for
-    # W^c and W^L; W^c_pos fires from frame 0 as it needs no prior CoM history):
-    #   W^c     = lambda_c     * ||c_ddot - c_ddot_ref||^2  (CoM accel tracking)
-    #   W^c_pos = lambda_c_pos * ||c - c_ref||^2             (CoM position anchor)
-    #   W^L     = lambda_L     * ||L||^2                     (angular momentum -> 0)
-    # W^c_pos anchors the absolute CoM to the reference pelvis trajectory, curing
-    # the constant-velocity drift that W^c (second difference only) cannot prevent.
+    # --- Object-surface non-penetration (hard d_ij >= 0 on the object). Off: SLOW (SCS
+    # fallback ~13-26 s/frame). tol = allowed signed-distance floor.
+    activate_obj_surface_nonpen: bool = False
+    obj_surface_nonpen_tol: float = 0.005
+
+    # --- Centroidal terms (frame >= 2 for W^c/W^L; W^c_pos from frame 0):
+    #   W^c = lambda_c * ||c_ddot - c_ddot_ref||^2   (CoM accel)
+    #   W^c_pos = lambda_c_pos * ||c - c_ref||^2      (CoM position anchor)
+    #   W^L = lambda_L * ||L||^2                      (angular momentum -> 0)
     activate_centroidal: bool = False
     lambda_c: float = 0.0
     lambda_c_pos: float = 0.0
     lambda_L: float = 0.0
 
-    # W^L reference tracking (opt-in). The default W^L (lambda_L) drives the angular
-    # momentum toward 0; the paper tracks the reference momentum L_ref. When
-    # track_L_ref is True, a lumped orbital angular momentum (robot link masses at
-    # the 14 mapped bodies) is built for BOTH the reference (from the GMR target
-    # trajectory) and the current config (linearized in dqa), and W^L tracks
-    # ||L_lumped - L_ref||^2 with weight lambda_L_track. This matters mainly in
-    # flight (in stance L is dominated by contacts); validated on aerial SFU clips.
-    # Default off so the grounded pipeline is unchanged. See centroidal.py.
+    # W^L reference tracking: track the reference momentum L_ref instead of driving L->0
+    # (matters in flight). lambda_L_track weights ||L_lumped - L_ref||^2.
     track_L_ref: bool = False
-    # Tuned on SFU 0007_Cartwheel001 (60 frames): solved-vs-reference angular-momentum
-    # correlation off=-0.03 (Style ignores the aerial spin) -> w=1: 0.76, w=5: 0.97,
-    # w=20: 1.00. w=5 reproduces the reference spin cleanly without over-constraining.
     lambda_L_track: float = 5.0
 
-    # Inertia mode (paper-faithful body placement). When True, from_config applies
-    # a bundle: floor_as_entity=True, pelvis_anchor_weight=0, lambda_c_pos=0,
-    # activate_centroidal=True with weak lambda_c/lambda_L. The body is placed by
-    # contacts (feet pinned to the permanent floor entity) and a weak W^c filling
-    # the residual/flight, with NO positional pelvis/CoM target. Default off so the
-    # parity/golden tests stay bit-exact. See docs/specs/2026-06-14-inertia-mode-design.md.
-    # It ALSO gates the Style objective's reference frame (activate_style=True):
-    #   - inertia_mode=True  -> joint orientations re-based by the current pelvis
-    #     (pelvis-relative) + weak pelvis position scaffold (paper placement).
-    #   - inertia_mode=False -> joint orientations in WORLD frame + full world-position
-    #     pelvis target (GMR-like), keeping the yaw-free pelvis tilt and dropped joint
-    #     positions. So without inertia mode the Style solve tracks like GMR.
-    inertia_mode: bool = False
-    # floor_as_entity: load the floor interaction channel (correspondence + ground
-    # probe + floor field) for ANY task, not only object tasks. Turned on by
-    # inertia_mode; kept separable for testing.
+    # --- Floor as a contact entity for ANY task (not just object tasks), so D/X and the
+    # object<->floor contact can act on the floor. Requires activate_obj_non_penetration.
     floor_as_entity: bool = False
 
-    # Brick 1 — Contact persistence as a hard tangential band constraint.
-    # Enabled by default after validation (2026-06-14): 30-frame object_interaction
-    # sub3_largebox_003 with persistence_tol=0.005 (5 mm) shows:
-    #   mean tangential slip: 5.09 mm (vs 74.25 mm without constraint; 14.6x tighter)
-    #   runtime: ~1.55x baseline (vs ~3x for soft lambda_P cost with SCS fallback)
-    #   SCS fallbacks: 0 (CLARABEL handles all frames at tol=5 mm)
-    #   all 30 frames finite; no infeasible solves
-    # The hard band Aproj_k @ dqa in [bproj_k - tol, bproj_k + tol] (one per
-    # carrier/link) replaces hundreds of near-parallel per-point soft rows that
-    # wrecked CLARABEL's conditioning. robot_only (no object_sdf) has the flag
-    # forced off by from_config, so its solve is bit-exact with the parity baseline.
-    # persistence_tol: band half-width in metres (5 mm validated; raise to 1 cm if
-    # a task geometry makes the 5 mm band infeasible).
-    activate_persistence: bool = False   # GMR baseline: off (was on)
+    # --- Contact persistence: hard tangential no-slip band. persistence_tol = band
+    # half-width (m). Needs an object/floor entity.
+    activate_persistence: bool = False
     persistence_tol: float = 0.005
 
-    # Brick 5 — Movable entities W^o (object motion regularization).
-    # Enabled by default after validation (2026-06-14): 30-frame object_interaction
-    # sub3_largebox_003 with lambda_o=1.0/lambda_omega=1.0 shows:
-    #   mean solved-object position error vs reference: 0.0004 m (< 0.15 m limit)
-    #   mean contact gap |d_robot - d_ref|: 0.07183 m (vs 0.07202 m off; slightly better)
-    #   pelvis z in [0.360, 0.812] m; all qpos finite; runtime ~1.1 s/frame.
-    # The object stays tightly near its reference trajectory (W^o regularization)
-    # while the bilateral D/X coupling keeps contact tracking at least as good.
-    # robot_only has no object (obj_pose is None) so its solve is structurally
-    # unaffected; the parity test (test_test_socp_parity.py) remains bit-exact.
-    # Only active on object tasks (obj_pose is not None) from frame_idx >= 2.
-    #   W^o = lambda_o     * ||vdot_obj - vdot_ref||^2  (linear acceleration tracking)
-    #         + lambda_omega * ||omega_obj - omega_ref||^2  (angular velocity tracking)
-    activate_movable: bool = False   # GMR baseline: off (was on)
+    # --- Movable object W^o (object tasks only): regularize the object's motion.
+    #   lambda_o * ||vdot_obj - vdot_ref||^2 + lambda_omega * ||omega_obj - omega_ref||^2
+    # lambda_o_pos: absolute object-position anchor to the reference path (analogue of
+    # lambda_c_pos). lambda_object_floor: place the object by its floor contact instead
+    # of a positional anchor (paper's object-environment pair).
+    activate_movable: bool = False
     lambda_o: float = 1.0
     lambda_omega: float = 1.0
-    # W^o position anchor. W^o (lambda_o/lambda_omega) regularizes only the
-    # object's acceleration/velocity, which is invariant to a constant position
-    # offset, so with the bilateral D/X coupling free to move the object the
-    # solved object pose drifts in absolute position while still matching the
-    # reference acceleration (the same position-blindness as centroidal W^c).
-    # This anchor pins the absolute object position to the reference path. It is
-    # the object analogue of lambda_c_pos. Tuned 2026-06-14 by sweep on
-    # sub3_largebox_003 (30 frames, all bricks on incl. persistence):
-    #   lambda_o_pos=0:   obj err mean=267.6 mm, contact gap=75.59 mm
-    #   lambda_o_pos=1:   obj err mean=  0.8 mm, contact gap=54.37 mm
-    #   lambda_o_pos=10:  obj err mean=  0.5 mm, contact gap=54.34 mm  <-- chosen
-    #   lambda_o_pos>=50: saturated (no further change).
-    # The anchor not only removes the drift but IMPROVES contact tracking (the gap
-    # was previously measured against a drifted object pose). 10.0 sits safely in
-    # the saturated regime. The persistence hard constraint pins the robot's
-    # contact points, so without this anchor the bilateral D/X coupling offsets
-    # the (position-blind) object instead; this term resolves that coupling.
-    lambda_o_pos: float = 0.0   # GMR baseline: off (tuned 10.0 — see note above)
-    # Object<->floor contact (the paper's object-environment pair). Places the
-    # object by its floor contact instead of a positional target: object surface
-    # points carried by T_obj query the floor field, resisting any motion that
-    # breaks the near-floor contact, and vanishing when the object is lifted (then
-    # the object is free, placed by object<->robot contact + ballistic W^o). Used
-    # by inertia_mode, which sets lambda_o_pos=0 (drop the anchor) and this > 0 so
-    # the object, like the body, is placed by contacts. Default off (parity).
+    lambda_o_pos: float = 0.0
     lambda_object_floor: float = 0.0

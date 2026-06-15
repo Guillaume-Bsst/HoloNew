@@ -11,8 +11,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 from HoloNew.examples.robot_retarget import RetargetingConfig
-from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+from HoloNew.tests.paper_placement import paper_placement_config
 from HoloNew.src.test_socp.interaction import (
     robot_control_points, query_entities, frame_references, _activation)
 
@@ -36,7 +36,7 @@ def test_inertia_jump_contacts_and_ballistic():
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="robot_only", task_name="0005_2FeetJump001",
         data_format="smplx", data_path=_CLIP.parent,
-        retargeter=TestSocpRetargeterConfig(inertia_mode=True, lambda_c=1e-3)))
+        retargeter=paper_placement_config(lambda_c=1e-3)))
     assert rt.smplx_ground_probe is not None and rt.smplx_ground_probe.smpl_order
     res = rt.retarget(max_frames=100)
     assert np.all(np.isfinite(res.qpos)), "non-finite qpos on the jump clip"

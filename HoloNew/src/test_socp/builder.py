@@ -75,9 +75,11 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["lambda_r"] = sc.lambda_r
     kwargs["sigma_qddot"] = sc.sigma_qddot
     kwargs["sigma_Vdot"] = sc.sigma_Vdot
+    kwargs["activate_pos_tracking"] = sc.activate_pos_tracking
+    kwargs["activate_rot_tracking"] = sc.activate_rot_tracking
     kwargs["activate_style"] = sc.activate_style
     kwargs["pelvis_anchor_weight"] = sc.pelvis_anchor_weight
-    kwargs["inertia_mode"] = sc.inertia_mode
+    kwargs["style_pelvis_relative"] = sc.style_pelvis_relative
     kwargs["activate_centroidal"] = sc.activate_centroidal
     kwargs["lambda_c"] = sc.lambda_c
     kwargs["lambda_c_pos"] = sc.lambda_c_pos
@@ -93,54 +95,35 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["obj_surface_nonpen_tol"] = sc.obj_surface_nonpen_tol
     kwargs["activate_persistence"] = sc.activate_persistence
     kwargs["persistence_tol"] = sc.persistence_tol
-    # The interaction costs require the non-penetration constraint to stay
-    # stable (the paper's optimization has both: the costs + d_ij >= 0).
-    # Without it the D term marches the floating base through the floor.
-    # Couple them: when interaction is active on an object task, enable
-    # non-penetration. robot_only (object_name "ground", no object SDF) keeps
-    # interaction and non-penetration both off, so its solve is unchanged.
-    # The bundled object SDF / correspondence assets load regardless of task,
-    # so gate interaction on the task actually having an object: robot_only /
-    # ground tasks keep the interaction weights at 0 (default solve unchanged,
-    # parity preserved). Object tasks keep the weights and couple the ground
-    # non-penetration constraint that keeps the D term stable (the paper's
-    # optimization has both costs + d_ij >= 0).
-    # Inertia mode bundle: paper-faithful placement (see design doc).
-    if sc.inertia_mode:
-        kwargs["floor_as_entity"] = True
-        kwargs["pelvis_anchor_weight"] = 0.0
-        kwargs["lambda_c_pos"] = 0.0
-        kwargs["activate_centroidal"] = True
-        # Weak W^c / W^L so contacts place the body and W^c only fills the
-        # residual/flight. Provisional weights; tuned in a follow-up task.
-        kwargs["lambda_c"] = sc.lambda_c if sc.lambda_c > 0 else 1e-5
-        kwargs["lambda_L"] = sc.lambda_L if sc.lambda_L > 0 else 1e-4
-        # The OBJECT, like the body, is placed by contacts: drop the position
-        # anchor and place it by object<->floor + object<->robot contacts.
-        kwargs["lambda_o_pos"] = 0.0
-        kwargs["lambda_object_floor"] = (
-            sc.lambda_object_floor if sc.lambda_object_floor > 0 else 5.0)
-        # NOTE: track_L_ref (paper W^L = track reference momentum) is NOT bundled.
-        # The rotation-tuned weight (lambda_L_track=5, validated on the cartwheel)
-        # over-constrains dynamic VERTICAL motion — it suppresses the leg
-        # extension on jump clips, killing the jump. The right weight is
-        # clip-dependent (strong for aerial spin, off/weak for vertical jumps), so
-        # track_L_ref stays an explicit opt-in rather than a fixed bundle weight.
-    else:
-        kwargs["floor_as_entity"] = sc.floor_as_entity
+    kwargs["n_iter_first"] = sc.n_iter_first
+    kwargs["n_iter_per_frame"] = sc.n_iter_per_frame
+    kwargs["iterate_step_tol"] = sc.iterate_step_tol
+    # Floor-as-entity and object-scene loading pass straight through, like every other
+    # field: the builder applies NO hidden rewrites or presets. Illegal combinations are
+    # rejected below with a clear error instead of being silently "fixed".
+    kwargs["floor_as_entity"] = sc.floor_as_entity
+    kwargs["load_object_scene"] = sc.load_object_scene
 
+    # Explicit validation of the two physical couplings the solve needs.
     _obj_name = getattr(constants, "OBJECT_NAME", "ground")
-    _floor_entity = kwargs.get("floor_as_entity", False)
-    if _obj_name in (None, "ground") and not _floor_entity:
-        kwargs["lambda_D"] = 0.0
-        kwargs["lambda_X"] = 0.0
-        kwargs["lambda_P"] = 0.0
-        # Persistence constraint requires an object SDF; inert for robot_only.
-        # Force off so the solve is structurally unchanged (parity bit-exact).
-        kwargs["activate_persistence"] = False
-    elif sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0 or sc.activate_persistence or _floor_entity:
-        kwargs["activate_obj_non_penetration"] = True
-        kwargs["load_object_scene"] = False  # ground non-pen only; plain model
+    _has_object = _obj_name not in (None, "ground")
+    _interaction = (sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0
+                    or sc.activate_persistence)
+    # 1) Interaction needs a contact entity to act on (an object SDF or the floor).
+    if _interaction and not (_has_object or sc.floor_as_entity):
+        raise ValueError(
+            "TEST-SOCP config: interaction is on (lambda_D / lambda_X / lambda_P > 0 or "
+            "activate_persistence) but the task has no object and floor_as_entity is "
+            "False. Use an object task or set floor_as_entity=True.")
+    # 2) Any contact-pushing term needs the non-penetration constraint, or the D term
+    #    drives the floating base through the floor (the paper pairs the costs with the
+    #    d_ij >= 0 constraint).
+    if (_interaction or sc.floor_as_entity or sc.lambda_object_floor > 0) \
+            and not sc.activate_obj_non_penetration:
+        raise ValueError(
+            "TEST-SOCP config: interaction / floor_as_entity / lambda_object_floor > 0 "
+            "require activate_obj_non_penetration=True (without it the D term drives the "
+            "floating base through the floor).")
     rt = cls(**kwargs)
 
     # Load raw joint positions + per-joint quaternions. Two sources:
@@ -232,10 +215,8 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # and D/X interaction terms. None until the object SDF block loads them.
     rt._obj_poses_raw = None
 
-    # Frame time step for the P persistence cost: OMOMO is captured at 30 fps.
-    # If the motion config exposes a frame rate attribute, use it; otherwise
-    # fall back to 1/30 with a comment so the value is traceable here.
-    rt._dt = 1.0 / 30.0  # OMOMO dataset frame rate: 30 fps
+    # Frame time step for every temporal term, from the config fps (OMOMO is 30 fps).
+    rt._dt = 1.0 / sc.fps
 
     # Precompute the lumped reference angular momentum L_ref(t) for W^L tracking
     # (opt-in). Built from the GMR target mapped-body trajectory + robot link
