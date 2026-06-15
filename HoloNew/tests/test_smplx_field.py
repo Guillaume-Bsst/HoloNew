@@ -8,7 +8,8 @@ class _FakeBody:
     def __init__(self):
         self.calls = []
 
-    def placed_points(self, quats_wxyz, pelvis_target, cache, frame_idx=None):
+    def placed_points(self, quats_wxyz, pelvis_target, cache, frame_idx=None,
+                     smpl_order=False):
         self.calls.append((frame_idx, np.asarray(pelvis_target, float).copy()))
         return (np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]) + np.asarray(pelvis_target, float))
 
@@ -39,7 +40,7 @@ def test_probe_places_then_queries_in_object_local_frame():
     expected_local = world - trans[1]            # identity rot -> world_to_local subtracts trans[t]
     np.testing.assert_allclose(sdf.last[0], expected_local, atol=1e-6)
     assert sdf.last[1] == 0.1                     # margin forwarded
-    assert out == "FIELD"                         # ContactField returned as-is
+    assert out.field == "FIELD"                   # SDF ContactField carried on the ProbeFrame
     assert body.calls[-1][0] == 1                 # frame_idx forwarded to placed_points
 
 
