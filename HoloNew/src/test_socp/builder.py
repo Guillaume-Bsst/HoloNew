@@ -206,18 +206,25 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     else:
         toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
     rt.gmr_grounded = ground_to_floor(raw_joints, toe_indices)
-    # Place the GMR base via sc.scale_xy_robot / sc.scale_z_robot (TEST defaults: XY
-    # 1.0 = RAW grounded pelvis, Z None = native morphological scaling), NOT holosoma's
-    # globally-scaled placement. Holosoma pulls the root toward the world centre by
-    # ROBOT_HEIGHT/human_height (~0.68), shifting the base ~0.3 m toward the origin. The
-    # contact references (SmplxGroundProbe) place the human at the raw grounded pelvis,
-    # so a <1 XY scale would put the GMR targets and the contact field in inconsistent
-    # world frames (~raw_xy*(1-scale) apart); 1.0 keeps both at raw_xy so they agree.
-    # The placement is applied inside scale(); proportions and the Z floor-drop are
-    # unaffected. The object is placed independently below (scale_xy/z_object).
+    # Robot-root placement (config §0). Each axis: None -> AUTO = the per-clip
+    # ROBOT_HEIGHT / human_height (computed, not hardcoded), which puts the root at the
+    # robot's own height; a float = explicit multiplier on the raw grounded axis. TEST
+    # defaults: XY 1.0 (raw, so the GMR targets and the SmplxGroundProbe contact field
+    # share one world frame), Z None (auto). Placement is applied inside scale();
+    # proportions and the Z floor-drop are unaffected.
+    from HoloNew.src.holosoma.preprocess import calculate_scale_factor
+    _robot_h = constants.ROBOT_HEIGHT
+    if data_format == "smplx":
+        smpl_scale = _robot_h / float(_smplx_height)
+    else:
+        try:
+            smpl_scale = calculate_scale_factor(cfg.task_name, _robot_h)
+        except Exception:  # noqa: BLE001 - height table may lack this subject
+            smpl_scale = _robot_h / (cfg.motion_data_config.default_human_height or 1.78)
+    _rob_xy = sc.scale_xy_robot if sc.scale_xy_robot is not None else smpl_scale
+    _rob_z = sc.scale_z_robot if sc.scale_z_robot is not None else smpl_scale
     rt.gmr_stages = compute_stages(
-        rt.gmr_grounded, human_quat,
-        scale_xy=sc.scale_xy_robot, scale_z=sc.scale_z_robot,
+        rt.gmr_grounded, human_quat, scale_xy=_rob_xy, scale_z=_rob_z,
     )
     rt.gmr_ground = rt.gmr_stages["ground"]
     ground = rt.gmr_ground

@@ -21,24 +21,21 @@ from dataclasses import dataclass
 
 from HoloNew.config_types.retargeter import RetargeterConfig
 
-# SMPL -> robot morphological scale: the human is ~0.9x the robot along the body axes
-# (the pelvis entry of HUMAN_SCALE_TABLE). Used as the robot base Z placement default;
-# made explicit here instead of being hidden behind a None -> table lookup.
-SMPL_MORPHOLOGICAL_SCALE = 0.9
-
 
 @dataclass(frozen=True)
 class TestSocpRetargeterConfig(RetargeterConfig):
     # =====================================================================
     # §0 — PREPROCESS (world placement, applied in the scale stage upstream of the solve)
-    # Per axis, an EXPLICIT multiplier on the raw grounded value (no hidden None/native):
-    #   1.0                      = raw (keep the grounded value)
-    #   SMPL_MORPHOLOGICAL_SCALE = the SMPL->robot morphological scale (0.9)
-    # Default: robot base Z uses the morphological scale (the robot sits at its own
-    # height); robot XY + object XY/Z stay raw, so everything shares one world frame.
+    # Robot-root placement, per axis:
+    #   None  -> AUTO: from_config computes ROBOT_HEIGHT / human_height (per clip), the
+    #            physically-correct scale that puts the robot root at its own height.
+    #            Nothing hardcoded — the height comes from the clip + the robot model.
+    #   float -> explicit multiplier on the raw grounded axis (1.0 = raw).
+    # Default: robot base Z auto (None); robot XY raw (1.0) so the GMR targets and the
+    # contact field share one world frame. The object stays raw (handled separately).
     # =====================================================================
-    scale_xy_robot: float = 1.0
-    scale_z_robot: float = SMPL_MORPHOLOGICAL_SCALE
+    scale_xy_robot: float | None = 1.0
+    scale_z_robot: float | None = None
     scale_xy_object: float = 1.0
     scale_z_object: float = 1.0
 
