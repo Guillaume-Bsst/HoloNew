@@ -24,6 +24,7 @@ import pytest
 from HoloNew.examples.robot_retarget import RetargetingConfig
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+from HoloNew.evaluation.metrics import compute_smoothness
 
 # Tuned values — record here so the assertion parameters are traceable.
 _TUNED_LR = 0.2
@@ -44,8 +45,10 @@ def _solve(lr, sq, sV, K=_K):
                                             sigma_qddot=sq, sigma_Vdot=sV,
                                             activate_ws=False)))
     res = rt.retarget(max_frames=K)
-    # Mean absolute third finite difference of joint angles (columns 7: = actuated joints).
-    jerk = float(np.mean(np.abs(np.diff(res.qpos[:, 7:], n=3, axis=0))))
+    # Mean absolute third finite difference of joint angles (shared scoreboard metric;
+    # joint_jerk_meanabs is dt-independent, so the value matches the old inline formula).
+    dof = res.qpos.shape[1] - 7
+    jerk = compute_smoothness(res.qpos, dof, dt=1.0 / 30.0)["joint_jerk_meanabs"]
     # Mean pelvis (body 0) position error against the GMR ground target.
     track = float(np.mean(np.linalg.norm(res.qpos[:, 0:3] - rt.gmr_ground["pos"][:K, 0], axis=1)))
     return jerk, track

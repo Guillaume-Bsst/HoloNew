@@ -38,6 +38,7 @@ import pytest
 from HoloNew.examples.robot_retarget import RetargetingConfig
 from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+from HoloNew.evaluation.metrics import compute_dynamics
 
 MAX_FRAMES = 30
 TASK_TYPE = "robot_only"
@@ -84,14 +85,9 @@ def _com_accel_error(rt: TestSocpRetargeter, qpos: np.ndarray) -> float:
         rt.pin.com(rt.pin.qpos_mj_to_q_pin(qpos[t, :36]))
         for t in range(T)
     ])
-    gpos = rt.gmr_ground["pos"][:T, 0, :]   # (T, 3) reference pelvis
-    dt = rt._dt
-    errors = []
-    for t in range(2, T):
-        cddot_ref = (gpos[t] - 2.0 * gpos[t - 1] + gpos[t - 2]) / dt ** 2
-        cddot_solved = (coms[t] - 2.0 * coms[t - 1] + coms[t - 2]) / dt ** 2
-        errors.append(float(np.linalg.norm(cddot_solved - cddot_ref)))
-    return float(np.mean(errors))
+    gpos = rt.gmr_ground["pos"][:T, 0, :]   # (T, 3) reference pelvis (CoM proxy)
+    # Shared scoreboard metric: identical 2nd-difference definition as the old loop.
+    return compute_dynamics(coms, gpos, rt._dt)["com_accel_err"]
 
 
 def test_centroidal_reduces_com_accel_error_and_pelvis_sane():
