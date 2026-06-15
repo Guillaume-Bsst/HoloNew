@@ -63,10 +63,13 @@ in flight automatically).
 of `T` LBS forward evaluations at the **grounded** pose; negligible, and **zero per-iteration
 solve cost**.
 
-**Mass model (fixed from the rest pose, mass-conserving):** each mesh triangle gets a constant
-mass from its **rest-pose** tetrahedron volume (triangle → origin, uniform density). We then
-track the **posed triangle centroid** `p_e(t)` per frame. This conserves mass per material
-element and avoids the vertex-density bias (hands/face) a naive per-vertex average would have.
+**Mass model (fixed from the rest pose, mass-conserving):** each mesh triangle is a point mass
+at its centroid, with a constant mass `m_e` = its **rest-pose triangle area** (uniform surface
+density). We then track the **posed triangle centroid** `p_e(t)` per frame. Each triangle is a
+conserved material patch (mass fixed from rest), which avoids the signed-volume fragility of an
+origin-apex tetrahedron decomposition and the vertex-density bias (hands/face) of a naive
+per-vertex average. A uniform-density shell is an adequate proxy for the *effective* rotation
+rate `ω` (and the CoM trajectory) this soft target needs.
 
 Per frame `t`, from posed centroids `p_e(t)` and masses `m_e`:
 

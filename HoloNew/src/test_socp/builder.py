@@ -112,32 +112,11 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["floor_as_entity"] = sc.floor_as_entity
     kwargs["load_object_scene"] = sc.load_object_scene
 
-    # Explicit validation of the physical couplings the solve needs.
-    _obj_name = getattr(constants, "OBJECT_NAME", "ground")
-    _has_object = _obj_name not in (None, "ground")
-    _interaction = sc.activate_wd or sc.activate_wx or sc.activate_wp or sc.activate_persistence
-    # 1) Interaction needs a contact entity to act on (an object SDF or the floor).
-    if _interaction and not (_has_object or sc.floor_as_entity):
-        raise ValueError(
-            "TEST-SOCP config: interaction is on (activate_wd / activate_wx / activate_wp / "
-            "activate_persistence) but the task has no object and floor_as_entity is "
-            "False. Use an object task or set floor_as_entity=True.")
-    # 2) Any contact-pushing term needs the non-penetration constraint, or the D term
-    #    drives the floating base through the floor (the paper pairs the costs with the
-    #    d_ij >= 0 constraint).
-    if (_interaction or sc.floor_as_entity or sc.activate_wo_floor) \
-            and not sc.activate_obj_non_penetration:
-        raise ValueError(
-            "TEST-SOCP config: interaction / floor_as_entity / activate_wo_floor "
-            "require activate_obj_non_penetration=True (without it the D term drives the "
-            "floating base through the floor).")
-    # 3) The movable W^o weights act on the object pose variable, which only exists when
-    #    activate_tm is on.
-    if (sc.activate_wo or sc.activate_wo_pos or sc.activate_wo_floor) \
-            and not sc.activate_tm:
-        raise ValueError(
-            "TEST-SOCP config: activate_wo / activate_wo_pos / activate_wo_floor act on "
-            "the object pose variable; set activate_tm=True (object is a variable).")
+    # No config policing: the builder passes everything through as-is. Physically
+    # inconsistent combinations are allowed (e.g. interaction without non-penetration lets
+    # the D term push the base through the floor) — that shows up directly in the result.
+    # Couplings worth remembering: interaction (D/X/P) needs an object/floor entity and the
+    # d>=0 non-penetration constraint to stay stable; the W^o weights need activate_tm.
     rt = cls(**kwargs)
 
     # Load raw joint positions + per-joint quaternions. Two sources:

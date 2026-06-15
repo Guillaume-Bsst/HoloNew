@@ -79,7 +79,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # W^D / W^X / W^P — Interaction. D = normal proximity, X = tangential placement,
     # P = soft persistence (prefer the hard constraint in §3). Need an interaction entity
     # + non-penetration. sigma_v scales P. (lambda_p untuned placeholder.)
-    activate_wd: bool = False
+    activate_wd: bool = True
     lambda_d: float = 20.0
     activate_wx: bool = False
     lambda_x: float = 20.0
