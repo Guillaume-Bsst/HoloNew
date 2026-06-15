@@ -210,25 +210,25 @@ def test_bilateral_dx_object_channel_numpy_equivalence():
                  f"numpy={gt:.6g}"))
 
 
-def test_movable_default_on_and_stays_finite():
-    """activate_movable=True by default (enabled after 2026-06-14 validation).
-
-    The default TestSocpRetargeterConfig has activate_movable=True, lambda_o=1.0,
-    lambda_omega=1.0. The solve must stay finite and the object must not drift.
+def test_movable_when_enabled_stays_finite():
+    """W^o is opt-in: activate_movable (object variable) + activate_wo (the W^o cost).
+    The solve must stay finite and the object must not drift from the reference.
     """
     import pytest
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="object_interaction",
         task_name="sub3_largebox_003",
         data_format="smplh",
+        retargeter=TestSocpRetargeterConfig(activate_movable=True, activate_wo=True),
     ))
     if rt.correspondence is None or rt.object_sdf is None:
         pytest.skip("contact assets not present")
 
-    # Default: movable is on (enabled after validation).
+    # W^o on with its tuned weights.
     assert rt.activate_movable is True
     assert rt.lambda_o == 1.0
     assert rt.lambda_omega == 1.0

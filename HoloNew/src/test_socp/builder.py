@@ -68,11 +68,14 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["activate_obj_non_penetration"] = sc.activate_obj_non_penetration
     kwargs["activate_foot_sticking"] = sc.activate_foot_sticking
     kwargs["activate_self_collision"] = sc.activate_self_collision
-    kwargs["lambda_D"] = sc.lambda_D
-    kwargs["lambda_X"] = sc.lambda_X
-    kwargs["lambda_P"] = sc.lambda_P
+    # Each cost term has its own activate_* switch (config §3): the switch alone decides,
+    # so resolve the EFFECTIVE weight here (tuned value when on, 0 when off) and feed the
+    # solver, whose gating stays the simple "weight > 0". One flag per weight.
+    kwargs["lambda_D"] = sc.lambda_D if sc.activate_d else 0.0
+    kwargs["lambda_X"] = sc.lambda_X if sc.activate_x else 0.0
+    kwargs["lambda_P"] = sc.lambda_P if sc.activate_p else 0.0
     kwargs["sigma_v"] = sc.sigma_v
-    kwargs["lambda_r"] = sc.lambda_r
+    kwargs["lambda_r"] = sc.lambda_r if sc.activate_wr else 0.0
     kwargs["sigma_qddot"] = sc.sigma_qddot
     kwargs["sigma_Vdot"] = sc.sigma_Vdot
     kwargs["activate_pos_tracking"] = sc.activate_pos_tracking
@@ -80,17 +83,20 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["activate_style"] = sc.activate_style
     kwargs["pelvis_anchor_weight"] = sc.pelvis_anchor_weight
     kwargs["style_pelvis_relative"] = sc.style_pelvis_relative
-    kwargs["activate_centroidal"] = sc.activate_centroidal
-    kwargs["lambda_c"] = sc.lambda_c
-    kwargs["lambda_c_pos"] = sc.lambda_c_pos
-    kwargs["lambda_L"] = sc.lambda_L
+    # Centroidal: one switch per term; the solver's master activate_centroidal is the OR.
+    kwargs["activate_centroidal"] = sc.activate_wc or sc.activate_wc_pos or sc.activate_wl
+    kwargs["lambda_c"] = sc.lambda_c if sc.activate_wc else 0.0
+    kwargs["lambda_c_pos"] = sc.lambda_c_pos if sc.activate_wc_pos else 0.0
+    kwargs["lambda_L"] = sc.lambda_L if sc.activate_wl else 0.0
     kwargs["track_L_ref"] = sc.track_L_ref
     kwargs["lambda_L_track"] = sc.lambda_L_track
+    # Movable: activate_movable (§1) makes the object a variable; the three W^o weights
+    # are each switched independently.
     kwargs["activate_movable"] = sc.activate_movable
-    kwargs["lambda_o"] = sc.lambda_o
-    kwargs["lambda_omega"] = sc.lambda_omega
-    kwargs["lambda_o_pos"] = sc.lambda_o_pos
-    kwargs["lambda_object_floor"] = sc.lambda_object_floor
+    kwargs["lambda_o"] = sc.lambda_o if sc.activate_wo else 0.0
+    kwargs["lambda_omega"] = sc.lambda_omega if sc.activate_wo else 0.0
+    kwargs["lambda_o_pos"] = sc.lambda_o_pos if sc.activate_o_pos else 0.0
+    kwargs["lambda_object_floor"] = sc.lambda_object_floor if sc.activate_object_floor else 0.0
     kwargs["activate_obj_surface_nonpen"] = sc.activate_obj_surface_nonpen
     kwargs["obj_surface_nonpen_tol"] = sc.obj_surface_nonpen_tol
     kwargs["activate_persistence"] = sc.activate_persistence
@@ -104,26 +110,32 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["floor_as_entity"] = sc.floor_as_entity
     kwargs["load_object_scene"] = sc.load_object_scene
 
-    # Explicit validation of the two physical couplings the solve needs.
+    # Explicit validation of the physical couplings the solve needs.
     _obj_name = getattr(constants, "OBJECT_NAME", "ground")
     _has_object = _obj_name not in (None, "ground")
-    _interaction = (sc.lambda_D > 0 or sc.lambda_X > 0 or sc.lambda_P > 0
-                    or sc.activate_persistence)
+    _interaction = sc.activate_d or sc.activate_x or sc.activate_p or sc.activate_persistence
     # 1) Interaction needs a contact entity to act on (an object SDF or the floor).
     if _interaction and not (_has_object or sc.floor_as_entity):
         raise ValueError(
-            "TEST-SOCP config: interaction is on (lambda_D / lambda_X / lambda_P > 0 or "
+            "TEST-SOCP config: interaction is on (activate_d / activate_x / activate_p / "
             "activate_persistence) but the task has no object and floor_as_entity is "
             "False. Use an object task or set floor_as_entity=True.")
     # 2) Any contact-pushing term needs the non-penetration constraint, or the D term
     #    drives the floating base through the floor (the paper pairs the costs with the
     #    d_ij >= 0 constraint).
-    if (_interaction or sc.floor_as_entity or sc.lambda_object_floor > 0) \
+    if (_interaction or sc.floor_as_entity or sc.activate_object_floor) \
             and not sc.activate_obj_non_penetration:
         raise ValueError(
-            "TEST-SOCP config: interaction / floor_as_entity / lambda_object_floor > 0 "
+            "TEST-SOCP config: interaction / floor_as_entity / activate_object_floor "
             "require activate_obj_non_penetration=True (without it the D term drives the "
             "floating base through the floor).")
+    # 3) The movable W^o weights act on the object pose variable, which only exists when
+    #    activate_movable is on.
+    if (sc.activate_wo or sc.activate_o_pos or sc.activate_object_floor) \
+            and not sc.activate_movable:
+        raise ValueError(
+            "TEST-SOCP config: activate_wo / activate_o_pos / activate_object_floor act on "
+            "the object pose variable; set activate_movable=True (object is a variable).")
     rt = cls(**kwargs)
 
     # Load raw joint positions + per-joint quaternions. Two sources:

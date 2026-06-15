@@ -40,7 +40,8 @@ def _solve(lr, sq, sV, K=_K):
     # snapshot + the full-clip finiteness checks.
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh",
-        retargeter=TestSocpRetargeterConfig(lambda_r=lr, sigma_qddot=sq, sigma_Vdot=sV,
+        retargeter=TestSocpRetargeterConfig(activate_wr=lr > 0, lambda_r=lr,
+                                            sigma_qddot=sq, sigma_Vdot=sV,
                                             activate_style=False)))
     res = rt.retarget(max_frames=K)
     # Mean absolute third finite difference of joint angles (columns 7: = actuated joints).

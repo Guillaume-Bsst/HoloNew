@@ -58,9 +58,13 @@ def _make_rt(activate_centroidal: bool, lambda_c: float, lambda_c_pos: float,
         task_name=TASK_NAME,
         data_format=DATA_FORMAT,
         retargeter=TestSocpRetargeterConfig(
-            activate_centroidal=activate_centroidal,
+            # Per-weight switches (config §3): enable each centroidal term whose weight
+            # the caller set > 0 (the old single activate_centroidal master is gone).
+            activate_wc=activate_centroidal and lambda_c > 0,
             lambda_c=lambda_c,
+            activate_wc_pos=activate_centroidal and lambda_c_pos > 0,
             lambda_c_pos=lambda_c_pos,
+            activate_wl=activate_centroidal and lambda_L > 0,
             lambda_L=lambda_L,
             pelvis_anchor_weight=pelvis_anchor_weight,
             activate_style=True,   # keep default; isolates centroidal effect

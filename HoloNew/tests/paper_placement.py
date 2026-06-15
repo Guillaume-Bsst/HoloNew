@@ -12,20 +12,22 @@ Use ``paper_placement_config(**overrides)`` in tests instead of the old flag.
 """
 from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 
-# Effective fields of the old inertia_mode bundle + the bricks it relied on.
+# Explicit switches of the old inertia_mode bundle + the bricks it relied on. The cost
+# weights themselves default to their tuned values (config §3), so only the switches and
+# the pelvis scaffold weight are set here. The position anchors (W^c_pos, W^o_pos) stay
+# OFF: the body and object are placed by contacts.
 PAPER_PLACEMENT = dict(
     # Style objective, pelvis-relative frame (the paper-placement frame).
     activate_style=True, style_pelvis_relative=True, pelvis_anchor_weight=0.0,
-    # Contact terms that actually place the body/feet.
-    lambda_D=20.0, lambda_X=20.0, activate_persistence=True,
-    lambda_r=0.2,
+    # Contact terms that place the body/feet + temporal regularization.
+    activate_d=True, activate_x=True, activate_persistence=True, activate_wr=True,
     # Movable object, placed by contacts (no position anchor).
-    activate_movable=True, lambda_o=1.0, lambda_omega=1.0, lambda_o_pos=0.0,
+    activate_movable=True, activate_wo=True,
     # Weak centroidal W^c / W^L fills the residual / flight.
-    activate_centroidal=True, lambda_c=1e-5, lambda_c_pos=0.0, lambda_L=1e-4,
+    activate_wc=True, activate_wl=True,
     # Floor as a contact entity + object<->floor contact, with the required
-    # non-penetration constraint (now enforced explicitly in from_config).
-    floor_as_entity=True, lambda_object_floor=5.0, activate_obj_non_penetration=True,
+    # non-penetration constraint (enforced in from_config).
+    floor_as_entity=True, activate_object_floor=True, activate_obj_non_penetration=True,
 )
 
 

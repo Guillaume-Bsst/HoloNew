@@ -46,15 +46,16 @@ def _mean_object_gap(rt, res):
 
 
 def test_dx_reduces_object_contact_gap():
-    # ON: default config (lambda_D=lambda_X=5.0, ground non-penetration coupled).
+    # ON: D/X enabled (tuned weights) with the required non-penetration constraint.
     rt_on = TestSocpRetargeter.from_config(RetargetingConfig(
-        task_type="object_interaction", task_name="sub3_largebox_003", data_format="smplh"))
+        task_type="object_interaction", task_name="sub3_largebox_003", data_format="smplh",
+        retargeter=TestSocpRetargeterConfig(
+            activate_d=True, activate_x=True, activate_obj_non_penetration=True)))
     if rt_on.correspondence is None or rt_on.object_sdf is None:
         pytest.skip("correspondence/object_sdf assets not present")
-    # OFF: interaction weights zeroed (persistence/movable defaults unchanged).
+    # OFF: interaction switches off (the GMR baseline default).
     rt_off = TestSocpRetargeter.from_config(RetargetingConfig(
-        task_type="object_interaction", task_name="sub3_largebox_003", data_format="smplh",
-        retargeter=TestSocpRetargeterConfig(lambda_D=0.0, lambda_X=0.0, lambda_P=0.0)))
+        task_type="object_interaction", task_name="sub3_largebox_003", data_format="smplh"))
 
     # Use a window that includes the manipulation phase: on sub3_largebox_003 the
     # hands engage the box only after ~frame 9, so a short window (e.g. K=8) can

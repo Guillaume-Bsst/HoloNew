@@ -49,6 +49,8 @@ def _build_rt(activate_movable, lambda_o=0.0, lambda_omega=0.0):
         data_format="smplh",
         retargeter=TestSocpRetargeterConfig(
             activate_movable=activate_movable,
+            # W^o is switched by activate_wo now; enable it when a weight was set.
+            activate_wo=activate_movable and (lambda_o > 0 or lambda_omega > 0),
             lambda_o=lambda_o,
             lambda_omega=lambda_omega,
         ),
