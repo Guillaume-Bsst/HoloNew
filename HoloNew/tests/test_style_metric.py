@@ -16,10 +16,12 @@ where
     R_tilde_k     = R_B^{-1} @ R_k     (solved pelvis-relative joint orientation)
     R_tilde_k_ref = R_B_ref^{-1} @ R_k_ref  (reference pelvis-relative joint orientation)
 
-Observed numbers (recorded 2026-06-13, sub3_largebox_003, robot_only, smplh, 30 frames):
-    Style pelvis-relative fidelity : 0.6003 rad
-    World pelvis-relative fidelity : 0.8180 rad  (Style is ~27 % better)
-    Pelvis z range (30 frames)     : [0.562, 0.800] m  (well within [0.4, 1.0])
+Observed numbers (recorded 2026-06-15, sub3_largebox_003, robot_only, smplh, 30 frames,
+style_pelvis_relative=True pinned — see _make_rt):
+    Style pelvis-relative fidelity : 0.4177 rad
+    World pelvis-relative fidelity : 0.6994 rad  (Style is ~40 % better)
+    For reference, Style with style_pelvis_relative=False (the current config default,
+    no re-basing) gives 0.9646 rad — worse than world: re-basing is what makes Style help.
 
 Base-xy drift (recorded 2026-06-14, sub3_largebox_003, object_interaction, smplh,
     30 frames, pelvis_anchor_weight=10.0):
@@ -44,77 +46,46 @@ DATA_FORMAT = "smplh"
 
 
 def _make_rt(activate_ws: bool) -> TestSocpRetargeter:
+    # Pin style_pelvis_relative=True: this test validates the *pelvis-relative*
+    # Style objective. The config default flipped to False (GMR baseline) after this
+    # test was written, which exercises the non-re-basing Style variant that does NOT
+    # improve pelvis-relative fidelity — so the feature must be pinned on here.
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
     cfg = RetargetingConfig(
         task_type=TASK_TYPE,
         task_name=TASK_NAME,
         data_format=DATA_FORMAT,
+        retargeter=TestSocpRetargeterConfig(activate_ws=activate_ws,
+                                            style_pelvis_relative=True),
     )
-    rt = TestSocpRetargeter.from_config(cfg)
-    rt.activate_ws = activate_ws
-    return rt
+    return TestSocpRetargeter.from_config(cfg)
 
 
 def _pelvis_relative_fidelity(rt: TestSocpRetargeter, qpos: np.ndarray) -> float:
-    """Compute mean pelvis-relative orientation error over all tracked non-pelvis
-    bodies and over all solved frames.
+    """Mean pelvis-relative orientation error over tracked non-pelvis bodies/frames.
 
-    For each frame t and each non-pelvis body k:
-        R_tilde_k     = R_B^{-1}     @ R_k       (solved, pelvis-relative)
-        R_tilde_k_ref = R_B_ref^{-1} @ R_k_ref   (reference, pelvis-relative)
-        err_k_t       = || log(R_tilde_k^{-1} @ R_tilde_k_ref) ||  [rad]
-
-    Returns the mean over all (t, k) pairs.
+    Delegates to the shared scoreboard style metric (single source of truth): the
+    reference context supplies the GMR-grounded targets + FK, and compute_style
+    returns the same pelvis-relative geodesic error as the old inline formula.
     """
-    gpos = rt.gmr_ground["pos"]     # (T_full, B, 3)
-    gquat = rt.gmr_ground["quat"]   # (T_full, B, 4) wxyz
+    from HoloNew.evaluation.reference_context import ReferenceContext
+    from HoloNew.evaluation.metrics.style import compute_style
 
+    ctx = ReferenceContext.from_rt(rt)
     T = min(qpos.shape[0], MAX_FRAMES)
-    errors = []
-
-    for t in range(T):
-        # Reconstruct the full config at frame t from the solved qpos row.
-        q = rt.q_init_full.copy()
-        q[:qpos.shape[1]] = qpos[t]
-
-        # Reference targets for this frame.
-        tg = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
-
-        # Pelvis reference and solved rotations.
-        R_B_ref = None
-        R_B_solved = rt.body_rotation(q, ROBOT_ROOT_NAME)
-        for frame, (_, R_t, _, _) in tg.items():
-            if rt.robot_link_names[frame] == ROBOT_ROOT_NAME:
-                R_B_ref = R_t
-                break
-
-        if R_B_ref is None:
-            continue  # pelvis not in table (should not happen)
-
-        for frame, (_, R_t, _, w_r) in tg.items():
-            body = rt.robot_link_names[frame]
-            if body == ROBOT_ROOT_NAME or w_r == 0:
-                continue  # skip pelvis and untracked bodies
-
-            R_k_solved = rt.body_rotation(q, body)
-            # Pelvis-relative orientations.
-            R_tilde_solved = R_B_solved.T @ R_k_solved
-            R_tilde_ref = R_B_ref.T @ R_t
-            # log-map distance (rotvec norm).
-            delta = R_tilde_solved.T @ R_tilde_ref
-            err = np.linalg.norm(Rotation.from_matrix(delta).as_rotvec())
-            errors.append(err)
-
-    return float(np.mean(errors)) if errors else float("nan")
+    rot_m, pos_m = ctx.fk_links(qpos[:T])
+    rot_ref, pos_ref = ctx.reference_RP(T)
+    return compute_style(rot_m, pos_m, rot_ref, pos_ref,
+                         ctx.pelvis_idx, ctx.tracked)["style_orient_err"]
 
 
 def test_style_finite_no_collapse_and_fidelity():
     """Validate activate_ws=True over 30 frames: finite, sane pelvis z,
     comparable pelvis-relative joint fidelity to world-frame tracking.
 
-    Observed on sub3_largebox_003 (2026-06-13):
-        style  pelvis-relative err : 0.6003 rad
-        world  pelvis-relative err : 0.8180 rad  (Style ~27 % better)
-        pelvis z range             : [0.562, 0.800] m
+    Observed on sub3_largebox_003 (2026-06-15, style_pelvis_relative=True):
+        style  pelvis-relative err : 0.4177 rad
+        world  pelvis-relative err : 0.6994 rad  (Style ~40 % better)
     """
     # --- Style solve ---
     rt_style = _make_rt(activate_ws=True)
