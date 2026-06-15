@@ -82,7 +82,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # contact, see activate_obj_floor below). D = normal proximity, X = tangential
     # placement, P = soft persistence (prefer the hard constraint in §3). The robot channel
     # (robot -> {floor, object}) shares lambda_d / lambda_x. sigma_v scales P.
-    activate_wd: bool = True
+    activate_wd: bool = False
     lambda_d: float = 20.0
     activate_wx: bool = False
     lambda_x: float = 20.0
@@ -136,15 +136,21 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # (self_collision, foot_lock, foot_sticking_tolerance are inherited).
     activate_self_collision: bool = False
     activate_foot_sticking: bool = False
+    # non-penetration d_ij >= 0 (signed distance kept above -tolerance). Holosoma-style:
+    # phi comes from MuJoCo collision (mj_collision prefilter + mj_geomDistance) on the
+    # geometries in the loaded model, with our object/ground pair filter on top. Inherited
+    # from RetargeterConfig (penetration_tolerance inherited). Required by the interaction
+    # costs. See load_object_scene below for which geometry MuJoCo measures against.
+    activate_obj_non_penetration: bool = False
     # GMR: actuated joint limits q_a^- <= q_a <= q_a^+.
     activate_joint_limits: bool = True
-    # Our customs: non-penetration d_ij >= 0 (required by the interaction costs;
-    # penetration_tolerance inherited). load_object_scene: with non-pen + a real object,
-    # True = object<->robot non-pen (full geometry), False = ground non-pen only.
-    # activate_obj_surface_nonpen: hard d_ij>=0 on the object surface (SLOW).
+    # Our customs: load_object_scene selects the geometry the Holosoma non-pen measures
+    # against (swaps the loaded xml): with non-pen + a real object, True = object<->robot
+    # non-pen (full geometry from the object-scene xml), False = ground non-pen only.
+    # activate_obj_surface_nonpen: hard d_ij>=0 on the object surface, from the SDF/contact
+    # field (not MuJoCo), the article's d_{i,j} (SLOW).
     # activate_persistence: hard tangential no-slip band (the article's P as a constraint);
     # persistence_tol = band half-width (m). Needs an interaction entity.
-    activate_obj_non_penetration: bool = False
     load_object_scene: bool = True
     activate_obj_surface_nonpen: bool = False
     obj_surface_nonpen_tol: float = 0.005

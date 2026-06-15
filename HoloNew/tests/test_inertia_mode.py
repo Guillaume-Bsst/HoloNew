@@ -20,7 +20,7 @@ def test_default_is_gmr_baseline():
     rt = _robot_only()
     assert rt.activate_ws is False
     assert rt.activate_centroidal is False
-    assert rt.lambda_x == 0.0
+    assert rt.lambda_d == 0.0 and rt.lambda_x == 0.0
 
 
 def test_paper_placement_fields_pass_through():
