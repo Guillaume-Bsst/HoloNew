@@ -112,7 +112,7 @@ class RetargetingEvaluator:
         self.metric_families = (
             metric_families
             if metric_families is not None
-            else {"smoothness", "effort", "tracking", "dynamics"}
+            else {"smoothness", "effort", "tracking", "dynamics", "contacts"}
         )
 
         if self.object_name == "multi_boxes":
@@ -292,7 +292,41 @@ class RetargetingEvaluator:
             ref_com = human_joints[:, pelvis_demo_idx, :]
             out.update(compute_dynamics(coms, ref_com, dt))
 
+        if "contacts" in self.metric_families:
+            out.update(self._floor_contact_metrics(qpos, human_joints))
+
         return out
+
+    _TOE_CANDIDATES = ("L_Toe", "R_Toe", "LeftToeBase", "RightToeBase")
+
+    def _floor_contact_metrics(self, qpos: np.ndarray, human_joints: np.ndarray,
+                              z_thresh: float = 0.05) -> Dict[str, float]:
+        """Floor-channel contact metrics (timing / placement / no-slip).
+
+        Floor is analytic (z=0), so contacts are extractable from positions alone:
+        source contact = SMPL toe near the floor, robot contact = robot foot link near
+        the floor (FK). Placement = |robot foot z|; slip = tangential drift of the foot
+        between consecutive contact frames. Returns {} if no toe joints are mapped.
+        """
+        from HoloNew.evaluation.metrics import compute_contacts
+
+        toes = [t for t in self._TOE_CANDIDATES
+                if t in self.demo_joints and t in self.joints_mapping]
+        if not toes:
+            return {}
+        foot_links = [self.joints_mapping[t] for t in toes]
+        toe_idx = [self.demo_joints.index(t) for t in toes]
+        T = min(qpos.shape[0], human_joints.shape[0])
+        robot_p = np.array([self._get_robot_link_positions(qpos[t], foot_links)
+                            for t in range(T)])          # (T, C, 3)
+        robot_z = robot_p[:, :, 2]                         # (T, C)
+        ref_z = human_joints[:T][:, toe_idx, 2]           # (T, C)
+        robot_contact = robot_z < z_thresh
+        ref_contact = ref_z < z_thresh
+        placement = np.abs(robot_z)
+        slip = np.zeros_like(robot_z)
+        slip[1:] = np.linalg.norm(robot_p[1:, :, :2] - robot_p[:-1, :, :2], axis=-1)
+        return compute_contacts(robot_contact, ref_contact, placement, slip)
 
     def _prefilter_pairs_with_mj_collision(self, threshold: float):
         m, d = self.robot_model, self.robot_data
@@ -829,8 +863,8 @@ class Args:
     object_name: str | None = None
     max_workers: int = 1
     # Scoreboard metric families to compute (comma-separated subset of
-    # smoothness,effort,tracking,dynamics). Empty = none.
-    metrics: str = "smoothness,effort,tracking,dynamics"
+    # smoothness,effort,tracking,dynamics,contacts). Empty = none.
+    metrics: str = "smoothness,effort,tracking,dynamics,contacts"
 
     # Nested configs for overrides
     robot_config: RobotConfig = field(default_factory=lambda: RobotConfig(robot_type="g1"))

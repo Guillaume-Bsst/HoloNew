@@ -48,6 +48,21 @@ def test_scoreboard_metrics_finite_on_real_npz():
     assert 0.0 < m["mpjpe_global"] < 1.0
 
 
+def test_floor_contacts_finite_on_real_npz():
+    if not _NPZ.exists():
+        pytest.skip(f"{_NPZ} not present")
+    d = np.load(_NPZ, allow_pickle=True)
+    m = _evaluator()._floor_contact_metrics(d["qpos"], d["human_joints"])
+    if not m:
+        pytest.skip("no toe joints mapped for this task")
+    for k in ("contact_precision", "contact_recall", "contact_f1",
+              "contact_place_err", "contact_slip_mean"):
+        assert k in m and np.isfinite(m[k]), (k, m)
+    assert 0.0 <= m["contact_f1"] <= 1.0
+    assert m["contact_place_err"] >= 0.0
+    assert m["contact_slip_mean"] >= 0.0
+
+
 def test_metric_family_gating():
     if not _NPZ.exists():
         pytest.skip(f"{_NPZ} not present")
