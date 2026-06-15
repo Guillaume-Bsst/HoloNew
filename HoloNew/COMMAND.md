@@ -29,9 +29,9 @@ The solvers live under `src/`:
 
 | Solver | Folder | Description |
 |--------|--------|-------------|
-| Holosoma native SOCP | `src/holosoma/` | Original interaction-mesh retargeter |
+| Holosoma native SOCP | `src/holosoma/` | Original interaction-mesh (Laplacian) retargeter |
 | GMR-SOCP | `src/gmr_socp/` | Autonomous GMR-SOCP solver, mink-aligned preprocessing |
-| TEST-SOCP | `src/test_socp/` | Second GMR-SOCP variant |
+| TEST-SOCP | `src/test_socp/` | Paper-formulation per-frame SQP: pelvis-relative Style + interaction D/X/P (SDF + OT correspondence) + centroidal W^c/W^L + movable object W^o + inertia mode |
 
 ### Holosoma native — standalone CLI
 
@@ -100,6 +100,28 @@ Constraint applicability:
 | `activate_self_collision` | Any task | Requires `self_collision=SelfCollisionConfig(enable=True, pairs=[...])` to take effect |
 | `foot_lock=FootLockConfig(enable=True, ...)` | `robot_only` and any task with g1 | Independent toggle (gated only by `foot_lock.enable`); pins the foot Z to the floor over the configured frame windows |
 
+#### TEST-SOCP paper-formulation features
+
+Beyond the holosoma-style constraints, TEST-SOCP carries the paper terms. They live
+in `src/test_socp/config.py` and are set on `TestSocpRetargeterConfig`:
+
+| Field (default) | Effect |
+|-----------------|--------|
+| `lambda_D` / `lambda_X` (`20.0`) | interaction distance / cross terms (SDF + OT correspondence) |
+| `lambda_P` (`0.0`) | tangential band constraint is a hard constraint, on by default; this is the soft fallback weight |
+| `inertia_mode` (`False`) / `floor_as_entity` (`False`) | contacts place the body (Style + contacts), weak `W^c` carries the ballistic phase when contacts are few/absent |
+| `track_L_ref` (`False`) / `lambda_L_track` (`5.0`) | track the lumped reference orbital angular momentum `L^ref` (opt-in; can suppress jumps at high weight) |
+| `lambda_object_floor` (`0.0`) | object↔floor contact term (object inertia) |
+| `activate_obj_surface_nonpen` (`False`) | object surface non-penetration (opt-in; slow) |
+
+```python
+from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+cfg = RetargetingConfig(
+    task_type="object_interaction", task_name="sub3_largebox_003", data_format="smplh",
+    retargeter=TestSocpRetargeterConfig(inertia_mode=True, floor_as_entity=True),
+)
+```
+
 ---
 
 ## 2. Stage visualization — `view_stages.py`
@@ -128,8 +150,18 @@ python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp
 python examples/view_stages.py --task-name sub3_largebox_003 --methods holosoma test_socp
 ```
 
-Takes the same `RetargetingConfig` flags as `robot_retarget.py`, plus `--methods`
-and `--omomo_dir` (see SMPL-X mesh below).
+Takes the same `RetargetingConfig` flags as `robot_retarget.py`, plus `--methods`,
+`--omomo-dir` (see SMPL-X mesh below) and `--max-frames`.
+
+**`--max-frames N`** caps the solved/displayed frames on **all** selected methods
+(SFU dance and OMOMO manipulation clips run to several hundred frames — see counts
+in §2b). Use it to inspect a motion without waiting for the full solve:
+
+```bash
+# First 120 frames only, TEST-SOCP alone (fastest)
+python examples/view_stages.py --task-name sub3_largebox_003 \
+  --methods test_socp --max-frames 120
+```
 
 The viewer also exposes (GUI folders, right panel):
 
@@ -154,8 +186,20 @@ The viewer also exposes (GUI folders, right panel):
   - **G1 transport** — the correspondence points carried onto the solved robot,
     coloured by their human source's distance (gated to the `Robot` stage).
   - **Directions** — probe → witness lines (human on `Grounded`, G1 on `Robot`).
+- **TEST diagnostics** — the per-frame solve state of the `test_socp` method (no-op
+  for the others):
+  - **Solved object pose** (on by default) — re-places the object mesh/points at
+    TEST's **solved** object pose (movable / inertia), overriding the reference
+    pose, so the solved-vs-reference gap is visible.
+  - **CoM + trail** — magenta CoM marker + grey ground shadow (z=0) + the whole-clip
+    CoM polyline: the ballistic arc and balance made geometric (W^c / inertia).
+  - **Angular momentum L** — an arrow from the CoM along `L`, auto-scaled so the
+    clip's peak `|L|` reads ~0.5 m (direction is the cue on spins / cartwheels — W^L).
+  - **Solve state** — read-only text: `CoM z`, foot `slip` (mm), `|L|` for the frame.
 - **Ghost** — pick a second `(Method, Stage)` to overlay faded for comparison
-  (`Off` to disable). The ghost covers skeleton stages, not the robot.
+  (`Off` to disable). The ghost covers skeleton stages, not the robot. **The main
+  tool for the pose/style and duck-walk comparisons** (overlay GMR or holosoma
+  under TEST).
 
 ### SMPL-X mesh (Meshes → SMPL-X mesh)
 
@@ -178,6 +222,86 @@ to the neutral shape.
 # betas load automatically — no extra flag needed
 python examples/view_stages.py --task-name sub3_largebox_003 --methods gmr_socp
 ```
+
+---
+
+## 2b. Interesting motions to visualize (the three experiments)
+
+The clips that exercise the thesis: TEST keeps a GMR-level **style** while enabling
+**object interaction** without the holosoma failure modes (foot-lock blow-ups,
+Laplacian "duck-walk" toward the object). All commands open the §2 viewer; use the
+**Ghost** folder to overlay two methods and the **TEST diagnostics** folder for the
+centroidal cues.
+
+Prepped clips and their lengths:
+
+| Clip | `--data-path` | `--data-format` | `--task-type` | Frames | Used for |
+|------|---------------|-----------------|---------------|-------:|----------|
+| `0005_2FeetJump001`  | `demo_data/SFU` | `smplx` | `robot_only` | 644 | flight / ballistic (W^c) |
+| `0007_Cartwheel001`  | `demo_data/SFU` | `smplx` | `robot_only` | 528 | flight + angular momentum (W^L) |
+| `0017_WushuKicks001` | `demo_data/SFU` | `smplx` | `robot_only` | 595 | complex foot motion (foot-lock) |
+| `0018_ChineseDance001` | `demo_data/SFU` | `smplx` | `robot_only` | 342 | one-foot spin (foot-lock) |
+| `0018_DanceTurns001` | `demo_data/SFU` | `smplx` | `robot_only` | 182 | dynamic style |
+| `sub3_largebox_003`  | `demo_data/OMOMO_new` | `smplh` | `object_interaction` | 196 | object interaction / duck-walk |
+
+### E1 — Style vs GMR on highly dynamic SFU clips
+
+TEST should track the style as well as GMR (which reproduces it well). Run both,
+then Ghost one under the other and compare the skeletons / robot pose.
+
+```bash
+python examples/view_stages.py \
+  --data-path demo_data/SFU --data-format smplx --task-type robot_only \
+  --task-name 0018_DanceTurns001 --methods gmr_socp test_socp
+# (no cap needed at 182 frames; add --max-frames for the longer clips)
+```
+
+### E2 — Holosoma "duck-walk" toward the object (OMOMO largebox)
+
+Holosoma's Laplacian pulls the body toward the object → the legs/feet splay
+(abduction, "marche en canard"). TEST's SDF activation is local, so the legs stay
+put. Ghost **holosoma** under **test_socp** and watch the legs/feet; toggle the
+object to see how close the body is dragged.
+
+```bash
+python examples/view_stages.py \
+  --task-name sub3_largebox_003 --methods holosoma test_socp --max-frames 150
+# In the viewer: Ghost -> Method=holosoma, Stage=Robot. Watch hip abduction.
+```
+
+### E3 — Foot-lock is horrible (one-foot spin, complex footwork)
+
+Holosoma's foot pinning explodes on a self-spin on one foot and on fast footwork;
+TEST stays smooth. Ghost **holosoma** under **test_socp** and watch the feet.
+
+```bash
+# One-foot spin
+python examples/view_stages.py \
+  --data-path demo_data/SFU --data-format smplx --task-type robot_only \
+  --task-name 0018_ChineseDance001 --methods holosoma test_socp --max-frames 200
+
+# Complex footwork
+python examples/view_stages.py \
+  --data-path demo_data/SFU --data-format smplx --task-type robot_only \
+  --task-name 0017_WushuKicks001 --methods holosoma test_socp --max-frames 200
+```
+
+### Flight / ballistic phase (W^c, W^L)
+
+Jumps and cartwheels: with few/no contacts the centroidal terms carry the pelvis.
+Enable **TEST diagnostics → CoM + trail** (ballistic arc) and **Angular momentum L**.
+
+```bash
+python examples/view_stages.py \
+  --data-path demo_data/SFU --data-format smplx --task-type robot_only \
+  --task-name 0005_2FeetJump001 --methods test_socp --max-frames 250
+```
+
+> The viewer CLI builds the **default** TEST config (inertia mode off). The
+> CoM/trail/L diagnostics still visualise the ballistic phase of the default solve;
+> to view the **inertia-mode** variant, solve via the Python API
+> (`TestSocpRetargeterConfig(inertia_mode=True, floor_as_entity=True)`, §1) and
+> replay the qpos with `viser_player.py`.
 
 ---
 
@@ -277,6 +401,19 @@ pytest tests/test_correspondence_build.py tests/test_correspondence_ot.py \
 
 # Holosoma-style constraints (default-off parity + ON smoke for GMR/TEST)
 pytest tests/test_holosoma_constraints.py -q
+
+# TEST-SOCP paper formulation: inertia mode, centroidal W^c / W^L (L^ref),
+# object↔floor, SMPL-X / AMASS loaders + probe (metric + golden regressions)
+pytest tests/test_inertia_mode.py tests/test_inertia_mode_metric.py \
+       tests/test_inertia_mode_golden.py tests/test_inertia_flight.py \
+       tests/test_centroidal_metric.py tests/test_centroidal_lref.py \
+       tests/test_pin_centroidal.py tests/test_object_floor.py \
+       tests/test_interaction_floor_only.py \
+       tests/test_smplx_loader.py tests/test_smplx_field.py \
+       tests/test_smplx_probe.py tests/test_amass_prep_orientations.py -q
+
+# Bit-exact parity of the TEST-SOCP baseline (guards the SQP step-break + caching)
+pytest tests/test_test_socp_parity.py -q
 ```
 
 ---
