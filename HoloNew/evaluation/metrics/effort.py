@@ -21,5 +21,5 @@ def compute_effort(joints: np.ndarray, q_lower: np.ndarray, q_upper: np.ndarray,
         "joint_limit_margin_min": float(np.min(margin)),
         "joint_limit_saturation_frac": float(np.mean(margin < _SAT_EPS)),
         "joint_vel_rms": float(np.sqrt(np.mean(np.square(vel)))) if vel.size else 0.0,
-        "joint_vel_max": float(np.max(np.abs(vel))) if vel.size else 0.0,
+        "joint_vel_peak": float(np.max(np.abs(vel))) if vel.size else 0.0,
     }

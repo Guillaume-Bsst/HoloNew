@@ -29,7 +29,7 @@ from HoloNew.config_types.data_type import (  # noqa: E402
     MotionDataConfig,
 )
 from HoloNew.config_types.robot import RobotConfig  # noqa: E402
-from HoloNew.src.mujoco_utils import _world_mesh_from_geom  # type: ignore[import-not-found]  # noqa: E402
+from HoloNew.src.holosoma.mujoco_utils import _world_mesh_from_geom  # type: ignore[import-not-found]  # noqa: E402
 from HoloNew.src.holosoma.interaction_mesh import transform_points_world_to_local  # noqa: E402
 from HoloNew.src.holosoma.preprocess import (  # noqa: E402
     calculate_scale_factor,
@@ -99,6 +99,7 @@ class RetargetingEvaluator:
         joints_mapping: Dict[str, str],
         visualize: bool = True,
         constants: SimpleNamespace | None = None,
+        metric_families: set[str] | None = None,
     ):
         """Initialize evaluator with robot and object models."""
         if constants is None:
@@ -107,6 +108,12 @@ class RetargetingEvaluator:
         self.object_name = object_name
         self.demo_joints = demo_joints
         self.joints_mapping = joints_mapping
+        # Scoreboard metric families to compute (None = all). See _scoreboard_metrics.
+        self.metric_families = (
+            metric_families
+            if metric_families is not None
+            else {"smoothness", "effort", "tracking", "dynamics"}
+        )
 
         if self.object_name == "multi_boxes":
             self.collision_detection_threshold = 0.1
@@ -212,6 +219,80 @@ class RetargetingEvaluator:
             robot_link_positions.append(pos)
 
         return np.array(robot_link_positions)
+
+    def _limited_joint_ranges(self, dof: int):
+        """(cols, lower, upper) of limited actuated joints, aligned to qpos[:, 7:7+dof].
+
+        Maps each limited hinge/slide joint's qpos address to its column in the
+        actuated joint block so effort margins align with the joint trajectory.
+        """
+        m = self.robot_model
+        cols, lo, hi = [], [], []
+        for j in range(m.njnt):
+            if m.jnt_type[j] not in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
+                continue
+            if not m.jnt_limited[j]:
+                continue
+            col = int(m.jnt_qposadr[j]) - 7
+            if 0 <= col < dof:
+                cols.append(col)
+                lo.append(float(m.jnt_range[j, 0]))
+                hi.append(float(m.jnt_range[j, 1]))
+        return np.array(cols, dtype=int), np.array(lo), np.array(hi)
+
+    def _scoreboard_metrics(self, qpos: np.ndarray, human_joints: np.ndarray,
+                           fps: float) -> Dict[str, float]:
+        """Compute the scoreboard metric families and return one flat scalar dict.
+
+        Pure-function metrics (HoloNew.evaluation.metrics) fed with arrays extracted
+        here via MuJoCo: FK keypoints, subtree CoM, and model joint ranges. qpos and
+        human_joints are truncated to their common length. Families are gated by
+        ``self.metric_families``. Reference for tracking/dynamics is the SMPL pelvis.
+        """
+        from HoloNew.evaluation.metrics import (
+            compute_smoothness, compute_effort, compute_tracking, compute_dynamics)
+
+        dof = int(self.constants.ROBOT_DOF)
+        dt = 1.0 / float(np.asarray(fps).ravel()[0])
+        T = min(qpos.shape[0], human_joints.shape[0])
+        qpos = np.asarray(qpos)[:T]
+        human_joints = np.asarray(human_joints)[:T]
+        out: Dict[str, float] = {}
+
+        if "smoothness" in self.metric_families:
+            out.update(compute_smoothness(qpos, dof, dt))
+
+        if "effort" in self.metric_families:
+            cols, lo, hi = self._limited_joint_ranges(dof)
+            if cols.size:
+                out.update(compute_effort(qpos[:, 7:7 + dof][:, cols], lo, hi, dt))
+
+        # Mapped joints common to the correspondence and the demo skeleton.
+        joint_names = [n for n in self.joints_mapping if n in self.demo_joints]
+        root_name = next((n for n in joint_names if "pelvis" in n.lower()), None)
+        pelvis_demo_idx = self.demo_joints.index(root_name) if root_name else 0
+
+        if "tracking" in self.metric_families and joint_names:
+            robot_links = [self.joints_mapping[n] for n in joint_names]
+            demo_idx = [self.demo_joints.index(n) for n in joint_names]
+            robot_kpts = np.array([self._get_robot_link_positions(q, robot_links) for q in qpos])
+            ref_kpts = human_joints[:, demo_idx, :]
+            root_idx = joint_names.index(root_name) if root_name else 0
+            out.update(compute_tracking(
+                robot_kpts, ref_kpts, root_idx,
+                base_xyz=qpos[:, 0:3], ref_root_xyz=human_joints[:, pelvis_demo_idx, :]))
+
+        if "dynamics" in self.metric_families:
+            base_body = int(self.robot_model.jnt_bodyid[0])  # robot floating-base subtree
+            coms = np.empty((T, 3))
+            for t in range(T):
+                self.robot_data.qpos[:] = qpos[t]
+                mujoco.mj_forward(self.robot_model, self.robot_data)
+                coms[t] = self.robot_data.subtree_com[base_body]
+            ref_com = human_joints[:, pelvis_demo_idx, :]
+            out.update(compute_dynamics(coms, ref_com, dt))
+
+        return out
 
     def _prefilter_pairs_with_mj_collision(self, threshold: float):
         m, d = self.robot_model, self.robot_data
@@ -453,6 +534,8 @@ class RetargetingEvaluator:
         contact_results = self.evaluate_contact_precision(human_joints, object_poses, q_retarget)
 
         opt_cost = rt_res_data["cost"]
+        fps = rt_res_data["fps"] if "fps" in rt_res_data else 30.0
+        scoreboard = self._scoreboard_metrics(q_retarget, human_joints, fps)
 
         return {
             "penetration_duration": penetration_duration,
@@ -461,6 +544,7 @@ class RetargetingEvaluator:
             "max_toe_sliding_velocities": max_toe_sliding_velocities,
             "contact_preservation": contact_results,
             "opt_cost": opt_cost,
+            **scoreboard,
         }
 
     def evaluate_terrain_contact_precision(
@@ -558,6 +642,8 @@ class RetargetingEvaluator:
         contact_results = self.evaluate_terrain_contact_precision(human_joints, q_retarget)
 
         opt_cost = rt_res_data["cost"]
+        fps = rt_res_data["fps"] if "fps" in rt_res_data else 30.0
+        scoreboard = self._scoreboard_metrics(q_retarget, human_joints, fps)
 
         return {
             "penetration_duration": penetration_duration,
@@ -566,6 +652,7 @@ class RetargetingEvaluator:
             "max_toe_sliding_velocities": max_toe_sliding_velocities,
             "contact_preservation": contact_results,
             "opt_cost": opt_cost,
+            **scoreboard,
         }
 
     def evaluate_robot_only_trajectory(self, task_name, data_dir, input_data_dir):
@@ -635,6 +722,8 @@ class RetargetingEvaluator:
         )
 
         opt_cost = rt_res_data["cost"]
+        fps = rt_res_data["fps"] if "fps" in rt_res_data else 30.0
+        scoreboard = self._scoreboard_metrics(q_retarget, human_joints, fps)
 
         return {
             "penetration_duration": penetration_duration,
@@ -642,6 +731,7 @@ class RetargetingEvaluator:
             "sliding_duration": sliding_duration,
             "max_toe_sliding_velocities": max_toe_sliding_velocities,
             "opt_cost": opt_cost,
+            **scoreboard,
         }
 
 
@@ -653,6 +743,7 @@ def _evaluate_single_task(
     motion_data_config_kwargs: Dict[str, Any],
     object_name: str | None,
     data_type: str,
+    metric_families: set[str] | None = None,
 ):
     robot_config = RobotConfig(**robot_config_kwargs)
     motion_data_config = MotionDataConfig(**motion_data_config_kwargs)
@@ -698,6 +789,7 @@ def _evaluate_single_task(
         joints_mapping=constants.JOINTS_MAPPING,
         visualize=False,
         constants=constants,
+        metric_families=metric_families,
     )
     if data_type == "robot_object":
         return task_name, evaluator.evaluate_trajectory(task_name, data_path, input_data_dir)
@@ -736,6 +828,9 @@ class Args:
     data_format: str | None = None  # Use str to allow dynamic data formats
     object_name: str | None = None
     max_workers: int = 1
+    # Scoreboard metric families to compute (comma-separated subset of
+    # smoothness,effort,tracking,dynamics). Empty = none.
+    metrics: str = "smoothness,effort,tracking,dynamics"
 
     # Nested configs for overrides
     robot_config: RobotConfig = field(default_factory=lambda: RobotConfig(robot_type="g1"))
@@ -779,6 +874,7 @@ def main(cfg: Args) -> None:
 
     robot_config_kwargs = asdict(cfg.robot_config)
     motion_data_config_kwargs = asdict(cfg.motion_data_config)
+    metric_families = {m.strip() for m in cfg.metrics.split(",") if m.strip()}
 
     results: Dict[str, Dict[str, Any]] = {}
     max_workers = max(1, cfg.max_workers)
@@ -793,6 +889,7 @@ def main(cfg: Args) -> None:
                 motion_data_config_kwargs,
                 object_name,
                 cfg.data_type,
+                metric_families,
             ): task_name
             for task_name, file_path in zip(task_names, files)
         }
