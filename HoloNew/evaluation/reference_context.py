@@ -103,3 +103,32 @@ class ReferenceContext:
             out["style_orient_vs_gmr"] = sg["style_orient_err"]
             out["style_shape_vs_gmr"] = sg["style_shape_err"]
         return out
+
+    def score_roots(self, method_qpos: np.ndarray,
+                    object_pose_ref: np.ndarray | None = None) -> dict[str, float]:
+        """Root-pose sanity: robot floating-base pose error vs the reference pelvis,
+        and (when the qpos carries a trailing object pose + a reference) object pose error.
+
+        ``object_pose_ref`` is (T, 7) [qw,qx,qy,qz,x,y,z], matching the trailing 7 qpos
+        columns; supply it for object tasks (e.g. rt's source object poses).
+        """
+        from scipy.spatial.transform import Rotation as R
+        from HoloNew.evaluation.metrics.roots import compute_pose_error
+
+        T = min(method_qpos.shape[0], self._gpos.shape[0])
+        Rref, pref = self.reference_RP(T)
+        base_pos = method_qpos[:T, 0:3]
+        base_rot = R.from_quat(method_qpos[:T, 3:7][:, [1, 2, 3, 0]]).as_matrix()
+        e = compute_pose_error(base_pos, base_rot,
+                              pref[:, self.pelvis_idx], Rref[:, self.pelvis_idx])
+        out = {"root_pos_err": e["pos_err"], "root_rot_err": e["rot_err"]}
+
+        if object_pose_ref is not None and method_qpos.shape[1] >= 7 + 7:
+            obj = method_qpos[:T, -7:]
+            ref = np.asarray(object_pose_ref)[:T]
+            obj_rot = R.from_quat(obj[:, 0:4][:, [1, 2, 3, 0]]).as_matrix()
+            ref_rot = R.from_quat(ref[:, 0:4][:, [1, 2, 3, 0]]).as_matrix()
+            eo = compute_pose_error(obj[:, 4:7], obj_rot, ref[:, 4:7], ref_rot)
+            out["obj_root_pos_err"] = eo["pos_err"]
+            out["obj_root_rot_err"] = eo["rot_err"]
+        return out
