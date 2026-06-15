@@ -30,6 +30,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     scale_z_object: float | None = 1.0
 
     # === §1 VARIABLES — what the solve optimises ===
+
     # [TEST] article formulation: q_a actuated joints / T_B floating base / T_m movable
     # object pose. False freezes each; activate_tm makes the object a variable (W^o in §2).
     activate_qa: bool = True
@@ -37,6 +38,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_tm: bool = False
 
     # === §2 WEIGHTS ===
+
     # [GMR] per-point position / orientation tracking (values in IK_MATCH_TABLE1/2). Core objective.
     activate_pos_tracking: bool = True
     activate_rot_tracking: bool = True
@@ -61,7 +63,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wp: bool = False
     lambda_p: float = 20.0
     sigma_v: float = 0.05
-    # [TEST] object carrier → floor (object<->environment pair); separate weight, needs activate_tm.
+    #object carrier → floor (object<->environment pair); separate weight, needs activate_tm.
     activate_obj_floor: bool = False
     lambda_obj_floor: float = 5.0
 
@@ -93,6 +95,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     sigma_Vdot: float = 20.0
 
     # === §3 CONSTRAINTS ===
+
     # [HOLO] need their companion config: self_collision=SelfCollisionConfig(...),
     # foot-sticking needs foot_lock + sequences (both inherited).
     activate_self_collision: bool = False
@@ -103,11 +106,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # from RetargeterConfig. load_object_scene is an addon selecting the geometry MuJoCo
     # measures against (xml swap): True = object<->robot (full object xml), False = ground only.
     activate_obj_non_penetration: bool = False
-    load_object_scene: bool = True
+    load_object_scene: bool = False
 
     # [GMR] actuated joint limits.
     activate_joint_limits: bool = True
-    
+
     # [TEST] obj_surface_nonpen = hard d_ij>=0 on the object surface from the SDF/contact
     # field (not MuJoCo; SLOW). persistence = hard tangential no-slip band (article's P as a
     # constraint, tol = band half-width m, needs an interaction entity).
@@ -118,6 +121,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # The floor is ALWAYS an interaction target (no floor_as_entity flag); every carrier contacts it.
 
     # === §4 SOLVER (SQP mechanics) ===
+
     # [TEST] fps -> dt = 1/fps. n_iter_first / n_iter_per_frame: inner SQP iterations on frame
     # 0 vs rest. iterate_step_tol: early-stop when the actuated step norm drops below it (0 off).
     # (step_size is inherited from Holosoma's RetargeterConfig.)
