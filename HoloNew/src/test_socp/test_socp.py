@@ -85,6 +85,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         lambda_qdiag: float = 0.0,
         lambda_nominal: float = 0.0,
         nominal_tau: float = 10.0,
+        lambda_lap: float = 0.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         activate_ws: bool = False,
@@ -282,6 +283,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.nominal_tau = nominal_tau
         self._nominal_idx = np.asarray(
             getattr(task_constants, "NOMINAL_TRACKING_INDICES", []), dtype=int)
+        self.lambda_lap = lambda_lap
 
         # Temporal regularization weights (default 0.0 = off; solve is unchanged).
         self.lambda_r = lambda_r
@@ -842,6 +844,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             w_nom = self.lambda_nominal * float(np.exp(-sqp_iter / self.nominal_tau))
             z = dqa[cols_sel] - (self.q_init_full[qpos_sel] - q_a_n_last[qpos_sel])
             obj_terms.append(w_nom * cp.sum_squares(z))
+
+        # W^lap (native Holosoma primary objective): interaction-mesh Laplacian
+        # deformation. J_L is exact (uniform weights -> L depends only on adjacency).
+        if self.lambda_lap > 0:
+            from HoloNew.src.test_socp.laplacian import build_laplacian_terms
+            obj_terms += build_laplacian_terms(self, _q_pin, dqa, frame_idx, self.lambda_lap)
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
