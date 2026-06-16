@@ -449,6 +449,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         frame_idx: int = 0,
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
+        obj_pose_ref=None,
         q_t_last2: np.ndarray | None = None,
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
@@ -776,8 +777,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and self.lambda_o_pos > 0):
             from HoloNew.src.test_socp.movable import (
                 build_wo_position_anchor, pose_to_se3)
+            # Anchor target is the REFERENCE position (obj_pose_ref), NOT the warm-start
+            # obj_pose — otherwise the anchor would chase the drift instead of pinning it.
+            _anchor_ref = obj_pose_ref if obj_pose_ref is not None else obj_pose
             obj_terms.append(build_wo_position_anchor(
-                pose_to_se3(obj_pose), np.asarray(obj_pose[4:7], dtype=float),
+                pose_to_se3(obj_pose), np.asarray(_anchor_ref[4:7], dtype=float),
                 dxi_obj, self.lambda_o_pos,
             ))
 
@@ -871,6 +875,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         frame_idx: int = 0,
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
+        obj_pose_ref=None,
         q_t_last2: np.ndarray | None = None,
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
@@ -888,7 +893,15 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         second catches passes that plateau at a tiny oscillating step at the
         trust-region / active-set boundary — they never trip the cost test but
         their extra iterations only chatter and waste solves.
+
+        The object is a first-class SQP variable: ``obj_pose`` is its linearization
+        point, RE-LINEARIZED each inner iteration around the freshly solved pose so
+        it converges within the frame just like the robot. ``obj_pose_ref`` stays
+        the reference pose throughout (the W^o_pos anchor target) and is never
+        re-linearized — only obj_pose advances.
         """
+        if obj_pose_ref is None:
+            obj_pose_ref = obj_pose
         last = np.inf
         cost = 0.0
         solved_obj_pose = None
@@ -897,13 +910,17 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             q_n, cost, solved_obj_pose = self.solve_single_iteration(
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
-                obj_pose=obj_pose, q_t_last2=q_t_last2,
+                obj_pose=obj_pose, obj_pose_ref=obj_pose_ref, q_t_last2=q_t_last2,
                 c_tm1=c_tm1, c_tm2=c_tm2, cddot_ref=cddot_ref,
                 c_ref=c_ref,
                 obj_pose_tm1=obj_pose_tm1, obj_pose_tm2=obj_pose_tm2,
                 vdot_ref_obj=vdot_ref_obj, omega_ref_obj=omega_ref_obj,
                 sqp_iter=_sqp_it,
             )
+            # Re-linearize the object around its solved pose for the next inner step
+            # (the robot is already re-linearized via q_n). obj_pose_ref is untouched.
+            if solved_obj_pose is not None:
+                obj_pose = solved_obj_pose
             step = float(np.linalg.norm(q_n[self.q_a_indices] - q_a_prev))
             if np.isclose(cost, last) or step < self._iterate_step_tol:
                 break
@@ -1072,8 +1089,21 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             # placement. GMR-SOCP (two-pass) remains the separate comparison solver.
             tg = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE_SINGLE)
             _fs = self.foot_sticking_sequences[t] if self.foot_sticking_sequences else None
-            _obj_pose = (self._obj_poses_raw[t]
-                         if getattr(self, "_obj_poses_raw", None) is not None else None)
+            # Object: reference pose at t (the W^o_pos anchor target) and the FEED-FORWARD
+            # warm-start linearization point = previous SOLVED pose advanced by the
+            # reference's per-frame increment (accumulates the grasp correction across
+            # frames AND pre-applies the reference motion, so the SQP only fixes the
+            # contact residual — no lag on fast object motion). Frame 0 / movable-off
+            # fall back to the raw reference.
+            _obj_pose_ref = (self._obj_poses_raw[t]
+                             if getattr(self, "_obj_poses_raw", None) is not None else None)
+            if (self.activate_tm and _obj_pose_ref is not None
+                    and t >= 1 and _obj_prev is not None):
+                from HoloNew.src.test_socp.movable import feedforward_object_warmstart
+                _obj_pose = feedforward_object_warmstart(
+                    self._obj_poses_raw[t], self._obj_poses_raw[t - 1], _obj_prev)
+            else:
+                _obj_pose = _obj_pose_ref
             _cddot_ref_t = _cddot_ref_all[t]
             # c_ref: reference CoM = reference pelvis + structural com-pelvis offset.
             # Keeps the W^c_pos anchor on the correct trajectory without height bias.
@@ -1084,14 +1114,15 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             _n_iter = self.n_iter_first if t == 0 else self.n_iter_per_frame
             q, _, _frame_solved_obj = self.iterate(q, q, q_prev, tg, n_iter=_n_iter,
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
+                                obj_pose_ref=_obj_pose_ref,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
                                 c_ref=_c_ref_t,
                                 obj_pose_tm1=_obj_prev, obj_pose_tm2=_obj_prev2,
                                 vdot_ref_obj=_vdot_ref_obj_t, omega_ref_obj=_omega_ref_obj_t)
-            if _frame_solved_obj is None and _obj_pose is not None:
-                # movable is off or frame_idx<2: use reference pose as the "solved" pose.
-                _frame_solved_obj = _obj_pose
+            if _frame_solved_obj is None and _obj_pose_ref is not None:
+                # movable off / not solved this frame: the object sits at its reference.
+                _frame_solved_obj = _obj_pose_ref
             if _frame_solved_obj is not None:
                 self._obj_solved_poses.append(_frame_solved_obj.copy())
             # Shift two-frame history: q_prev2 <- q_prev (frame t-2 slot) BEFORE
@@ -1112,7 +1143,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 _obj_prev = _frame_solved_obj
 
             # Update cross-frame persistence state after the solved frame.
-            if self._p_state is not None and _obj_pose is not None:
+            if self._p_state is not None and _frame_solved_obj is not None:
                 from HoloNew.src.test_socp.interaction import (
                     robot_control_points, query_entities, frame_references, _activation,
                 )
@@ -1120,11 +1151,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 _L_obj = self.L_object
                 _L_flr = self.L_floor
                 _p_world = robot_control_points(self, _q_pin_solved)
+                # Persistence state reflects the SOLVED object pose (not the warm-start).
                 _fobj_s, _fflr_s = query_entities(
-                    self, _p_world, _obj_pose, margin_obj=_L_obj, margin_flr=_L_flr)
+                    self, _p_world, _frame_solved_obj, margin_obj=_L_obj, margin_flr=_L_flr)
                 _d_obj_ref, _, _d_flr_ref, _, _ = frame_references(self, t)
                 self._p_state["p_prev_world"] = _p_world
-                self._p_state["obj_prev"] = _obj_pose.copy()
+                self._p_state["obj_prev"] = _frame_solved_obj.copy()
                 self._p_state["d_prev_obj"] = np.asarray(_fobj_s.distance, dtype=np.float64)
                 self._p_state["d_prev_flr"] = np.asarray(_fflr_s.distance, dtype=np.float64)
                 self._p_state["a_prev_obj"] = np.array(
@@ -1136,6 +1168,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 g1_pts.append(transported_points(
                     Tw, self.correspondence.link_idx,
                     self.correspondence.offset_local, self.correspondence.link_names))
+            # The SOLVED object pose is part of the result: write it back into the object
+            # free-joint qpos so res.qpos[:, -7:] carries the OPTIMIZED object (not the
+            # reference set pre-solve at line ~1053). Reorder pose7 [qw,qx,qy,qz,x,y,z] ->
+            # MuJoCo [x,y,z,qw,qx,qy,qz]. Gated on has_dynamic_object: only then does q
+            # have the trailing 7 object DOFs (otherwise q[-7:] are robot joints).
+            if self.has_dynamic_object and _frame_solved_obj is not None:
+                q[-7:] = np.concatenate([_frame_solved_obj[4:7], _frame_solved_obj[0:4]])
             out.append(np.copy(q))
 
         res = RetargetResult(qpos=np.array(out), stages={}, cost=0.0)

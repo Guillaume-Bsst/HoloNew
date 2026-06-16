@@ -40,6 +40,31 @@ def se3_to_pose(M: pin.SE3) -> np.ndarray:
     return np.array([q.w, q.x, q.y, q.z, M.translation[0], M.translation[1], M.translation[2]])
 
 
+def feedforward_object_warmstart(ref_t, ref_tm1, solved_tm1) -> np.ndarray:
+    """Feed-forward object linearization point for frame t.
+
+        T_warm = (T_ref[t] · T_ref[t-1]^{-1}) · T_solved[t-1]
+
+    Advance the previous SOLVED object pose by the reference's per-frame world
+    increment ΔT_ref = T_ref[t]·T_ref[t-1]^{-1}. This rides on the solved pose (so
+    the accumulated grasp correction persists) while pre-applying the reference
+    motion, so the SQP step only has to fix the contact residual — no lag on fast
+    object motion. Reduces to T_ref[t] when the previous solve matched the reference.
+
+    Args:
+        ref_t, ref_tm1, solved_tm1: pose7 [qw,qx,qy,qz,x,y,z] (reference at t / t-1,
+            solved object at t-1).
+
+    Returns:
+        pose7 warm-start linearization point.
+    """
+    T_ref_t = pose_to_se3(np.asarray(ref_t, dtype=float))
+    T_ref_tm1 = pose_to_se3(np.asarray(ref_tm1, dtype=float))
+    T_solved_tm1 = pose_to_se3(np.asarray(solved_tm1, dtype=float))
+    dT_ref = T_ref_t * T_ref_tm1.inverse()        # reference world increment
+    return se3_to_pose(dT_ref * T_solved_tm1)
+
+
 def sample_object_surface(mesh_file: str, density: float = 200.0,
                           seed: int = 0) -> np.ndarray:
     """Sample control points on the object mesh surface (object-local frame).
