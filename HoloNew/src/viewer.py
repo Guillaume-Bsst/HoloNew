@@ -740,16 +740,28 @@ class Viewer:
             return
         stage = self._stage_dd.value
         pose = self._object_pose(stage)
+        # Object pose used to lift the object-local witnesses. When "Solved object pose"
+        # is on, lift by the SOLVED object pose (so the directions point at the solved
+        # object); otherwise lift by the reference pose (the default). Reference order is
+        # [x,y,z, qw,qx,qy,qz] (quat at [3:7]); solved is [qw,qx,qy,qz, x,y,z] (quat at [:4]).
+        _sp_seq = method.solved_object_poses
+        if (self._tog_solved_obj.value and _sp_seq is not None and frame < len(_sp_seq)):
+            obj_quat, obj_trans, has_obj_pose = _sp_seq[frame][:4], _sp_seq[frame][4:7], True
+        elif pose is not None:
+            obj_quat, obj_trans, has_obj_pose = pose[frame, 3:7], pose[frame, :3], True
+        else:
+            obj_quat = obj_trans = None
+            has_obj_pose = False
         if stage == "Grounded" and method.human_probe_pts is not None:
             probes = method.human_probe_pts[frame]
             # Object channel: object-local witness, lifted by the object pose.
-            if (show_obj and pose is not None and method.human_witness is not None
+            if (show_obj and has_obj_pose and method.human_witness is not None
                     and method.human_obj_dist is not None):
                 d_obj = method.human_obj_dist[frame]
                 a_obj = d_obj < CONTACT_MARGIN_M
                 if a_obj.any():
                     wit = transform_points_local_to_world(
-                        pose[frame, 3:7], pose[frame, :3], method.human_witness[frame][a_obj])
+                        obj_quat, obj_trans, method.human_witness[frame][a_obj])
                     self._draw_segments("/test/dir_human_obj", probes[a_obj], wit, d_obj[a_obj])
             # Floor channel: world-frame witness, NOT lifted by the object pose.
             if (show_flr and method.human_flr_witness is not None
@@ -763,14 +775,15 @@ class Viewer:
         # and a floor channel, each gated on its own toggle (mirrors the human probes).
         if stage == ROBOT_STAGE and method.g1_transport_pts is not None:
             g1 = method.g1_transport_pts[frame]
-            # Object channel: object-local witness, lifted by the object pose.
-            if (show_obj and pose is not None and method.g1_obj_witness is not None
+            # Object channel: object-local witness, lifted by the object pose (solved
+            # when "Solved object pose" is on, else reference — see obj_quat/obj_trans above).
+            if (show_obj and has_obj_pose and method.g1_obj_witness is not None
                     and method.g1_obj_dist is not None):
                 d = method.g1_obj_dist[frame]
                 a = d < CONTACT_MARGIN_M
                 if a.any():
                     wit = transform_points_local_to_world(
-                        pose[frame, 3:7], pose[frame, :3], method.g1_obj_witness[frame][a])
+                        obj_quat, obj_trans, method.g1_obj_witness[frame][a])
                     self._draw_segments("/test/dir_g1_obj", g1[a], wit, d[a])
             # Floor channel: world-frame witness, NOT lifted by the object pose.
             if (show_flr and method.g1_flr_witness is not None
