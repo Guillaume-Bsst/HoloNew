@@ -27,7 +27,7 @@ from scipy.spatial.transform import Rotation
 
 from HoloNew.config_types.retargeter import FootLockConfig, SelfCollisionConfig
 from .holosoma_constraints import HolosomaConstraintsMixin
-from .tables import IK_MATCH_TABLE1
+from .tables import IK_MATCH_TABLE1, STYLE_WEIGHT_TABLE
 
 # Body name remapping: keys are IK table frame names; values are actual G1
 # MuJoCo body names.  Only entries that differ from the table key are listed.
@@ -88,6 +88,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         lambda_ws: float = 0.0,
+        style_weights: dict | None = None,
         sigma_R: float = 0.2,
         sigma_a: float = 9.81,
         sigma_L: float = 10.0,
@@ -299,6 +300,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # W^s Style (additive pelvis-relative orientation matching; default 0 = off).
         self.lambda_ws = lambda_ws
         self.sigma_R = sigma_R
+        # Brick 2 — per-body style weights ω_k^s. Default = uniform table (same
+        # behavior as the legacy w_r path, since all w_r=10). Pass an explicit
+        # dict to override; set to None to fall back to the legacy w_r path.
+        self.style_weights = style_weights if style_weights is not None else STYLE_WEIGHT_TABLE
         # Brick 1 — σ characteristic scales (flat constants; plumbed from config).
         self.sigma_a = sigma_a
         self.sigma_L = sigma_L

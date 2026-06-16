@@ -132,6 +132,33 @@ HUMAN_BODY_TO_IDX: dict[str, int] = {
 
 MAPPED_BODY_NAMES: list[str] = list(HUMAN_BODY_TO_IDX.keys())
 
+# Intra-style distribution ω_k^s (+ ω^B via "__pelvis_tilt__"). Normalized
+# internally by build_style_terms (Σω = 1). Uniform default == the legacy
+# w_r-derived distribution (which is also uniform at w_r=10 for all tracked
+# bodies), so retargeting behavior is unchanged until weights are re-tuned.
+#
+# Keys must match rt.robot_link_names[frame], i.e. the actual G1 body names:
+#   - "pelvis" frame -> body "pelvis" -> build_style_terms uses key "__pelvis_tilt__"
+#   - "left_toe_link" / "right_toe_link" are remapped to "left_ankle_roll_link" /
+#     "right_ankle_roll_link" (see _BODY_NAME_REMAP in test_socp.py)
+#   - all other frames keep their table key as the body name
+STYLE_WEIGHT_TABLE: dict[str, float] = {
+    "__pelvis_tilt__":        1.0,   # S_B: pelvis tilt against gravity
+    "left_hip_roll_link":     1.0,   # S_k: left hip orientation
+    "left_knee_link":         1.0,   # S_k: left knee orientation
+    "left_ankle_roll_link":   1.0,   # S_k: left foot orientation (remapped from left_toe_link)
+    "right_hip_roll_link":    1.0,   # S_k: right hip orientation
+    "right_knee_link":        1.0,   # S_k: right knee orientation
+    "right_ankle_roll_link":  1.0,   # S_k: right foot orientation (remapped from right_toe_link)
+    "torso_link":             1.0,   # S_k: spine/torso orientation
+    "left_shoulder_yaw_link": 1.0,   # S_k: left shoulder orientation
+    "left_elbow_link":        1.0,   # S_k: left elbow orientation
+    "left_wrist_yaw_link":    1.0,   # S_k: left wrist orientation
+    "right_shoulder_yaw_link":1.0,   # S_k: right shoulder orientation
+    "right_elbow_link":       1.0,   # S_k: right elbow orientation
+    "right_wrist_yaw_link":   1.0,   # S_k: right wrist orientation
+}
+
 # bones connecting mapped bodies, for stage-skeleton rendering (human-body-name pairs)
 MAPPED_BODY_BONES: list[tuple[str, str]] = [
     ("pelvis", "spine3"),
