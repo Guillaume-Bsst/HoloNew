@@ -160,6 +160,11 @@ def _activation(d_ref: float, L: float) -> float:
     return max(a, 0.0) ** 2
 
 
+def _p_scale_sq(lambda_p: float, sigma_v: float, dt: float) -> float:
+    """Faithful P scale: λ_p / (σ_v·Δt)² (the LaTeX per-frame slide scale)."""
+    return lambda_p / (sigma_v * dt) ** 2
+
+
 def _robj_from_pose(obj_pose: np.ndarray) -> np.ndarray:
     """Extract the 3x3 rotation matrix R_obj (object-to-world) from obj_pose.
 
@@ -494,23 +499,17 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
         t: Current frame index (must be >= 1).
         obj_pose: (7,) [qw, qx, qy, qz, x, y, z] current object pose.
         lambda_p: Weight for the persistence term.
-        sigma_v: Accepted for API compatibility; no longer used in the scale (see
-            the normalization note below).
-        dt: Accepted for API compatibility; no longer used in the scale.
+        sigma_v: Characteristic per-frame velocity (m/s) used in the scale
+            λ_p / (σ_v·Δt)².
+        dt: Time step (s) used in the scale λ_p / (σ_v·Δt)².
 
     Returns:
         List of cvxpy scalar expressions. May be empty if no points have γ > 0.
 
-    Normalization (deliberate divergence from the paper). The paper normalizes P
-    by the characteristic per-frame slide (sigma_v * dt)^2. With sigma_v = 0.05 and
-    dt = 1/30 that scale is ~1.7 mm, giving a weight ~3.6e5 — ~3600x the D/X terms
-    (normalized by the field range L^2 ~ 0.01), which wrecks CLARABEL's
-    conditioning and makes the solve fail once P engages. P is a tangential
-    meter-residual exactly like X, so we normalize it by the SAME L^2: lambda_p is
-    then directly comparable to lambda_x, and no-slip is enforced as a gentle
-    tangential prior (the per-frame slide is already bounded by the SQP trust
-    region). This keeps the paper's intent (reproduce the source's tangential
-    slide) while staying numerically well-conditioned.
+    Normalization: P is normalized by (σ_v·Δt)², the characteristic per-frame
+    slide (as in the LaTeX spec). At the re-tuned O(1) λ_p this is well-conditioned
+    and keeps λ_p directly interpretable as a no-slip stiffness in units of
+    (m/slide)².
     """
     import cvxpy as cp
 
@@ -518,7 +517,7 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
     L = rt.smplx_ground_probe.margin
-    scale_sq = (lambda_p / L ** 2)
+    scale_sq = _p_scale_sq(lambda_p, sigma_v, dt)
 
     # Per-link point counts for 1/N_k normalisation.
     n_links = len(corr.link_names)

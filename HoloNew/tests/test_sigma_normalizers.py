@@ -94,3 +94,9 @@ def test_wo_sigma_split_single_lambda():
     omega = V_t[3:6]
     gt = 2.0 * (np.sum(((vdot - vdot_ref)/3.0)**2) + np.sum(((omega - omega_ref)/5.0)**2))
     np.testing.assert_allclose(float(term.value), gt, rtol=1e-3)
+
+
+def test_p_scale_helper():
+    from HoloNew.src.test_socp.interaction import _p_scale_sq
+    np.testing.assert_allclose(_p_scale_sq(4.0, 0.05, 1/30.0),
+                               4.0 / (0.05 * (1/30.0))**2, rtol=1e-12)

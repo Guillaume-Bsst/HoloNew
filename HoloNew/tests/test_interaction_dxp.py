@@ -324,8 +324,9 @@ def test_p_persistence_runs():
 
     P is exercised alone (D/X off, no ground non-penetration) to check the
     persistence assembly + cross-frame state run through the solve. P is
-    normalized by L^2 (see interaction.build_p_terms) so it is well-conditioned;
-    in the default config it runs alongside D/X + ground non-penetration.
+    normalized by (sigma_v*dt)^2 (see interaction._p_scale_sq) — the LaTeX
+    faithful scale; in the default config it runs alongside D/X + ground
+    non-penetration.
     """
     rt = _rt()
     if rt.correspondence is None or rt.object_sdf is None:

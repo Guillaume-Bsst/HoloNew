@@ -144,9 +144,9 @@ def _pointwise_p_objective(rt, q_pin: np.ndarray, val: np.ndarray,
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
     L = rt.smplx_ground_probe.margin
-    # P is normalized by the field range L^2 (same scale as X), not (sigma_v*dt)^2
-    # — see the note in interaction.build_p_terms. sigma_v/dt are unused.
-    scale_sq = lambda_p / L ** 2
+    # Faithful P scale: λ_p / (σ_v·Δt)² (mirrors interaction._p_scale_sq).
+    from HoloNew.src.test_socp.interaction import _p_scale_sq
+    scale_sq = _p_scale_sq(lambda_p, sigma_v, dt)
 
     n_links = len(corr.link_names)
     link_counts = np.zeros(n_links, dtype=float)
