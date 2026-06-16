@@ -43,12 +43,9 @@ class TestSocpRetargeterConfig(RetargeterConfig):
 
     # [GMR] per-point position / orientation tracking (values in IK_MATCH_TABLE1/2). Core objective.
     activate_pos_tracking: bool = True
-    activate_rot_tracking: bool = True
-    # [TEST] global priority λ + characteristic scale σ for the GMR tracking, per channel.
-    # Each residual becomes λ·w/σ²·‖·‖² with the per-point w_p/w_r as the intra-distribution.
-    # Defaults 1.0 = behavior-preserving (effective weight == legacy w_p/w_r); σ in m / rad.
     lambda_pos: float = 1.0
     sigma_p: float = 1.0
+    activate_rot_tracking: bool = True
     lambda_rot: float = 1.0
     sigma_rot: float = 1.0
 
@@ -58,14 +55,14 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # Holosoma solver as the comparison for that.
     # W^smooth: step-toward-previous-frame joint smoothness (Holosoma smooth_weight).
     activate_smooth: bool = False
-    lambda_smooth: float = 0.2
+    lambda_smooth: float = 1.0
     # W^qdiag: absolute joint-config regularizer, per-joint weights from MANUAL_COST.
     activate_qdiag: bool = False
     lambda_qdiag: float = 1.0
     # W^nominal: pull NOMINAL_TRACKING_INDICES joints toward a nominal pose, with an
     # exp-decaying weight over SQP iterations (Holosoma w_nominal_tracking_init / tau).
     activate_nominal: bool = False
-    lambda_nominal: float = 5.0
+    lambda_nominal: float = 1.0
     nominal_tau: float = 10.0
     
     # [TEST] σ characteristic scales — FLAT constants, none auto-computed.
@@ -88,9 +85,9 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # proximity, X = tangential placement, P = soft persistence (prefer the §3 hard constraint).
     # Robot channel shares lambda_d/lambda_x; sigma_v scales P.
     activate_wd: bool = False
-    lambda_d: float = 20.0
+    lambda_d: float = 1.0
     activate_wx: bool = False
-    lambda_x: float = 20.0
+    lambda_x: float = 1.0
     activate_wp: bool = False
     lambda_p: float = 1.0       # seed; P now (σ_v·dt)²-normalized
     sigma_v: float = 0.05
@@ -100,7 +97,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     L_object: float | None = None
     #object carrier → floor (object<->environment pair); separate weight, needs activate_tm.
     activate_obj_floor: bool = False
-    lambda_obj_floor: float = 5.0
+    lambda_obj_floor: float = 1.0
 
     # [TEST] W^c/W^L Centroidal (W^c/W^L from frame >= 2, W^c_pos from frame 0):
     # W^c = ||c_ddot - c_ddot_ref||^2, W^c_pos = ||c - c_ref||^2, W^L = ||L||^2.
@@ -121,7 +118,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wo: bool = False
     lambda_o: float = 1.0       # seed (collapsed; σ_ao/σ_omega folded)
     activate_wo_pos: bool = False
-    lambda_o_pos: float = 10.0
+    lambda_o_pos: float = 1.0
 
     # [TEST] W^r Temporal reg (tangent-space accel); sigma_* = per-DOF noise scale (joints / base).
     # lambda_r re-tuned to 0.5 for the single-pass solve (the old two-pass value 0.2 is
@@ -136,12 +133,8 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # [HOLO] need their companion config: self_collision=SelfCollisionConfig(...),
     # foot-sticking needs foot_lock + sequences (both inherited).
     activate_self_collision: bool = False
-    activate_foot_sticking: bool = False
-    # [TEST] self-collision safety margin ε (d_ij >= ε), surfaced flat from
-    # SelfCollisionConfig.tolerance so it lives with the other constants. The builder
-    # feeds it into the companion config's tolerance (the flat field wins). Default =
-    # the inherited SelfCollisionConfig default, so behavior is unchanged.
     self_collision_margin: float = 0.02
+    activate_foot_sticking: bool = False
 
     # [HOLO] non-penetration d_ij >= -tolerance: phi from MuJoCo collision (mj_collision +
     # mj_geomDistance) on the loaded geometry, with our object/ground pair filter. Inherited

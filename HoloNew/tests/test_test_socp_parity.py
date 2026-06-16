@@ -17,17 +17,19 @@ from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
 _G1_QDIM = 36  # G1 base (7) + 29 joints
 
-# Re-baselined after adding the SQP plateau step-break (_iterate_step_tol=0.01),
-# a ~3x speedup. The base pose is essentially unchanged; the step-break only stops
-# the inner loop's joint chatter ~6 mm earlier (max |qpos diff| ~6 mm vs running
-# every iteration). Recorded with rt.retarget().qpos[:3, :7] on sub3_largebox_003.
+# Re-baselined after the robot-Z scale fix: the builder no longer resolves
+# scale_z_robot=None -> smpl_scale; it passes None through to scale() so the robot Z
+# uses GMR's native morphological base (HUMAN_SCALE_TABLE[pelvis]*ratio), like gmr_socp.
+# The pelvis Z dropped ~4 cm and the orientation/XY rebalanced. Recorded with
+# rt.retarget().qpos[:3, :7] on sub3_largebox_003 (solve is deterministic to 0.0).
+# See test_scale_z_gmr_parity for the underlying z-placement assertion.
 BASELINE = np.array([
-    [ 0.93336654,  1.22630751,  0.80000567, -0.71056267, -0.00636412,
-     -0.01614609,  0.70341986],
-    [ 0.92929709,  1.23494086,  0.78959036, -0.71344381, -0.05943356,
-     -0.06284857,  0.69535289],
-    [ 0.92367599,  1.24801238,  0.77287924, -0.71196827, -0.11827157,
-     -0.11462996,  0.68262214],
+    [ 0.93314958,  1.24469752,  0.76197750, -0.70748595, -0.07170524,
+     -0.07309210,  0.69927072],
+    [ 0.92763404,  1.25388192,  0.74687360, -0.70932002, -0.09050483,
+     -0.09135339,  0.69305738],
+    [ 0.92314360,  1.26238896,  0.73055882, -0.71104174, -0.10792174,
+     -0.10957625,  0.68612360],
 ])
 
 
@@ -35,7 +37,8 @@ def test_default_solve_is_stable():
     # The default from_config build must produce a constraint-free solve that
     # matches this frozen baseline. No flag override needed: TestSocpRetargeterConfig
     # defaults all holosoma-style constraint flags OFF, so the plain default config
-    # is already constraint-free.
+    # is already constraint-free (only the GMR pos/rot tracking weights are active;
+    # the re-tuned lambda_* of the gated bricks do not affect this solve).
     rt = TestSocpRetargeter.from_config(
         RetargetingConfig(
             task_type="robot_only",

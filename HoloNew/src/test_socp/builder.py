@@ -218,7 +218,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         except Exception:  # noqa: BLE001 - height table may lack this subject
             smpl_scale = _robot_h / (cfg.motion_data_config.default_human_height or 1.78)
     _rob_xy = sc.scale_xy_robot if sc.scale_xy_robot is not None else smpl_scale
-    _rob_z = sc.scale_z_robot if sc.scale_z_robot is not None else smpl_scale
+    # Robot Z native default is the morphological base (HUMAN_SCALE_TABLE[pelvis]*ratio),
+    # NOT smpl_scale: pass None straight through so scale() takes its native branch and the
+    # z placement matches GMR / gmr_socp. (XY native = smpl_scale is correct; Z is not.)
+    _rob_z = sc.scale_z_robot
     # Object placement uses the same convention (None -> AUTO = smpl_scale). Our defaults
     # keep the object raw (1.0 / 1.0) so its trajectory is unchanged.
     _obj_xy = sc.scale_xy_object if sc.scale_xy_object is not None else smpl_scale
