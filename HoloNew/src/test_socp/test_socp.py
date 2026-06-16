@@ -101,6 +101,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
         lambda_l: float = 0.0,
+        lambda_cv: float = 0.0,
+        sigma_cv: float = 1.0,
         activate_wl_track: bool = False,
         lambda_l_track: float = 1.0,
         activate_qa: bool = True,
@@ -326,6 +328,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.lambda_c = lambda_c
         self.lambda_c_pos = lambda_c_pos
         self.lambda_l = lambda_l
+        self.lambda_cv = lambda_cv      # W^c_vel: CoM velocity tracking
+        self.sigma_cv = sigma_cv
 
         # Brick 5 — Movable entities W^o (default off; parity preserved).
         # §1 Variables: q_a (joints) and T_B (base) are free by default; setting their
@@ -462,6 +466,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
         cddot_ref: np.ndarray | None = None,
+        cdot_ref: np.ndarray | None = None,
         c_ref: np.ndarray | None = None,
         obj_pose_tm1=None,
         obj_pose_tm2=None,
@@ -709,7 +714,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # W^c_pos only needs c_ref and fires at any frame when active.
         # Guard: activate_centroidal and at least one lambda > 0.
         if self.activate_centroidal \
-                and (self.lambda_c > 0 or self.lambda_c_pos > 0 or self.lambda_l > 0) \
+                and (self.lambda_c > 0 or self.lambda_c_pos > 0
+                     or self.lambda_l > 0 or self.lambda_cv > 0) \
                 and c_ref is not None:
             # W^c / W^L require the two-step CoM history; only activate from frame 2.
             _lam_c_eff = self.lambda_c if (
@@ -722,7 +728,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and c_tm1 is not None and c_tm2 is not None
                 and q_t_last is not None
             ) else 0.0
-            if self.lambda_c_pos > 0 or _lam_c_eff > 0 or _lam_L_eff > 0:
+            # W^c_vel: CoM velocity tracking needs only the robot velocity (q_t_last) and
+            # the reference CoM velocity (first diff) -> available from frame 1.
+            _lam_cv_eff = self.lambda_cv if (
+                frame_idx >= 1 and q_t_last is not None and cdot_ref is not None
+            ) else 0.0
+            if self.lambda_c_pos > 0 or _lam_c_eff > 0 or _lam_L_eff > 0 or _lam_cv_eff > 0:
                 from HoloNew.src.test_socp.centroidal import build_centroidal_terms
                 q_t0 = _q_pin
                 q_tm1 = (self.pin.qpos_mj_to_q_pin(q_t_last[:36])
@@ -736,6 +747,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                     _lam_c_eff, self.lambda_c_pos, _lam_L_eff,
                     self._dt,
                     sigma_a=self.sigma_a, sigma_L=self.sigma_L,
+                    lambda_cv=_lam_cv_eff, sigma_cv=self.sigma_cv, cdot_ref=cdot_ref,
                 )
 
         # W^L reference tracking (opt-in): track the lumped reference angular
@@ -899,6 +911,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
         cddot_ref: np.ndarray | None = None,
+        cdot_ref: np.ndarray | None = None,
         c_ref: np.ndarray | None = None,
         obj_pose_tm1=None,
         obj_pose_tm2=None,
@@ -931,7 +944,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
                 obj_pose=obj_pose, obj_pose_ref=obj_pose_ref,
                 obj_pose_ref_tm1=obj_pose_ref_tm1, q_t_last2=q_t_last2,
-                c_tm1=c_tm1, c_tm2=c_tm2, cddot_ref=cddot_ref,
+                c_tm1=c_tm1, c_tm2=c_tm2, cddot_ref=cddot_ref, cdot_ref=cdot_ref,
                 c_ref=c_ref,
                 obj_pose_tm1=obj_pose_tm1, obj_pose_tm2=obj_pose_tm2,
                 vdot_ref_obj=vdot_ref_obj, omega_ref_obj=omega_ref_obj,
@@ -1152,10 +1165,14 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                     _cddot_ref_t = (_com_ref_t - 2.0 * _com_ref_prev + _com_ref_prev2) / (self._dt ** 2)
                 else:
                     _cddot_ref_t = np.zeros(3)
+                # CoM VELOCITY reference (W^c_vel): causal first difference, from frame 1.
+                _cdot_ref_t = ((_com_ref_t - _com_ref_prev) / self._dt
+                               if (t >= 1 and _com_ref_prev is not None) else np.zeros(3))
                 _com_ref_prev2 = _com_ref_prev
                 _com_ref_prev = _com_ref_t
             else:
                 _cddot_ref_t = _cddot_ref_all[t]
+                _cdot_ref_t = None   # velocity reference needs the SMPL CoM trajectory
             # c_ref: reference CoM = reference pelvis + structural com-pelvis offset.
             # Keeps the W^c_pos anchor on the correct trajectory without height bias.
             _c_ref_t = _c_ref_all[t]
@@ -1173,6 +1190,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                                 obj_pose_ref_tm1=_obj_pose_ref_tm1,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
+                                cdot_ref=_cdot_ref_t,
                                 c_ref=_c_ref_t,
                                 obj_pose_tm1=_obj_prev, obj_pose_tm2=_obj_prev2,
                                 vdot_ref_obj=_vdot_ref_obj_t, omega_ref_obj=_omega_ref_obj_t)

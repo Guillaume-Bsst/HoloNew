@@ -139,3 +139,24 @@ def test_L_floor_object_fields_and_attrs(rt):
     # default (AUTO) reproduces the shared margin exactly
     m = rt.smplx_ground_probe.margin
     assert rt.L_floor == m and rt.L_object == m
+
+
+def test_lambda_cv_sigma_cv_scale_wcvel(rt):
+    """W^c_vel scales by lambda_cv and 1/sigma_cv^2 at a fixed dqa."""
+    from HoloNew.src.test_socp.centroidal import build_centroidal_terms
+    pm = rt.pin
+    rng = np.random.default_rng(3)
+    q0 = pm.qpos_mj_to_q_pin(rt.q_init_full[:36])
+    q1 = pin.integrate(pm.model, q0, 0.02 * rng.standard_normal(pm.model.nv))
+    c0 = pm.com(q0)
+    dqa = cp.Variable(rt.nv_a); dqa.value = 0.01 * rng.standard_normal(rt.nv_a)
+    kw = dict(rt=rt, q_t0=q0, q_tm1=q1, c_tm1=c0, c_tm2=c0, cddot_ref=np.zeros(3),
+              c_ref=c0, dqa=dqa, lambda_c=0.0, lambda_c_pos=0.0, lambda_l=0.0, dt=1 / 30.0,
+              cdot_ref=np.array([0.1, -0.2, 0.05]))
+    t1 = build_centroidal_terms(lambda_cv=1.0, sigma_cv=1.0, **kw)
+    t2 = build_centroidal_terms(lambda_cv=2.0, sigma_cv=1.0, **kw)
+    t3 = build_centroidal_terms(lambda_cv=1.0, sigma_cv=2.0, **kw)
+    s1 = sum(float(t.value) for t in t1)
+    assert s1 > 0
+    np.testing.assert_allclose(sum(float(t.value) for t in t2), 2.0 * s1, rtol=1e-9)
+    np.testing.assert_allclose(sum(float(t.value) for t in t3), s1 / 4.0, rtol=1e-9)

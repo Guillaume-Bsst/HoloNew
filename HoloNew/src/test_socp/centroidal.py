@@ -106,7 +106,8 @@ def build_lumped_L_term(rt, q_pin, q_pin_prev, dqa, frames, masses, L_ref_t,
 
 def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
                             lambda_c, lambda_c_pos, lambda_l, dt, *,
-                            sigma_a=1.0, sigma_L=1.0):
+                            sigma_a=1.0, sigma_L=1.0,
+                            lambda_cv=0.0, sigma_cv=1.0, cdot_ref=None):
     """Assemble W^c (CoM accel) + W^c_pos (CoM position) + W^L (angular momentum -> 0).
 
     W^c = lambda_c * ||c_ddot - cddot_ref||^2 / sigma_a^2
@@ -188,13 +189,29 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
     # dominated by the contacts). We have neither, so W^L is kept as a weak
     # spin-toward-zero regularizer — sane for the grounded manipulation/climb clips
     # available. True L_ref tracking is deferred (see the inertia-mode design doc).
-    if lambda_l > 0:
-        Ag = rt.pin.centroidal_map(q_t0)                       # (6, nv)
+    # W^L (angular momentum) and W^c_vel (CoM velocity) both need the centroidal map.
+    if lambda_l > 0 or (lambda_cv > 0 and cdot_ref is not None):
+        Ag = rt.pin.centroidal_map(q_t0)                       # (6, nv): [M·cdot; L] = Ag·v
         v0, Jd = rt.pin.difference_and_jac(q_tm1, q_t0)       # v0: (nv,), Jd: (nv, nv)
-        AgL = Ag[3:6, :]                                       # (3, nv)
-        # v_active contribution via Jd columns for active joints; sigma_L normalises scale
-        A_L = (np.sqrt(lambda_l) / sigma_L) * (AgL @ Jd[:, rt.v_a_indices])  # (3, nv_a)
-        b_L = (np.sqrt(lambda_l) / sigma_L) * (AgL @ v0)          # (3,)
-        terms.append(cp.sum_squares(A_L @ dqa + b_L))
+        Jd_a = Jd[:, rt.v_a_indices]                           # (nv, nv_a)
+
+        if lambda_l > 0:
+            AgL = Ag[3:6, :]                                   # (3, nv) angular-momentum rows
+            A_L = (np.sqrt(lambda_l) / sigma_L) * (AgL @ Jd_a)  # (3, nv_a)
+            b_L = (np.sqrt(lambda_l) / sigma_L) * (AgL @ v0)     # (3,)
+            terms.append(cp.sum_squares(A_L @ dqa + b_L))
+
+        # --- W^c_vel: CoM VELOCITY tracking (linear momentum / M) toward cdot_ref ---
+        # The missing middle between W^c (accel, no anchor -> drift) and W^c_pos (position,
+        # the world cheat). cdot = (Ag[:3] @ v)/M; tracking it anchors the placement without
+        # contacts and without phase separation (it's the same term in flight and stance),
+        # using a derivative (~morphology-invariant) instead of the absolute position.
+        if lambda_cv > 0 and cdot_ref is not None:
+            M = sum(float(I.mass) for I in rt.pin.model.inertias)   # total robot mass
+            AgP = Ag[0:3, :]                                   # (3, nv) linear-momentum rows
+            s = np.sqrt(lambda_cv) / (sigma_cv * M)
+            A_cv = s * (AgP @ Jd_a)                            # (3, nv_a)
+            b_cv = s * (AgP @ v0) - (np.sqrt(lambda_cv) / sigma_cv) * np.asarray(cdot_ref)
+            terms.append(cp.sum_squares(A_cv @ dqa + b_cv))
 
     return terms

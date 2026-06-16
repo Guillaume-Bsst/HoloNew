@@ -121,6 +121,13 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_l: float = 1.0       # seed; was 1e-4
     activate_wl_track: bool = False
     lambda_l_track: float = 1.0
+    # W^c_vel: track the CoM VELOCITY (linear momentum / M) toward cdot_ref — the missing
+    # anchor between W^c (accel, drifts) and W^c_pos (position, the world cheat). Anchors
+    # the body placement WITHOUT contacts and without phase separation, via a derivative
+    # (~morpho-invariant). sigma_cv = characteristic CoM velocity (m/s).
+    activate_wcv: bool = False
+    lambda_cv: float = 1.0
+    sigma_cv: float = 1.0
 
     # [TEST] W^o Movable-object motion reg (needs activate_tm):
     # lambda_o * ( ||(vdot - vdot_ref)/sigma_ao||^2 + ||(omega - omega_ref)/sigma_omega||^2 ).
