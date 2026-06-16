@@ -81,6 +81,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         lambda_r: float = 0.0,
         sigma_qddot: float = 1.0,
         sigma_Vdot: float = 1.0,
+        lambda_smooth: float = 0.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         activate_ws: bool = False,
@@ -262,6 +263,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.lambda_x = lambda_x
         self.lambda_p = lambda_p
         self.sigma_v = sigma_v
+
+        # Native-Holosoma objective ports (default 0.0 = off; solve is unchanged).
+        self.lambda_smooth = lambda_smooth
 
         # Temporal regularization weights (default 0.0 = off; solve is unchanged).
         self.lambda_r = lambda_r
@@ -787,6 +791,17 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                         if self.smplx_ground_probe is not None else 0.1)
             obj_terms += build_object_floor_terms(
                 self, dxi_obj, obj_pose, self.lambda_obj_floor, _L_floor)
+
+        # W^smooth (native Holosoma): penalize the actuated-joint step deviating from
+        # the step toward the previous frame's pose. Matches Holosoma's
+        #   smooth_weight * ||dqa - (q_t_last_a - q_a_n_last)||^2
+        # restricted to the actuated-joint columns of dqa (v_a tangent index >= 6).
+        if self.lambda_smooth > 0 and q_t_last is not None:
+            joint_cols = np.where(self.v_a_indices >= 6)[0]      # joint tangent columns
+            joint_qpos = self.v_a_indices[joint_cols] + 1        # tangent 6+j -> qpos 7+j
+            dqa_smooth = q_t_last[joint_qpos] - q_a_n_last[joint_qpos]   # (n_joint,)
+            obj_terms.append(
+                self.lambda_smooth * cp.sum_squares(dqa[joint_cols] - dqa_smooth))
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:

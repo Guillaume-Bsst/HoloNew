@@ -94,6 +94,12 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
 
+    # [HOLO] Native-Holosoma objective terms (flat ports; enable these + disable
+    # pos/rot tracking to replicate Holosoma). Defaults = Holosoma's own weights.
+    # W^smooth: step-toward-previous-frame joint smoothness (Holosoma smooth_weight).
+    activate_smooth: bool = False
+    lambda_smooth: float = 0.2
+
     # === §3 CONSTRAINTS ===
 
     # [HOLO] need their companion config: self_collision=SelfCollisionConfig(...),
