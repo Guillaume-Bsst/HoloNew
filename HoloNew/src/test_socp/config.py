@@ -37,7 +37,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # object pose. False freezes each; activate_tm makes the object a variable (W^o in §2).
     activate_qa: bool = True
     activate_tb: bool = True
-    activate_tm: bool = False
+    activate_tm: bool = True
 
     # === §2 WEIGHTS ===
 
@@ -84,24 +84,31 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # (e.g. arms > legs). Normalized internally (Σω=1).
     style_weights: dict | None = None
 
-    # [TEST] W^D/W^X/W^P Interaction: carrier control points query each target's signed field.
-    # Targets = floor (always) + object; carriers = robot (always) + object. D = normal
-    # proximity, X = tangential placement, P = soft persistence (prefer the §3 hard constraint).
-    # Robot channel shares lambda_d/lambda_x; sigma_v scales P.
-    activate_wd: bool = False
-    lambda_d: float = 1.0
-    activate_wx: bool = False
-    lambda_x: float = 1.0
+    # [TEST] W^D/W^X/W^P Interaction — ROBOT carrier ↔ its environment. Robot control
+    # points query each target's signed field (floor always + object). D = normal
+    # proximity, X = tangential placement, P = soft persistence. sigma_v scales P.
+    activate_wd: bool = True
+    lambda_d: float = 10.0
+    activate_wx: bool = True
+    lambda_x: float = 10.0
     activate_wp: bool = False
     lambda_p: float = 1.0       # seed; P now (σ_v·dt)²-normalized
     sigma_v: float = 0.05
+    # [TEST] W^D/W^X/W^P Interaction — OBJECT carrier ↔ its environment (mirrors the
+    # robot block above; needs activate_tm). Object surface points query the floor field
+    # (object↔floor); object↔object pairs are a TODO (no multi-object data yet). Set all
+    # three activate_*_obj to False to disable the object-interaction channel.
+    activate_wd_obj: bool = False
+    lambda_d_obj: float = 10.0
+    activate_wx_obj: bool = False
+    lambda_x_obj: float = 10.0
+    activate_wp_obj: bool = False
+    lambda_p_obj: float = 1.0
+    sigma_v_obj: float = 0.05
     # [TEST] per-entity field range Lⱼ (activation distance AND positional scale).
     # None = AUTO: inherit the SDF probe margin (current shared value).
     L_floor: float | None = None
     L_object: float | None = None
-    #object carrier → floor (object<->environment pair); separate weight, needs activate_tm.
-    activate_obj_floor: bool = False
-    lambda_obj_floor: float = 1.0
 
     # [TEST] W^c/W^L Centroidal (W^c/W^L from frame >= 2, W^c_pos from frame 0):
     # W^c = ||c_ddot - c_ddot_ref||^2, W^c_pos = ||c - c_ref||^2, W^L = ||L||^2.
@@ -118,7 +125,8 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # [TEST] W^o Movable-object motion reg (needs activate_tm):
     # lambda_o * ( ||(vdot - vdot_ref)/sigma_ao||^2 + ||(omega - omega_ref)/sigma_omega||^2 ).
     # Single lambda_o; sigma_ao/sigma_omega carry the linear/angular asymmetry (Task 1.6).
-    # activate_wo_pos: absolute object-position anchor. (object<->floor contact = activate_obj_floor.)
+    # activate_wo_pos: absolute object-position anchor. (object<->floor contact = the
+    # object-interaction block above: activate_wd_obj / activate_wx_obj / activate_wp_obj.)
     activate_wo: bool = False
     lambda_o: float = 1.0       # seed (collapsed; σ_ao/σ_omega folded)
     activate_wo_pos: bool = False

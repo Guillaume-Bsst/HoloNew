@@ -81,37 +81,38 @@ def sample_object_surface(mesh_file: str, density: float = 200.0,
     return np.asarray(pts, dtype=np.float64)
 
 
-def build_object_floor_terms(rt, dxi, obj_pose, lambda_of, margin):
-    """Object<->floor contact (the paper's object-environment pair), in inertia
-    mode. Object surface points are carried by the object pose T = exp6(dxi)*T_ref
-    and query the analytic floor field (z=0 plane). Each near-floor point gets a D
-    (normal/height) and X (tangential/no-slip) residual that resists breaking the
-    floor contact, coupling the object pose variable dxi. Activation comes from the
-    reference floor distance, so the term acts only when the object is near the
-    floor and VANISHES when the object is lifted (-> object free -> W^o ballistic).
+def build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj, lambda_x_obj, margin):
+    """Object<->floor D + X (the object-environment pair, object = carrier). Object
+    surface points are carried by the object pose T = exp6(dxi)*T0 and query the
+    analytic floor field (z=0 plane). Each near-floor point gets a D (normal/height)
+    and X (tangential/placement) residual, with INDEPENDENT weights lambda_d_obj /
+    lambda_x_obj (mirroring the robot lambda_d / lambda_x). Activation comes from the
+    floor distance, so the term acts only when the object is near the floor and
+    VANISHES when it is lifted (-> object free -> W^o ballistic).
 
-    Linearization point is the reference object pose (obj_pose), so the residual is
-    zero at dxi=0 and penalizes motion of the floor-contact points away from it.
-    For a world point p, p(dxi) ~= p0 + [I, -skew(p0)] @ dxi (left-compose).
+    Linearization point is the object pose (obj_pose); the residual is zero at dxi=0
+    and penalizes motion of the floor-contact points away from it. For a world point
+    p, p(dxi) ~= p0 + [I, -skew(p0)] @ dxi (left-compose).
 
     Args:
         rt: retargeter (provides rt.object_surface_local).
         dxi: cp.Variable(6), object SE(3) tangent step.
-        obj_pose: (7,) [qw,qx,qy,qz,x,y,z] reference object pose at this frame.
-        lambda_of: object-floor weight.
+        obj_pose: (7,) [qw,qx,qy,qz,x,y,z] object pose at this frame.
+        lambda_d_obj: object-floor normal-proximity (D) weight (0 disables).
+        lambda_x_obj: object-floor tangential-placement (X) weight (0 disables).
         margin: floor activation band L (metres).
 
     Returns:
         List of up to two cvxpy expressions [D_term, X_term] (empty if no active
-        near-floor object points).
+        near-floor object points or both weights are 0).
     """
     import cvxpy as cp
     from HoloNew.src.test_socp.interaction import _activation, _skew
 
     p_local = rt.object_surface_local                       # (M, 3)
     M = p_local.shape[0]
-    T_ref = pose_to_se3(obj_pose)
-    p_w0 = p_local @ T_ref.rotation.T + T_ref.translation   # (M, 3) world
+    T0 = pose_to_se3(obj_pose)
+    p_w0 = p_local @ T0.rotation.T + T0.translation         # (M, 3) world
     d_ref = p_w0[:, 2]                                       # floor signed distance (z)
 
     alpha = np.array([_activation(float(d_ref[i]), margin) for i in range(M)])
@@ -121,17 +122,88 @@ def build_object_floor_terms(rt, dxi, obj_pose, lambda_of, margin):
 
     z = np.array([0.0, 0.0, 1.0])
     Pi0 = np.eye(3) - np.outer(z, z)
-    sw = np.sqrt(lambda_of * alpha[active] / (margin * margin * M))   # (na,)
+    w = alpha[active] / (margin * margin * M)               # (na,) per-point weight
 
     A_D = np.empty((active.size, 6))          # D: z^T [I,-skew(p0)] per point
     AX_blocks = []                            # X: Pi0 [I,-skew(p0)] per point
     for k, i in enumerate(active):
         Ji = np.hstack([np.eye(3), -_skew(p_w0[i])])        # (3, 6)
-        A_D[k] = sw[k] * (z @ Ji)
-        AX_blocks.append(sw[k] * (Pi0 @ Ji))
+        A_D[k] = np.sqrt(lambda_d_obj * w[k]) * (z @ Ji)
+        AX_blocks.append(np.sqrt(lambda_x_obj * w[k]) * (Pi0 @ Ji))
     A_X = np.vstack(AX_blocks)                                # (3*na, 6)
 
-    return [cp.sum_squares(A_D @ dxi), cp.sum_squares(A_X @ dxi)]
+    terms = []
+    if lambda_d_obj > 0:
+        terms.append(cp.sum_squares(A_D @ dxi))
+    if lambda_x_obj > 0:
+        terms.append(cp.sum_squares(A_X @ dxi))
+    return terms
+
+
+def build_object_floor_persistence(rt, dxi, obj_pose, obj_pose_prev, ref_t, ref_tm1,
+                                   lambda_p_obj, sigma_v, margin, dt):
+    """Object<->floor persistence P (the object-environment no-slip pair), symmetric
+    to the robot P (interaction.build_p_terms). Near-floor object surface points
+    resist tangential slip on the floor between frames, tracking the REFERENCE
+    object's tangential displacement (static source -> no-slip; sliding source ->
+    reproduce the slide). Coupled through the object pose variable dxi.
+
+        residual_i = Π0 · ( Δp_obj_i(dxi) − Δp_ref_i ),
+        Δp_obj_i  = p_i(dxi) − p_prev_i      (current solved-history displacement),
+        Δp_ref_i  = p_ref_t_i − p_ref_{t-1}_i (reference object displacement),
+        p_i(dxi) ≈ p_i0 + [I, −skew(p_i0)] · dxi,   Π0 = I − z zᵀ.
+
+    Normalized by (σ_v·Δt)² (the faithful per-frame slide, like the robot P), and
+    activated by floor proximity (acts only on near-floor points).
+
+    Args:
+        rt: retargeter (provides rt.object_surface_local).
+        dxi: cp.Variable(6), object SE(3) tangent step.
+        obj_pose: (7,) object pose linearization point at t.
+        obj_pose_prev: (7,) SOLVED object pose at t-1 (the no-slip anchor).
+        ref_t, ref_tm1: (7,) reference object poses at t and t-1.
+        lambda_p_obj, sigma_v, margin, dt: weight / slide scale / floor band / timestep.
+
+    Returns:
+        List with one cvxpy expression (empty if no active near-floor points or weight 0).
+    """
+    import cvxpy as cp
+    from HoloNew.src.test_socp.interaction import _activation, _skew, _p_scale_sq
+
+    if lambda_p_obj <= 0:
+        return []
+    p_local = rt.object_surface_local                       # (M, 3)
+    M = p_local.shape[0]
+    T0 = pose_to_se3(obj_pose)
+    p_w0 = p_local @ T0.rotation.T + T0.translation
+    alpha = np.array([_activation(float(p_w0[i, 2]), margin) for i in range(M)])
+    active = np.where(alpha > 0)[0]
+    if active.size == 0:
+        return []
+
+    Tprev = pose_to_se3(obj_pose_prev)
+    p_prev = p_local @ Tprev.rotation.T + Tprev.translation
+    Trt = pose_to_se3(ref_t)
+    Trtm1 = pose_to_se3(ref_tm1)
+    p_ref_t = p_local @ Trt.rotation.T + Trt.translation
+    p_ref_tm1 = p_local @ Trtm1.rotation.T + Trtm1.translation
+
+    z = np.array([0.0, 0.0, 1.0])
+    Pi0 = np.eye(3) - np.outer(z, z)
+    scale_sq = _p_scale_sq(lambda_p_obj, sigma_v, dt)
+
+    B_rows, r_rows = [], []
+    for i in active:
+        Bi = np.hstack([np.eye(3), -_skew(p_w0[i])])        # (3, 6)
+        dp_obj_const = p_w0[i] - p_prev[i]
+        dp_ref = p_ref_t[i] - p_ref_tm1[i]
+        sw = float(np.sqrt(scale_sq * alpha[i] / M))
+        B_rows.append(sw * (Pi0 @ Bi))                      # (3, 6)
+        # residual = Π0·(dp_obj_const + Bi·dxi − dp_ref); rhs = Π0·(dp_ref − dp_obj_const)
+        r_rows.append(sw * (Pi0 @ (dp_ref - dp_obj_const)))
+    B = np.vstack(B_rows)
+    r = np.concatenate(r_rows)
+    return [cp.sum_squares(B @ dxi - r)]
 
 
 def build_wo_term(

@@ -27,7 +27,7 @@ def test_paper_placement_fields_pass_through():
     # No hidden bundle: every field of the explicit paper-placement config reaches the
     # retargeter unchanged (the builder only validates, it never rewrites).
     rt = _robot_only(**PAPER_PLACEMENT)
-    assert rt.lambda_obj_floor > 0.0   # object<->floor contact enabled
+    assert rt.lambda_d_obj > 0.0 and rt.lambda_x_obj > 0.0   # object<->floor D/X enabled
     assert rt.lambda_ws > 0.0          # additive Style enabled
     assert rt.activate_centroidal is True
     assert rt.lambda_c > 0 and rt.lambda_l > 0

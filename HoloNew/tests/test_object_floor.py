@@ -31,7 +31,7 @@ def test_inertia_bundle_object_placed_by_contacts():
     if rt.correspondence is None:
         pytest.skip("assets not present")
     assert rt.lambda_o_pos == 0.0, "inertia mode must drop the object position anchor"
-    assert rt.lambda_obj_floor > 0.0, "inertia mode must enable object<->floor"
+    assert rt.lambda_d_obj > 0.0 and rt.lambda_x_obj > 0.0, "inertia mode must enable object<->floor D/X"
     assert rt.object_surface_local is not None and rt.object_surface_local.shape[1] == 3
 
 
@@ -44,7 +44,7 @@ def test_object_floor_term_assembles_finite():
     dxi = cp.Variable(6)
     dxi.value = np.array([0.01, 0.0, 0.0, 0.0, 0.0, 0.02])
     obj_pose = rt._obj_poses_raw[0]
-    terms = build_object_floor_terms(rt, dxi, obj_pose, lambda_of=5.0, margin=0.1)
+    terms = build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj=5.0, lambda_x_obj=5.0, margin=0.1)
     assert isinstance(terms, list)
     # The largebox rests on the floor at frame 0, so some bottom points are active.
     assert len(terms) == 2, "expected D + X object-floor terms with active points"

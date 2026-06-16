@@ -60,7 +60,7 @@ def test_loop_tracks_constant_velocity_object_no_lag():
     cfg = TestSocpRetargeterConfig(
         activate_tm=True, activate_wo=True,           # object variable + W^o motion reg
         activate_wd=False, activate_wx=False,          # no contact channel
-        activate_persistence=False, activate_obj_floor=False, activate_wo_pos=False)
+        activate_persistence=False, activate_wo_pos=False)
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
         task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh",
         retargeter=cfg))

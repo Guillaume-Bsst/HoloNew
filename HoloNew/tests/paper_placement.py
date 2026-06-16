@@ -25,8 +25,8 @@ PAPER_PLACEMENT = dict(
     activate_tm=True, activate_wo=True,
     # Weak centroidal W^c / W^L fills the residual / flight.
     activate_wc=True, activate_wl=True,
-    # Object<->floor contact (the floor is always a target now) + non-penetration.
-    activate_obj_floor=True, activate_obj_non_penetration=True,
+    # Object<->floor contact (object carrier D/X; the floor is always a target) + non-penetration.
+    activate_wd_obj=True, activate_wx_obj=True, activate_obj_non_penetration=True,
 )
 
 

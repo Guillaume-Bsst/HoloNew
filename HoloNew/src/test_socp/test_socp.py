@@ -108,7 +108,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         activate_tm: bool = False,
         lambda_o: float = 0.0,
         lambda_o_pos: float = 0.0,
-        lambda_obj_floor: float = 0.0,
+        lambda_d_obj: float = 0.0,
+        lambda_x_obj: float = 0.0,
+        lambda_p_obj: float = 0.0,
+        sigma_v_obj: float = 0.05,
         activate_obj_surface_nonpen: bool = False,
         obj_surface_nonpen_tol: float = 0.005,
         load_object_scene: bool = True,
@@ -333,7 +336,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.activate_tm = activate_tm
         self.lambda_o = lambda_o
         self.lambda_o_pos = lambda_o_pos
-        self.lambda_obj_floor = lambda_obj_floor
+        # Object-as-carrier interaction (object ↔ environment): D/X/P, mirroring the robot.
+        self.lambda_d_obj = lambda_d_obj
+        self.lambda_x_obj = lambda_x_obj
+        self.lambda_p_obj = lambda_p_obj
+        self.sigma_v_obj = sigma_v_obj
         self.activate_obj_surface_nonpen = activate_obj_surface_nonpen
         self.obj_surface_nonpen_tol = obj_surface_nonpen_tol
         self.activate_wl_track = activate_wl_track
@@ -450,6 +457,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
         obj_pose_ref=None,
+        obj_pose_ref_tm1=None,
         q_t_last2: np.ndarray | None = None,
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
@@ -791,13 +799,23 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # the object is lifted (then placed by object<->robot + ballistic W^o).
         if (dxi_obj is not None
                 and obj_pose is not None
-                and self.lambda_obj_floor > 0
-                and getattr(self, "object_surface_local", None) is not None):
-            from HoloNew.src.test_socp.movable import build_object_floor_terms
+                and getattr(self, "object_surface_local", None) is not None
+                and (self.lambda_d_obj > 0 or self.lambda_x_obj > 0 or self.lambda_p_obj > 0)):
+            from HoloNew.src.test_socp.movable import (
+                build_object_floor_terms, build_object_floor_persistence)
             _L_floor = (self.L_floor
                         if self.smplx_ground_probe is not None else 0.1)
-            obj_terms += build_object_floor_terms(
-                self, dxi_obj, obj_pose, self.lambda_obj_floor, _L_floor)
+            # D/X: object surface points vs the floor field.
+            if self.lambda_d_obj > 0 or self.lambda_x_obj > 0:
+                obj_terms += build_object_floor_terms(
+                    self, dxi_obj, obj_pose, self.lambda_d_obj, self.lambda_x_obj, _L_floor)
+            # P: tangential no-slip of the object on the floor, tracking the reference
+            # object's slide. Needs the previous SOLVED pose + reference[t] & [t-1] (frame>=1).
+            if (self.lambda_p_obj > 0 and obj_pose_tm1 is not None
+                    and obj_pose_ref is not None and obj_pose_ref_tm1 is not None):
+                obj_terms += build_object_floor_persistence(
+                    self, dxi_obj, obj_pose, obj_pose_tm1, obj_pose_ref, obj_pose_ref_tm1,
+                    self.lambda_p_obj, self.sigma_v_obj, _L_floor, self._dt)
 
         # W^smooth (native Holosoma): penalize the actuated-joint step deviating from
         # the step toward the previous frame's pose. Matches Holosoma's
@@ -876,6 +894,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         foot_sticking: tuple[bool, bool] | None = None,
         obj_pose=None,
         obj_pose_ref=None,
+        obj_pose_ref_tm1=None,
         q_t_last2: np.ndarray | None = None,
         c_tm1: np.ndarray | None = None,
         c_tm2: np.ndarray | None = None,
@@ -910,7 +929,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             q_n, cost, solved_obj_pose = self.solve_single_iteration(
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
                 frame_idx=frame_idx, foot_sticking=foot_sticking,
-                obj_pose=obj_pose, obj_pose_ref=obj_pose_ref, q_t_last2=q_t_last2,
+                obj_pose=obj_pose, obj_pose_ref=obj_pose_ref,
+                obj_pose_ref_tm1=obj_pose_ref_tm1, q_t_last2=q_t_last2,
                 c_tm1=c_tm1, c_tm2=c_tm2, cddot_ref=cddot_ref,
                 c_ref=c_ref,
                 obj_pose_tm1=obj_pose_tm1, obj_pose_tm2=obj_pose_tm2,
@@ -1112,9 +1132,14 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             _vdot_ref_obj_t = _vdot_ref_obj_all[t]
             _omega_ref_obj_t = _omega_ref_obj_all[t]
             _n_iter = self.n_iter_first if t == 0 else self.n_iter_per_frame
+            # Reference object pose at t-1 (for the object↔floor persistence P slide target).
+            _obj_pose_ref_tm1 = (self._obj_poses_raw[t - 1]
+                                 if (getattr(self, "_obj_poses_raw", None) is not None and t >= 1)
+                                 else None)
             q, _, _frame_solved_obj = self.iterate(q, q, q_prev, tg, n_iter=_n_iter,
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 obj_pose_ref=_obj_pose_ref,
+                                obj_pose_ref_tm1=_obj_pose_ref_tm1,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
                                 c_ref=_c_ref_t,

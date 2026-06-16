@@ -118,7 +118,11 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["activate_tm"] = sc.activate_tm
     kwargs["lambda_o"] = sc.lambda_o if sc.activate_wo else 0.0
     kwargs["lambda_o_pos"] = sc.lambda_o_pos if sc.activate_wo_pos else 0.0
-    kwargs["lambda_obj_floor"] = sc.lambda_obj_floor if sc.activate_obj_floor else 0.0
+    # Object-as-carrier interaction (object ↔ environment): mirror the robot D/X/P gating.
+    kwargs["lambda_d_obj"] = sc.lambda_d_obj if sc.activate_wd_obj else 0.0
+    kwargs["lambda_x_obj"] = sc.lambda_x_obj if sc.activate_wx_obj else 0.0
+    kwargs["lambda_p_obj"] = sc.lambda_p_obj if sc.activate_wp_obj else 0.0
+    kwargs["sigma_v_obj"] = sc.sigma_v_obj
     kwargs["activate_obj_surface_nonpen"] = sc.activate_obj_surface_nonpen
     kwargs["obj_surface_nonpen_tol"] = sc.obj_surface_nonpen_tol
     kwargs["activate_persistence"] = sc.activate_persistence
