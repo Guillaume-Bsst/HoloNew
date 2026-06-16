@@ -1009,6 +1009,20 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # anchor target), so the solved-vs-target CoM gap can be shown geometrically.
         self._c_ref_all = _c_ref_all
 
+        # TRUE CoM reference for W^c (replaces the pelvis proxy above, which made W^c fight
+        # every limb motion). Calibrate the per-part SMPL masses ONCE (morphology-only),
+        # then compute the CoM incrementally per frame in the loop (causal / online). Falls
+        # back to the pelvis _cddot_ref_all when the SMPL body is unavailable.
+        _smpl_calib = None
+        _hb = getattr(self.smplx_ground_probe, "human_body", None) if self.smplx_ground_probe else None
+        if _hb is not None and getattr(_hb, "_betas", None) is not None:
+            try:
+                from HoloNew.src.test_socp.smpl_com import calibrate_smpl_com
+                _smpl_calib = calibrate_smpl_com(_hb)
+            except Exception:  # noqa: BLE001 - degrade gracefully to the pelvis proxy
+                _smpl_calib = None
+        _com_ref_prev = _com_ref_prev2 = None
+
         # Previous two solved CoMs for W^c finite-difference stencil.
         # Initialised to the init-config CoM so the warm-up frames are stable.
         if self.activate_centroidal:
@@ -1124,7 +1138,24 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                     self._obj_poses_raw[t], self._obj_poses_raw[t - 1], _obj_prev)
             else:
                 _obj_pose = _obj_pose_ref
-            _cddot_ref_t = _cddot_ref_all[t]
+            # CoM-acceleration reference for W^c. Prefer the TRUE SMPL CoM (per-part rigid
+            # FK from this frame's body orientations + grounded pelvis), computed
+            # incrementally with a causal 2nd difference (no look-ahead). Fall back to the
+            # batch pelvis proxy when SMPL is unavailable.
+            if _smpl_calib is not None:
+                from HoloNew.src.test_socp.smpl_com import smpl_com_from_pose
+                _probe_q_com = (self._smplx_orientations[t]
+                                if getattr(self, "_smplx_orientations", None) is not None
+                                else self.human_quat[t])
+                _com_ref_t = smpl_com_from_pose(_smpl_calib, _probe_q_com, pelvis_grounded[t])
+                if t >= 2 and _com_ref_prev2 is not None:
+                    _cddot_ref_t = (_com_ref_t - 2.0 * _com_ref_prev + _com_ref_prev2) / (self._dt ** 2)
+                else:
+                    _cddot_ref_t = np.zeros(3)
+                _com_ref_prev2 = _com_ref_prev
+                _com_ref_prev = _com_ref_t
+            else:
+                _cddot_ref_t = _cddot_ref_all[t]
             # c_ref: reference CoM = reference pelvis + structural com-pelvis offset.
             # Keeps the W^c_pos anchor on the correct trajectory without height bias.
             _c_ref_t = _c_ref_all[t]
