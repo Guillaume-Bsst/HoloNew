@@ -68,6 +68,13 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["activate_obj_non_penetration"] = sc.activate_obj_non_penetration
     kwargs["activate_foot_sticking"] = sc.activate_foot_sticking
     kwargs["activate_self_collision"] = sc.activate_self_collision
+    # Surface ε flat: feed self_collision_margin into the companion config's tolerance
+    # (the flat field wins). build_retargeter_kwargs_from_config set kwargs["self_collision"]
+    # from the inherited RetargeterConfig; SelfCollisionConfig is frozen, so replace().
+    if kwargs.get("self_collision") is not None:
+        import dataclasses
+        kwargs["self_collision"] = dataclasses.replace(
+            kwargs["self_collision"], tolerance=sc.self_collision_margin)
     # Each cost term has its own activate_* switch (config §3): the switch alone decides,
     # so resolve the EFFECTIVE weight here (tuned value when on, 0 when off) and feed the
     # solver, whose gating stays the simple "weight > 0". One flag per weight.

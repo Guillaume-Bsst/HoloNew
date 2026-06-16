@@ -109,3 +109,19 @@ def test_config_sigma_defaults_present():
     assert c.sigma_ao == 9.81
     assert abs(c.sigma_omega - 2*np.pi) < 1e-9
     assert not hasattr(c, "lambda_omega")  # collapsed
+
+
+def test_self_collision_margin_surfaced():
+    """ε is a flat config field (Brick 4) defaulting to the SelfCollisionConfig value."""
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    c = TestSocpRetargeterConfig()
+    assert hasattr(c, "self_collision_margin")
+    assert isinstance(c.self_collision_margin, float)
+    assert c.self_collision_margin == 0.02
+
+
+def test_self_collision_margin_feeds_tolerance(rt):
+    """The flat ε reaches the solver's self-collision tolerance via the builder."""
+    # The module rt was built from the default config (self_collision_margin=0.02);
+    # the builder fed it into SelfCollisionConfig.tolerance -> _self_collision_tolerance.
+    assert rt._self_collision_tolerance == 0.02

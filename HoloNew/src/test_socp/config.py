@@ -126,6 +126,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # foot-sticking needs foot_lock + sequences (both inherited).
     activate_self_collision: bool = False
     activate_foot_sticking: bool = False
+    # [TEST] self-collision safety margin ε (d_ij >= ε), surfaced flat from
+    # SelfCollisionConfig.tolerance so it lives with the other constants. The builder
+    # feeds it into the companion config's tolerance (the flat field wins). Default =
+    # the inherited SelfCollisionConfig default, so behavior is unchanged.
+    self_collision_margin: float = 0.02
 
     # [HOLO] non-penetration d_ij >= -tolerance: phi from MuJoCo collision (mj_collision +
     # mj_geomDistance) on the loaded geometry, with our object/ground pair filter. Inherited
