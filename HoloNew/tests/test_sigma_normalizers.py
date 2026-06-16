@@ -100,3 +100,12 @@ def test_p_scale_helper():
     from HoloNew.src.test_socp.interaction import _p_scale_sq
     np.testing.assert_allclose(_p_scale_sq(4.0, 0.05, 1/30.0),
                                4.0 / (0.05 * (1/30.0))**2, rtol=1e-12)
+
+
+def test_config_sigma_defaults_present():
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    c = TestSocpRetargeterConfig()
+    assert c.sigma_R == 0.2 and c.sigma_a == 9.81 and c.sigma_L == 10.0
+    assert c.sigma_ao == 9.81
+    assert abs(c.sigma_omega - 2*np.pi) < 1e-9
+    assert not hasattr(c, "lambda_omega")  # collapsed

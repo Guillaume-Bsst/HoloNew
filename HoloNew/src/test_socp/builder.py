@@ -78,6 +78,11 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["lambda_r"] = sc.lambda_r if sc.activate_wr else 0.0
     kwargs["sigma_qddot"] = sc.sigma_qddot
     kwargs["sigma_Vdot"] = sc.sigma_Vdot
+    kwargs["sigma_R"] = sc.sigma_R
+    kwargs["sigma_a"] = sc.sigma_a
+    kwargs["sigma_L"] = sc.sigma_L
+    kwargs["sigma_ao"] = sc.sigma_ao
+    kwargs["sigma_omega"] = sc.sigma_omega
     kwargs["lambda_smooth"] = sc.lambda_smooth if sc.activate_smooth else 0.0
     kwargs["lambda_qdiag"] = sc.lambda_qdiag if sc.activate_qdiag else 0.0
     kwargs["lambda_nominal"] = sc.lambda_nominal if sc.activate_nominal else 0.0

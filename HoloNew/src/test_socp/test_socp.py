@@ -88,7 +88,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         lambda_ws: float = 0.0,
-        sigma_R: float = 1.0,
+        sigma_R: float = 0.2,
+        sigma_a: float = 9.81,
+        sigma_L: float = 10.0,
+        sigma_ao: float = 9.81,
+        sigma_omega: float = 6.283185307179586,
         activate_centroidal: bool = False,
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
@@ -293,6 +297,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # W^s Style (additive pelvis-relative orientation matching; default 0 = off).
         self.lambda_ws = lambda_ws
         self.sigma_R = sigma_R
+        # Brick 1 — σ characteristic scales (flat constants; plumbed from config).
+        self.sigma_a = sigma_a
+        self.sigma_L = sigma_L
+        self.sigma_ao = sigma_ao
+        self.sigma_omega = sigma_omega
 
         # Brick 4 — Centroidal W^c / W^c_pos / W^L (default off; parity preserved).
         self.activate_centroidal = activate_centroidal
@@ -679,7 +688,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                     self, q_t0, q_tm1, _c_tm1_eff, _c_tm2_eff,
                     _cddot_ref_eff, c_ref, dqa,
                     _lam_c_eff, self.lambda_c_pos, _lam_L_eff,
-                    self._dt
+                    self._dt,
+                    sigma_a=self.sigma_a, sigma_L=self.sigma_L,
                 )
 
         # W^L reference tracking (opt-in): track the lumped reference angular
@@ -694,7 +704,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             obj_terms.append(build_lumped_L_term(
                 self, q_pin_cur, q_pin_prev, dqa, self._lumped_frames,
                 self._lumped_masses, self._L_ref_all[frame_idx],
-                self.lambda_l_track, self._dt))
+                self.lambda_l_track, self._dt,
+                sigma_L=self.sigma_L))
 
         # W^o object motion regularization (Brick 5, default off).
         # dxi_obj was already created above; the W^o cost is added when the two
@@ -714,6 +725,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 T_obj0, T_obj_tm1, T_obj_tm2,
                 _vdot_ref, _omega_ref,
                 dxi_obj, self.lambda_o, self._dt,
+                sigma_ao=self.sigma_ao, sigma_omega=self.sigma_omega,
             ))
 
         # W^o position anchor: pins the absolute object position to the reference

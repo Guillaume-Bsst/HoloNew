@@ -61,12 +61,20 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_nominal: float = 5.0
     nominal_tau: float = 10.0
     
+    # [TEST] σ characteristic scales — FLAT constants, none auto-computed.
+    # Each residual is divided by its σ so λ is a pure fps-invariant priority.
+    sigma_R: float = 0.2        # style: orientation error (rad)
+    sigma_a: float = 9.81       # W^c: CoM accel (m/s²), = g
+    sigma_L: float = 10.0       # W^L: angular momentum (kg·m²/s), hand-set
+    sigma_ao: float = 9.81      # W^o linear: object accel (m/s²), = g
+    sigma_omega: float = 6.283185307179586  # W^o angular: spin (rad/s), = 2π
+
     # [TEST] W^s Style (additive, flat): ADDS pelvis-relative joint-orientation matching
     # (S_k) + pelvis-tilt against gravity (S_B) ON TOP of the GMR world tracking — no mode
     # swap. Per-body weights are normalized internally (sum to 1) so lambda_ws is a pure
     # priority (lambda^s in the spec). Activate + weight, like the other custom weights.
     activate_ws: bool = False
-    lambda_ws: float = 1.0
+    lambda_ws: float = 1.0      # seed (σ_R folded); validate via scoreboard
 
     # [TEST] W^D/W^X/W^P Interaction: carrier control points query each target's signed field.
     # Targets = floor (always) + object; carriers = robot (always) + object. D = normal
@@ -77,7 +85,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wx: bool = False
     lambda_x: float = 20.0
     activate_wp: bool = False
-    lambda_p: float = 20.0
+    lambda_p: float = 1.0       # seed; P now (σ_v·dt)²-normalized
     sigma_v: float = 0.05
     #object carrier → floor (object<->environment pair); separate weight, needs activate_tm.
     activate_obj_floor: bool = False
@@ -87,11 +95,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # W^c = ||c_ddot - c_ddot_ref||^2, W^c_pos = ||c - c_ref||^2, W^L = ||L||^2.
     # activate_wl_track: track L_ref (||L_lumped - L_ref||^2) instead of driving L->0.
     activate_wc: bool = False
-    lambda_c: float = 1e-5
+    lambda_c: float = 1.0       # seed; was 1e-5
     activate_wc_pos: bool = False
     lambda_c_pos: float = 1.0
     activate_wl: bool = False
-    lambda_l: float = 1e-4
+    lambda_l: float = 1.0       # seed; was 1e-4
     activate_wl_track: bool = False
     lambda_l_track: float = 5.0
 
@@ -100,7 +108,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # Single lambda_o; sigma_ao/sigma_omega carry the linear/angular asymmetry (Task 1.6).
     # activate_wo_pos: absolute object-position anchor. (object<->floor contact = activate_obj_floor.)
     activate_wo: bool = False
-    lambda_o: float = 1.0
+    lambda_o: float = 1.0       # seed (collapsed; σ_ao/σ_omega folded)
     activate_wo_pos: bool = False
     lambda_o_pos: float = 10.0
 
