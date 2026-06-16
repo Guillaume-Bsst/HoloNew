@@ -49,11 +49,10 @@ DATA_FORMAT = "smplh"
 _LAMBDA_C = 3.0
 _LAMBDA_C_POS = 5.0
 _LAMBDA_L = 0.5
-_PELVIS_ANCHOR_WEIGHT = 1.0
 
 
 def _make_rt(activate_centroidal: bool, lambda_c: float, lambda_c_pos: float,
-             lambda_l: float, pelvis_anchor_weight: float) -> TestSocpRetargeter:
+             lambda_l: float) -> TestSocpRetargeter:
     cfg = RetargetingConfig(
         task_type=TASK_TYPE,
         task_name=TASK_NAME,
@@ -67,8 +66,6 @@ def _make_rt(activate_centroidal: bool, lambda_c: float, lambda_c_pos: float,
             lambda_c_pos=lambda_c_pos,
             activate_wl=activate_centroidal and lambda_l > 0,
             lambda_l=lambda_l,
-            pelvis_anchor_weight=pelvis_anchor_weight,
-            activate_ws=True,   # keep default; isolates centroidal effect
         ),
     )
     return TestSocpRetargeter.from_config(cfg)
@@ -108,15 +105,14 @@ def test_centroidal_reduces_com_accel_error_and_pelvis_sane():
     because W^c tracks acceleration (second difference) not absolute position, and
     W^c_pos cannot cure this within the current linearised IK framework.
     """
-    # A: baseline (centroidal off), Style on.
+    # A: baseline (centroidal off).
     rt_A = _make_rt(activate_centroidal=False, lambda_c=0.0, lambda_c_pos=0.0,
-                    lambda_l=0.0, pelvis_anchor_weight=_PELVIS_ANCHOR_WEIGHT)
+                    lambda_l=0.0)
     res_A = rt_A.retarget(max_frames=MAX_FRAMES)
 
     # B: centroidal on with tuned weights including position anchor.
     rt_B = _make_rt(activate_centroidal=True, lambda_c=_LAMBDA_C,
-                    lambda_c_pos=_LAMBDA_C_POS, lambda_l=_LAMBDA_L,
-                    pelvis_anchor_weight=_PELVIS_ANCHOR_WEIGHT)
+                    lambda_c_pos=_LAMBDA_C_POS, lambda_l=_LAMBDA_L)
     res_B = rt_B.retarget(max_frames=MAX_FRAMES)
 
     K = min(res_B.qpos.shape[0], MAX_FRAMES)
@@ -155,8 +151,7 @@ def test_centroidal_reduces_com_accel_error_and_pelvis_sane():
         f"  improvement={err_A / err_B:.1f}x"
         f"  pelvis_z=[{pelvis_z.min():.3f}, {pelvis_z.max():.3f}] m"
         f"  xy_drift_max={xy_drift.max():.4f} m  (baseline ~0.022 m)"
-        f"\n  lambda_c={_LAMBDA_C}  lambda_c_pos={_LAMBDA_C_POS}"
-        f"  lambda_l={_LAMBDA_L}  pelvis_anchor_weight={_PELVIS_ANCHOR_WEIGHT}"
+        f"\n  lambda_c={_LAMBDA_C}  lambda_c_pos={_LAMBDA_C_POS}  lambda_l={_LAMBDA_L}"
         f"\n  NOTE: W^c_pos implemented but cannot cure drift when W^c active."
         f" W^c effective weight ~lambda_c/dt^4 = {_LAMBDA_C * (30**4):.0f}x"
         f" vs lambda_c_pos = {_LAMBDA_C_POS}."

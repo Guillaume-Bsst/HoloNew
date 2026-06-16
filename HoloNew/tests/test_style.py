@@ -34,9 +34,13 @@ def test_tilt_residual_matches_fd_and_is_yaw_invariant():
         np.testing.assert_allclose(A[:, k], fd, atol=1e-4, err_msg=f"col {k}")
 
 
-def test_style_default_on_and_runs():
-    # After Brick 3 validation, activate_ws=True is the default.
-    rt = _rt()
-    assert rt.activate_ws is True
-    res = rt.retarget(max_frames=6)
+def test_style_off_by_default_and_additive_runs():
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    # Style is OFF by default (GMR baseline); it is an additive weight.
+    assert _rt().lambda_ws == 0.0
+    # Turned on additively (on top of GMR tracking), the solve runs finite.
+    rt_on = TestSocpRetargeter.from_config(RetargetingConfig(
+        task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh",
+        retargeter=TestSocpRetargeterConfig(activate_ws=True, lambda_ws=1.0)))
+    res = rt_on.retarget(max_frames=6)
     assert np.all(np.isfinite(res.qpos))

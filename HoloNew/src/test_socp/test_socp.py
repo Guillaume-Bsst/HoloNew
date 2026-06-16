@@ -87,9 +87,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         nominal_tau: float = 10.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
-        activate_ws: bool = False,
-        pelvis_anchor_weight: float = 1.0,
-        style_pelvis_relative: bool = False,
+        lambda_ws: float = 0.0,
         activate_centroidal: bool = False,
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
@@ -292,15 +290,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # IK match tables). Toggle each channel on/off; the table values still apply.
         self.activate_pos_tracking = activate_pos_tracking
         self.activate_rot_tracking = activate_rot_tracking
-        # Brick 3 — Pelvis-relative Style objective (default off; parity preserved).
-        self.activate_ws = activate_ws
-        self.pelvis_anchor_weight = pelvis_anchor_weight
-        # style_pelvis_relative gates the Style objective's reference frame (only used
-        # when activate_ws is True): True keeps the pelvis-relative joint orientations
-        # + weak pelvis position scaffold (paper placement); False makes the joint
-        # orientations world-frame and the pelvis position a full world target (GMR-like),
-        # while keeping the yaw-free pelvis tilt and the dropped joint-position terms.
-        self.style_pelvis_relative = style_pelvis_relative
+        # W^s Style (additive pelvis-relative orientation matching; default 0 = off).
+        self.lambda_ws = lambda_ws
 
         # Brick 4 — Centroidal W^c / W^c_pos / W^L (default off; parity preserved).
         self.activate_centroidal = activate_centroidal
@@ -460,84 +451,54 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         dqa = cp.Variable(self.nv_a, name="dqa")
 
         obj_terms = []
-        if not self.activate_ws:
-            # World-frame tracking (default): each frame tracked in world coordinates.
-            for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
-                body = self.robot_link_names[frame]
-                Jp, Jr = self._body_jac(q, body)
+        # World-frame tracking (GMR): always runs; gated per body by activate_pos/rot.
+        for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
+            body = self.robot_link_names[frame]
+            Jp, Jr = self._body_jac(q, body)
 
-                if self.activate_pos_tracking and w_p > 0:
-                    p_c = self.body_position(q, body)
-                    obj_terms.append(
-                        w_p * cp.sum_squares(Jp @ dqa - (p_t - p_c))
-                    )
+            if self.activate_pos_tracking and w_p > 0:
+                p_c = self.body_position(q, body)
+                obj_terms.append(w_p * cp.sum_squares(Jp @ dqa - (p_t - p_c)))
 
-                if self.activate_rot_tracking and w_r > 0:
-                    R_c = self.body_rotation(q, body)
-                    # Orientation error in body frame; body-frame angular Jacobian.
-                    # Convention (b): body-frame Jacobian = R_c.T @ Jr,
-                    # body-frame error = log(R_c.T @ R_t).
-                    # This is the convention that makes the linearisation consistent:
-                    # body_omega ≈ (R_c.T @ Jr) @ dqa  and  e = log(R_c.T @ R_t).
-                    e = Rotation.from_matrix(R_c.T @ R_t).as_rotvec()
-                    Jr_body = R_c.T @ Jr
-                    obj_terms.append(
-                        w_r * cp.sum_squares(Jr_body @ dqa - e)
-                    )
-        else:
-            # Pelvis-relative Style objective (Brick 3):
-            # - pelvis position: weak scaffold (pelvis_anchor_weight * w_p)
-            # - pelvis orientation: roll/pitch-only tilt (yaw-invariant)
-            # - joint orientations: re-based by current pelvis (pelvis-relative)
-            # - joint position terms: dropped (positions emerge from orientations)
+            if self.activate_rot_tracking and w_r > 0:
+                R_c = self.body_rotation(q, body)
+                # Body-frame orientation error + body-frame angular Jacobian:
+                # body_omega ≈ (R_c.T @ Jr) @ dqa,  e = log(R_c.T @ R_t).
+                e = Rotation.from_matrix(R_c.T @ R_t).as_rotvec()
+                Jr_body = R_c.T @ Jr
+                obj_terms.append(w_r * cp.sum_squares(Jr_body @ dqa - e))
+
+        # W^s Style (additive, flat): pelvis-relative joint-orientation matching (S_k) +
+        # pelvis tilt against gravity (S_B), ADDED on top of the GMR world tracking — no
+        # mode swap. Per-body weights are normalized (sum to 1) so lambda_ws is a pure
+        # priority (lambda^s). See the spec's Style Component.
+        #   S_k: R~_k = R_B^-1 R_k  ->  (R_B_ref)^-1 R_t, linearized with the pelvis fixed
+        #        (R_target = R_B0 (R_B_ref)^-1 R_t, then match the world R_k -> R_target).
+        #   S_B: ||(R_B_ref)^T zhat - R_B^T zhat||^2 (yaw-free pelvis tilt).
+        if self.lambda_ws > 0 and self.activate_rot_tracking:
             from HoloNew.src.test_socp.style import pelvis_tilt_residual
             pelvis_body = "pelvis"
             R_B0 = self.body_rotation(q, pelvis_body)
-            R_Bref = None
-            pelvis_p_t = None
-            pelvis_w_p = 0.0
-            for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
-                if self.robot_link_names[frame] == pelvis_body:
-                    R_Bref = R_t
-                    pelvis_p_t = p_t
-                    pelvis_w_p = w_p
-            for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
-                body = self.robot_link_names[frame]
-                Jp, Jr = self._body_jac(q, body)
-                if body == pelvis_body:
-                    # Pelvis position. Pelvis-relative Style: weak scaffold (keeps the
-                    # pelvis from drifting; paw=0 there drops it entirely, the body being
-                    # placed by contacts). World Style: full world-position target like
-                    # GMR (weight w_p, no anchor multiplier).
-                    if self.activate_pos_tracking and pelvis_w_p > 0:
-                        p_c = self.body_position(q, body)
-                        if self.style_pelvis_relative:
-                            if self.pelvis_anchor_weight > 0:
-                                obj_terms.append(
-                                    self.pelvis_anchor_weight * pelvis_w_p
-                                    * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
-                                )
-                        else:
-                            obj_terms.append(
-                                pelvis_w_p * cp.sum_squares(Jp @ dqa - (pelvis_p_t - p_c))
-                            )
-                    # Roll/pitch tilt term replaces full pelvis orientation tracking
-                    # (yaw-free) in BOTH modes.
-                    if self.activate_rot_tracking and w_r > 0:
-                        r0, A = pelvis_tilt_residual(self, q, R_Bref)
-                        obj_terms.append(w_r * cp.sum_squares(A @ dqa - r0))
-                else:
-                    # Joint orientation target. Pelvis-relative Style: re-based by the
-                    # current pelvis (R_B0 @ R_Bref^{-1} @ R_t), so the joint tracks under
-                    # the robot's free pelvis yaw. World Style: the world-frame target R_t
-                    # directly (GMR-like). Joint position tracking is dropped in both;
-                    # positions emerge from the orientation constraints.
-                    if self.activate_rot_tracking and w_r > 0:
-                        R_target = R_B0 @ R_Bref.T @ R_t if self.style_pelvis_relative else R_t
+            R_Bref = next((R_t for frame, (p_t, R_t, w_p, w_r) in frame_targets.items()
+                           if self.robot_link_names[frame] == pelvis_body), None)
+            w_tot = sum(w_r for frame, (p_t, R_t, w_p, w_r) in frame_targets.items()
+                        if w_r > 0)
+            if R_Bref is not None and w_tot > 0:
+                for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
+                    if w_r <= 0:
+                        continue
+                    body = self.robot_link_names[frame]
+                    omega = self.lambda_ws * (w_r / w_tot)   # normalized intra-style weight
+                    if body == pelvis_body:
+                        r0, A = pelvis_tilt_residual(self, q, R_Bref)        # S_B
+                        obj_terms.append(omega * cp.sum_squares(A @ dqa - r0))
+                    else:
+                        _, Jr = self._body_jac(q, body)                      # S_k
                         R_c = self.body_rotation(q, body)
+                        R_target = R_B0 @ R_Bref.T @ R_t
                         e = Rotation.from_matrix(R_c.T @ R_target).as_rotvec()
                         Jr_body = R_c.T @ Jr
-                        obj_terms.append(w_r * cp.sum_squares(Jr_body @ dqa - e))
+                        obj_terms.append(omega * cp.sum_squares(Jr_body @ dqa - e))
 
         constraints = [cp.SOC(self.step_size, dqa)]
         # §1 Variables: freeze q_a (joints) or T_B (base) by pinning their tangent block

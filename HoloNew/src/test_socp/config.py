@@ -61,12 +61,12 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_nominal: float = 5.0
     nominal_tau: float = 10.0
     
-    # [TEST] W^s Style: swaps world-frame tracking for pelvis tilt-only orientation (joint
-    # positions dropped). style_pelvis_relative: re-base joint orientations on the current
-    # pelvis + weak scaffold (pelvis_anchor_weight*w_p); False = world frame + full pelvis position.
+    # [TEST] W^s Style (additive, flat): ADDS pelvis-relative joint-orientation matching
+    # (S_k) + pelvis-tilt against gravity (S_B) ON TOP of the GMR world tracking — no mode
+    # swap. Per-body weights are normalized internally (sum to 1) so lambda_ws is a pure
+    # priority (lambda^s in the spec). Activate + weight, like the other custom weights.
     activate_ws: bool = False
-    style_pelvis_relative: bool = False
-    pelvis_anchor_weight: float = 10.0
+    lambda_ws: float = 1.0
 
     # [TEST] W^D/W^X/W^P Interaction: carrier control points query each target's signed field.
     # Targets = floor (always) + object; carriers = robot (always) + object. D = normal

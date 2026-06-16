@@ -18,7 +18,7 @@ def test_default_is_gmr_baseline():
     # The flat default is the bare GMR objective: no Style, no centroidal, no floor
     # channel, no contact terms — added back explicitly per test.
     rt = _robot_only()
-    assert rt.activate_ws is False
+    assert rt.lambda_ws == 0.0
     assert rt.activate_centroidal is False
     assert rt.lambda_d == 0.0 and rt.lambda_x == 0.0
 
@@ -28,8 +28,7 @@ def test_paper_placement_fields_pass_through():
     # retargeter unchanged (the builder only validates, it never rewrites).
     rt = _robot_only(**PAPER_PLACEMENT)
     assert rt.lambda_obj_floor > 0.0   # object<->floor contact enabled
-    assert rt.pelvis_anchor_weight == 0.0
-    assert rt.style_pelvis_relative is True
+    assert rt.lambda_ws > 0.0          # additive Style enabled
     assert rt.activate_centroidal is True
     assert rt.lambda_c > 0 and rt.lambda_l > 0
     assert rt.correspondence is not None

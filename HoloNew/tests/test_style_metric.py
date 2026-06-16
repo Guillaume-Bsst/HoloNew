@@ -45,18 +45,17 @@ TASK_NAME = "sub3_largebox_003"
 DATA_FORMAT = "smplh"
 
 
-def _make_rt(activate_ws: bool) -> TestSocpRetargeter:
-    # Pin style_pelvis_relative=True: this test validates the *pelvis-relative*
-    # Style objective. The config default flipped to False (GMR baseline) after this
-    # test was written, which exercises the non-re-basing Style variant that does NOT
-    # improve pelvis-relative fidelity — so the feature must be pinned on here.
+def _make_rt(lambda_ws: float) -> TestSocpRetargeter:
+    # W^s is now an ADDITIVE pelvis-relative orientation term on top of GMR world
+    # tracking (no mode swap). A strong lambda_ws is used so its (modest) improvement
+    # of the pelvis-relative orientation fidelity is measurable against the GMR rot
+    # tracking it competes with.
     from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
     cfg = RetargetingConfig(
         task_type=TASK_TYPE,
         task_name=TASK_NAME,
         data_format=DATA_FORMAT,
-        retargeter=TestSocpRetargeterConfig(activate_ws=activate_ws,
-                                            style_pelvis_relative=True),
+        retargeter=TestSocpRetargeterConfig(activate_ws=lambda_ws > 0, lambda_ws=lambda_ws),
     )
     return TestSocpRetargeter.from_config(cfg)
 
@@ -80,15 +79,17 @@ def _pelvis_relative_fidelity(rt: TestSocpRetargeter, qpos: np.ndarray) -> float
 
 
 def test_style_finite_no_collapse_and_fidelity():
-    """Validate activate_ws=True over 30 frames: finite, sane pelvis z,
-    comparable pelvis-relative joint fidelity to world-frame tracking.
+    """Validate the additive W^s over 30 frames: finite, sane pelvis z, and it
+    IMPROVES the pelvis-relative orientation fidelity vs W^s off (GMR tracking only).
 
-    Observed on sub3_largebox_003 (2026-06-15, style_pelvis_relative=True):
-        style  pelvis-relative err : 0.4177 rad
-        world  pelvis-relative err : 0.6994 rad  (Style ~40 % better)
+    Additive W^s competes with the GMR world rot tracking, so its improvement is
+    modest; a strong lambda_ws makes it measurable.
+    Observed on sub3_largebox_003 (2026-06-16, lambda_ws=20):
+        style (W^s on)  pelvis-relative err : ~0.535 rad
+        world (W^s off) pelvis-relative err : ~0.551 rad  (W^s improves it)
     """
-    # --- Style solve ---
-    rt_style = _make_rt(activate_ws=True)
+    # --- W^s on (strong) ---
+    rt_style = _make_rt(20.0)
     res_style = rt_style.retarget(max_frames=MAX_FRAMES)
 
     # 1. Finite + no pose collapse.
@@ -101,24 +102,18 @@ def test_style_finite_no_collapse_and_fidelity():
         f"Pelvis z exceeded 1.0 m; max={pelvis_z.max():.4f}"
     )
 
-    # --- World-frame solve (reference) ---
-    rt_world = _make_rt(activate_ws=False)
+    # --- W^s off (GMR world tracking only) ---
+    rt_world = _make_rt(0.0)
     res_world = rt_world.retarget(max_frames=MAX_FRAMES)
 
-    # 2. Pelvis-relative fidelity comparison.
+    # 2. Pelvis-relative fidelity: additive W^s must improve it (lower error).
     style_err = _pelvis_relative_fidelity(rt_style, res_style.qpos)
     world_err = _pelvis_relative_fidelity(rt_world, res_world.qpos)
+    assert not np.isnan(style_err) and not np.isnan(world_err), "fidelity metric NaN"
 
-    # Record observed values in the assertion message for traceability.
-    assert not np.isnan(style_err), "Style fidelity metric is NaN"
-    assert not np.isnan(world_err), "World fidelity metric is NaN"
-
-    # Style tracks pelvis-relative orientations explicitly; it should be at least
-    # as good as world tracking (which does not optimise pelvis-relative errors
-    # directly). Allow a 0.05 rad slack for numerical noise.
-    assert style_err <= world_err + 0.05, (
-        f"Style pelvis-relative fidelity ({style_err:.4f} rad) is worse than "
-        f"world tracking ({world_err:.4f} rad) by more than 0.05 rad slack"
+    assert style_err < world_err, (
+        f"Additive W^s did not improve pelvis-relative fidelity: "
+        f"on={style_err:.4f} rad off={world_err:.4f} rad"
     )
 
     # Log the numbers so they appear in verbose test output.
@@ -130,14 +125,10 @@ def test_style_finite_no_collapse_and_fidelity():
 
 
 def test_style_base_drift_bounded():
-    """Assert that the default Style config (pelvis_anchor_weight=10.0) keeps
-    the solved base-xy close to the reference pelvis trajectory on
-    object_interaction sub3_largebox_003, 30 frames.
+    """Base-xy stays close to the reference pelvis trajectory on object_interaction
+    sub3_largebox_003, 30 frames. With W^s now additive (no mode swap), the pelvis
+    position is tracked by the GMR objective (always on), which keeps base-xy bounded.
 
-    Style frees the pelvis ORIENTATION (yaw), not its position; the scaffold
-    must be strong enough to prevent xy drift.
-
-    Observed (2026-06-14, paw=10.0): max=0.126 m, mean=0.049 m.
     Regression limit: mean < 0.12 m.
     """
     cfg = RetargetingConfig(
@@ -166,13 +157,9 @@ def test_style_base_drift_bounded():
     mean_drift = float(drifts.mean())
     max_drift = float(drifts.max())
 
-    print(
-        f"\n[style_drift] paw={rt.pelvis_anchor_weight}  "
-        f"mean_drift={mean_drift:.4f} m  max_drift={max_drift:.4f} m"
-    )
+    print(f"\n[style_drift] mean_drift={mean_drift:.4f} m  max_drift={max_drift:.4f} m")
 
     assert mean_drift < 0.12, (
-        f"Base-xy mean drift {mean_drift:.4f} m exceeds 0.12 m limit "
-        f"(pelvis_anchor_weight={rt.pelvis_anchor_weight}); "
-        f"the Style position scaffold may have been weakened."
+        f"Base-xy mean drift {mean_drift:.4f} m exceeds 0.12 m limit; "
+        f"the GMR pelvis-position tracking may have weakened."
     )

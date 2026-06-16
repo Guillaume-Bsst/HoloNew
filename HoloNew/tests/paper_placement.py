@@ -18,7 +18,7 @@ from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 # OFF: the body and object are placed by contacts.
 PAPER_PLACEMENT = dict(
     # Style objective, pelvis-relative frame (the paper-placement frame).
-    activate_ws=True, style_pelvis_relative=True, pelvis_anchor_weight=0.0,
+    activate_ws=True, lambda_ws=1.0,
     # Contact terms that place the body/feet + temporal regularization.
     activate_wd=True, activate_wx=True, activate_persistence=True, activate_wr=True,
     # Movable object, placed by contacts (no position anchor).
