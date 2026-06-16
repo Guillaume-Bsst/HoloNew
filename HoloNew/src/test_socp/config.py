@@ -14,9 +14,9 @@ Layout follows the solve pipeline (§0 preprocess → §1 variables → §2 weig
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from HoloNew.config_types.retargeter import RetargeterConfig
+from HoloNew.config_types.retargeter import FootLockConfig, RetargeterConfig
 
 
 @dataclass(frozen=True)
@@ -79,6 +79,10 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # priority (lambda^s in the spec). Activate + weight, like the other custom weights.
     activate_ws: bool = False
     lambda_ws: float = 1.0      # seed (σ_R folded); validate via scoreboard
+    # Intra-style distribution ω_k^s: None = the uniform STYLE_WEIGHT_TABLE (default,
+    # == legacy). Pass a dict {robot_body -> weight, "__pelvis_tilt__" -> ω_B} to re-weight
+    # (e.g. arms > legs). Normalized internally (Σω=1).
+    style_weights: dict | None = None
 
     # [TEST] W^D/W^X/W^P Interaction: carrier control points query each target's signed field.
     # Targets = floor (always) + object; carriers = robot (always) + object. D = normal
@@ -130,11 +134,18 @@ class TestSocpRetargeterConfig(RetargeterConfig):
 
     # === §3 CONSTRAINTS ===
 
-    # [HOLO] need their companion config: self_collision=SelfCollisionConfig(...),
-    # foot-sticking needs foot_lock + sequences (both inherited).
+    # [HOLO] self-collision companion config (inherited SelfCollisionConfig for geom pairs;
+    # self_collision_margin surfaces its tolerance flat).
     activate_self_collision: bool = False
     self_collision_margin: float = 0.02
+    # [HOLO] foot-sticking: per-frame XY no-slip on planted feet (sequence auto-built from the
+    # source). foot_sticking_tolerance = XY band half-width (m).
     activate_foot_sticking: bool = False
+    foot_sticking_tolerance: float = 1e-3
+    # [HOLO] foot-lock: pin a foot's Z to z_floor over configured frame windows. Re-surfaced
+    # from the inherited RetargeterConfig so it is settable/visible here. Off until
+    # foot_lock.enable=True (set windows / z_floor / tolerance on the FootLockConfig).
+    foot_lock: FootLockConfig = field(default_factory=FootLockConfig)
 
     # [HOLO] non-penetration d_ij >= -tolerance: phi from MuJoCo collision (mj_collision +
     # mj_geomDistance) on the loaded geometry, with our object/ground pair filter. Inherited
@@ -142,6 +153,9 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # measures against (xml swap): True = object<->robot (full object xml), False = ground only.
     activate_obj_non_penetration: bool = False
     load_object_scene: bool = False
+    # penetration_tolerance: allowed signed-distance slack d_ij >= -tolerance (m). Re-surfaced
+    # from the inherited RetargeterConfig.
+    penetration_tolerance: float = 0.001
 
     # [GMR] actuated joint limits.
     activate_joint_limits: bool = True
@@ -159,8 +173,10 @@ class TestSocpRetargeterConfig(RetargeterConfig):
 
     # [TEST] fps -> dt = 1/fps. n_iter_first / n_iter_per_frame: inner SQP iterations on frame
     # 0 vs rest. iterate_step_tol: early-stop when the actuated step norm drops below it (0 off).
-    # (step_size is inherited from Holosoma's RetargeterConfig.)
     fps: float = 30.0
     n_iter_first: int = 50
     n_iter_per_frame: int = 10
     iterate_step_tol: float = 0.01
+    # step_size: SOC trust-region radius ||dqa|| <= step_size per SQP iteration. Re-surfaced
+    # from the inherited RetargeterConfig.
+    step_size: float = 0.2

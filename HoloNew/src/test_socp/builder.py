@@ -103,6 +103,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["lambda_rot"] = sc.lambda_rot
     kwargs["sigma_rot"] = sc.sigma_rot
     kwargs["lambda_ws"] = sc.lambda_ws if sc.activate_ws else 0.0
+    kwargs["style_weights"] = sc.style_weights  # None -> solver uses STYLE_WEIGHT_TABLE
     # Centroidal: one switch per term; the solver's master activate_centroidal is the OR.
     kwargs["activate_centroidal"] = sc.activate_wc or sc.activate_wc_pos or sc.activate_wl
     kwargs["lambda_c"] = sc.lambda_c if sc.activate_wc else 0.0
