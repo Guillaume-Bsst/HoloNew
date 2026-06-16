@@ -102,6 +102,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # W^qdiag: absolute joint-config regularizer, per-joint weights from MANUAL_COST.
     activate_qdiag: bool = False
     lambda_qdiag: float = 1.0
+    # W^nominal: pull NOMINAL_TRACKING_INDICES joints toward a nominal pose, with an
+    # exp-decaying weight over SQP iterations (Holosoma w_nominal_tracking_init / tau).
+    activate_nominal: bool = False
+    lambda_nominal: float = 5.0
+    nominal_tau: float = 10.0
 
     # === §3 CONSTRAINTS ===
 

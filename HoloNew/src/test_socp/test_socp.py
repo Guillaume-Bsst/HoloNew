@@ -83,6 +83,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         sigma_Vdot: float = 1.0,
         lambda_smooth: float = 0.0,
         lambda_qdiag: float = 0.0,
+        lambda_nominal: float = 0.0,
+        nominal_tau: float = 10.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         activate_ws: bool = False,
@@ -273,6 +275,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self._q_diag_joints = np.zeros(task_constants.ROBOT_DOF)
         for _k, _v in getattr(task_constants, "MANUAL_COST", {}).items():
             self._q_diag_joints[int(_k)] = float(_v)
+        # W^nominal: which actuated joints, and the nominal pose to pull them toward.
+        # Default nominal = q_init's joint pose (static). For exact Holosoma parity the
+        # per-frame nominal (data qpos) is threaded in at the parity step.
+        self.lambda_nominal = lambda_nominal
+        self.nominal_tau = nominal_tau
+        self._nominal_idx = np.asarray(
+            getattr(task_constants, "NOMINAL_TRACKING_INDICES", []), dtype=int)
 
         # Temporal regularization weights (default 0.0 = off; solve is unchanged).
         self.lambda_r = lambda_r
@@ -406,6 +415,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         obj_pose_tm2=None,
         vdot_ref_obj: np.ndarray | None = None,
         omega_ref_obj: np.ndarray | None = None,
+        sqp_iter: int = 0,
     ):
         """One linearised IK step with GMR position + orientation objective.
 
@@ -820,6 +830,19 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             new_joints = dqa[joint_cols] + q_a_n_last[joint_qpos]
             obj_terms.append(cp.sum_squares(cp.multiply(sw, new_joints)))
 
+        # W^nominal (native Holosoma): pull selected joints toward a nominal pose with
+        # an exp-decaying weight over SQP iterations. Matches Holosoma's
+        #   w_init*exp(-i/tau) * ||dqa[idx] - (q_nominal[idx] - q_a_n_last[idx])||^2.
+        # Nominal defaults to q_init's joints (the per-frame nominal is wired at parity).
+        if self.lambda_nominal > 0 and self._nominal_idx.size > 0:
+            joint_cols = np.where(self.v_a_indices >= 6)[0]
+            joint_qpos = self.v_a_indices[joint_cols] + 1
+            cols_sel = joint_cols[self._nominal_idx]
+            qpos_sel = joint_qpos[self._nominal_idx]
+            w_nom = self.lambda_nominal * float(np.exp(-sqp_iter / self.nominal_tau))
+            z = dqa[cols_sel] - (self.q_init_full[qpos_sel] - q_a_n_last[qpos_sel])
+            obj_terms.append(w_nom * cp.sum_squares(z))
+
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
             prob.solve(solver=cp.CLARABEL)
@@ -883,7 +906,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         last = np.inf
         cost = 0.0
         solved_obj_pose = None
-        for _ in range(n_iter):
+        for _sqp_it in range(n_iter):
             q_a_prev = q_n[self.q_a_indices].copy()
             q_n, cost, solved_obj_pose = self.solve_single_iteration(
                 q_locked, q_n[self.q_a_indices], q_t_last, frame_targets,
@@ -893,6 +916,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 c_ref=c_ref,
                 obj_pose_tm1=obj_pose_tm1, obj_pose_tm2=obj_pose_tm2,
                 vdot_ref_obj=vdot_ref_obj, omega_ref_obj=omega_ref_obj,
+                sqp_iter=_sqp_it,
             )
             step = float(np.linalg.norm(q_n[self.q_a_indices] - q_a_prev))
             if np.isclose(cost, last) or step < self._iterate_step_tol:

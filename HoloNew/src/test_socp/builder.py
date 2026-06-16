@@ -80,6 +80,8 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["sigma_Vdot"] = sc.sigma_Vdot
     kwargs["lambda_smooth"] = sc.lambda_smooth if sc.activate_smooth else 0.0
     kwargs["lambda_qdiag"] = sc.lambda_qdiag if sc.activate_qdiag else 0.0
+    kwargs["lambda_nominal"] = sc.lambda_nominal if sc.activate_nominal else 0.0
+    kwargs["nominal_tau"] = sc.nominal_tau
     kwargs["activate_pos_tracking"] = sc.activate_pos_tracking
     kwargs["activate_rot_tracking"] = sc.activate_rot_tracking
     kwargs["activate_ws"] = sc.activate_ws
