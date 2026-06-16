@@ -85,7 +85,6 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         lambda_qdiag: float = 0.0,
         lambda_nominal: float = 0.0,
         nominal_tau: float = 10.0,
-        lambda_lap: float = 0.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         activate_ws: bool = False,
@@ -283,7 +282,6 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.nominal_tau = nominal_tau
         self._nominal_idx = np.asarray(
             getattr(task_constants, "NOMINAL_TRACKING_INDICES", []), dtype=int)
-        self.lambda_lap = lambda_lap
 
         # Temporal regularization weights (default 0.0 = off; solve is unchanged).
         self.lambda_r = lambda_r
@@ -845,12 +843,6 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             z = dqa[cols_sel] - (self.q_init_full[qpos_sel] - q_a_n_last[qpos_sel])
             obj_terms.append(w_nom * cp.sum_squares(z))
 
-        # W^lap (native Holosoma primary objective): interaction-mesh Laplacian
-        # deformation. J_L is exact (uniform weights -> L depends only on adjacency).
-        if self.lambda_lap > 0:
-            from HoloNew.src.test_socp.laplacian import build_laplacian_terms
-            obj_terms += build_laplacian_terms(self, _q_pin, dqa, frame_idx, self.lambda_lap)
-
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:
             prob.solve(solver=cp.CLARABEL)
@@ -948,7 +940,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         from tqdm import tqdm
 
         from HoloNew.src.retarget_result import RetargetResult
-        from .tables import IK_MATCH_TABLE1, IK_MATCH_TABLE2
+        from .tables import IK_MATCH_TABLE_SINGLE
         from .targets import ground_frame_targets
 
         gpos = self.gmr_ground["pos"]
@@ -1089,10 +1081,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 _flr_field = floor_field(pf.points, self.smplx_ground_probe.margin)
                 probe_flr.append(_flr_field.distance.copy())
                 probe_flr_wit.append(_flr_field.witness.copy())  # world-frame (probe projected to z=0)
-            # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
-            # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
-            tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
-            tg2 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE2)
+            # Single IK pass per frame (TEST is no longer two-pass): one merged table
+            # that tracks every body (position + orientation) with strong pelvis/feet
+            # placement. GMR-SOCP (two-pass) remains the separate comparison solver.
+            tg = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE_SINGLE)
             _fs = self.foot_sticking_sequences[t] if self.foot_sticking_sequences else None
             _obj_pose = (self._obj_poses_raw[t]
                          if getattr(self, "_obj_poses_raw", None) is not None else None)
@@ -1104,23 +1096,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             _vdot_ref_obj_t = _vdot_ref_obj_all[t]
             _omega_ref_obj_t = _omega_ref_obj_all[t]
             _n_iter = self.n_iter_first if t == 0 else self.n_iter_per_frame
-            q, _, _solved_obj1 = self.iterate(q, q, q_prev, tg1, n_iter=_n_iter,
+            q, _, _frame_solved_obj = self.iterate(q, q, q_prev, tg, n_iter=_n_iter,
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 q_t_last2=q_prev2,
                                 c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
                                 c_ref=_c_ref_t,
                                 obj_pose_tm1=_obj_prev, obj_pose_tm2=_obj_prev2,
                                 vdot_ref_obj=_vdot_ref_obj_t, omega_ref_obj=_omega_ref_obj_t)
-            q, _, _solved_obj2 = self.iterate(q, q, q_prev, tg2, n_iter=_n_iter,
-                                frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
-                                q_t_last2=q_prev2,
-                                c_tm1=_c_prev, c_tm2=_c_prev2, cddot_ref=_cddot_ref_t,
-                                c_ref=_c_ref_t,
-                                obj_pose_tm1=_obj_prev, obj_pose_tm2=_obj_prev2,
-                                vdot_ref_obj=_vdot_ref_obj_t, omega_ref_obj=_omega_ref_obj_t)
-            # The second pass's solved object pose is the frame-t result (both passes
-            # share the same reference; the second pass integrates from pass-1's result).
-            _frame_solved_obj = _solved_obj2 if _solved_obj2 is not None else _solved_obj1
             if _frame_solved_obj is None and _obj_pose is not None:
                 # movable is off or frame_idx<2: use reference pose as the "solved" pose.
                 _frame_solved_obj = _obj_pose

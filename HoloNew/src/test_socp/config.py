@@ -45,10 +45,22 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_pos_tracking: bool = True
     activate_rot_tracking: bool = True
 
-    # [HOLO] The four native-Holosoma objective terms are ported as flat weights below
-    # (W^smooth / W^qdiag / W^nominal / W^lap). Enable them + disable pos/rot tracking to
-    # run TEST in Holosoma mode; leave them off + tracking on for GMR-SOCP mode.
-
+    # [HOLO] General joint-space regularizers (flat ports of Holosoma's regularization
+    # terms; useful in TEST on their own). NOTE: Holosoma's Laplacian deformation term
+    # is intentionally NOT ported — it needs a different preprocess path; use the native
+    # Holosoma solver as the comparison for that.
+    # W^smooth: step-toward-previous-frame joint smoothness (Holosoma smooth_weight).
+    activate_smooth: bool = False
+    lambda_smooth: float = 0.2
+    # W^qdiag: absolute joint-config regularizer, per-joint weights from MANUAL_COST.
+    activate_qdiag: bool = False
+    lambda_qdiag: float = 1.0
+    # W^nominal: pull NOMINAL_TRACKING_INDICES joints toward a nominal pose, with an
+    # exp-decaying weight over SQP iterations (Holosoma w_nominal_tracking_init / tau).
+    activate_nominal: bool = False
+    lambda_nominal: float = 5.0
+    nominal_tau: float = 10.0
+    
     # [TEST] W^s Style: swaps world-frame tracking for pelvis tilt-only orientation (joint
     # positions dropped). style_pelvis_relative: re-base joint orientations on the current
     # pelvis + weak scaffold (pelvis_anchor_weight*w_p); False = world frame + full pelvis position.
@@ -97,23 +109,6 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_r: float = 0.2
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
-
-    # [HOLO] Native-Holosoma objective terms (flat ports; enable these + disable
-    # pos/rot tracking to replicate Holosoma). Defaults = Holosoma's own weights.
-    # W^smooth: step-toward-previous-frame joint smoothness (Holosoma smooth_weight).
-    activate_smooth: bool = False
-    lambda_smooth: float = 0.2
-    # W^qdiag: absolute joint-config regularizer, per-joint weights from MANUAL_COST.
-    activate_qdiag: bool = False
-    lambda_qdiag: float = 1.0
-    # W^nominal: pull NOMINAL_TRACKING_INDICES joints toward a nominal pose, with an
-    # exp-decaying weight over SQP iterations (Holosoma w_nominal_tracking_init / tau).
-    activate_nominal: bool = False
-    lambda_nominal: float = 5.0
-    nominal_tau: float = 10.0
-    # W^lap: interaction-mesh Laplacian deformation (Holosoma's primary objective).
-    activate_wlap: bool = False
-    lambda_lap: float = 10.0
 
     # === §3 CONSTRAINTS ===
 

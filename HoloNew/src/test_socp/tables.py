@@ -105,6 +105,20 @@ IK_MATCH_TABLE2: dict[str, tuple] = {
     "right_wrist_yaw_link":   ("right_wrist",    10, 5, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0, -1.0]),
 }
 
+# Single-pass merged table: TEST runs ONE IK pass per frame (not the GMR two-pass).
+# It is the complete table (all bodies, position + orientation) with the per-body MAX
+# of TABLE1/TABLE2 weights, so it keeps TABLE2's limb-position tracking AND the stronger
+# pelvis/feet placement + orientation from TABLE1 (pelvis/toes pos=100, rot=10; toes
+# rot=50; limbs pos=10, rot=10). Offsets are taken from TABLE2 (ground_frame_targets
+# ignores the table's offset columns).
+IK_MATCH_TABLE_SINGLE: dict[str, tuple] = {
+    _f: (IK_MATCH_TABLE2[_f][0],
+         max(IK_MATCH_TABLE1[_f][1], IK_MATCH_TABLE2[_f][1]),
+         max(IK_MATCH_TABLE1[_f][2], IK_MATCH_TABLE2[_f][2]),
+         IK_MATCH_TABLE2[_f][3], IK_MATCH_TABLE2[_f][4])
+    for _f in IK_MATCH_TABLE2
+}
+
 # human body name -> index into the 52-joint mujoco-order array (constants.JOINT_NAMES).
 # Validated by the GMR parity tests (tests/test_gmr_parity.py, test_gmr_qpos_parity.py).
 HUMAN_BODY_TO_IDX: dict[str, int] = {
