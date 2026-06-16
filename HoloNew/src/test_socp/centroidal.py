@@ -65,8 +65,8 @@ def reference_orbital_angular_momentum(ref_pos, masses, dt):
 
 
 def build_lumped_L_term(rt, q_pin, q_pin_prev, dqa, frames, masses, L_ref_t,
-                        lambda_l, dt):
-    """W^L tracking: lambda_l * ||L_lumped(dqa) - L_ref_t||^2.
+                        lambda_l, dt, *, sigma_L=1.0):
+    """W^L tracking: lambda_l * ||L_lumped(dqa) - L_ref_t||^2 / sigma_L^2.
 
     Current lumped orbital angular momentum, linearized in dqa with the moment arms
     held at the current config (mirroring how A_G(q0) @ v fixes q0):
@@ -74,6 +74,10 @@ def build_lumped_L_term(rt, q_pin, q_pin_prev, dqa, frames, masses, L_ref_t,
         v_k(dqa) = (p_k0 - p_k_prev)/dt + (J_k/dt) dqa,
     which is affine in dqa. p_k0/J_k at q_pin; p_k_prev at q_pin_prev (previous solved
     frame). Returns a scalar cvxpy expression.
+
+    sigma_L: characteristic angular-momentum scale (kg·m²/s). Divides the residual
+        so the cost is dimensionless and lambda_l is scale-independent. Default 1.0
+        preserves original behavior.
     """
     import cvxpy as cp
     from HoloNew.src.test_socp.interaction import _skew
@@ -96,15 +100,16 @@ def build_lumped_L_term(rt, q_pin, q_pin_prev, dqa, frames, masses, L_ref_t,
         A_L += masses[k] * (_skew(arm) @ Jrel)
         b_L0 += masses[k] * np.cross(arm, v_rel0)
 
-    r = np.sqrt(lambda_l) * (A_L @ dqa + (b_L0 - np.asarray(L_ref_t, dtype=np.float64)))
+    r = (np.sqrt(lambda_l) / sigma_L) * (A_L @ dqa + (b_L0 - np.asarray(L_ref_t, dtype=np.float64)))
     return cp.sum_squares(r)
 
 
 def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
-                            lambda_c, lambda_c_pos, lambda_l, dt):
+                            lambda_c, lambda_c_pos, lambda_l, dt, *,
+                            sigma_a=1.0, sigma_L=1.0):
     """Assemble W^c (CoM accel) + W^c_pos (CoM position) + W^L (angular momentum -> 0).
 
-    W^c = lambda_c * ||c_ddot - cddot_ref||^2
+    W^c = lambda_c * ||c_ddot - cddot_ref||^2 / sigma_a^2
         c_ddot = (c0 + Jc @ dqa - 2*c_tm1 + c_tm2) / dt^2   (linearised in dqa)
         Jc = com_jacobian(q_t0)[:, v_a_indices]
 
@@ -112,7 +117,7 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
         c_ref: reference CoM position for this frame (absolute anchor).
         Prevents the constant-velocity drift that W^c alone cannot constrain.
 
-    W^L = lambda_l * ||L||^2
+    W^L = lambda_l * ||L||^2 / sigma_L^2
         L = (A_G @ v)[3:6],  v = difference(q_tm1, q_t0) + Jd[:, v_a_indices] @ dqa
         A_G = centroidal_map(q_t0)
 
@@ -136,6 +141,11 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
         lambda_c_pos: weight for W^c_pos (CoM absolute position anchor).
         lambda_l: weight for W^L (angular momentum -> 0).
         dt: time step in seconds.
+        sigma_a: characteristic CoM acceleration scale (m/s²). Divides the W^c
+            residual so the cost is dimensionless and lambda_c is scale-independent.
+            Default 1.0 preserves original behavior.
+        sigma_L: characteristic angular-momentum scale (kg·m²/s). Divides the W^L
+            residual. Default 1.0 preserves original behavior.
 
     Returns:
         List of up to three cvxpy expressions [W_c_expr, W_c_pos_expr, W_L_expr],
@@ -155,12 +165,12 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
     # free-flight branch is implemented but UNVALIDATED — no demo_data clip
     # contains a flight phase (see the inertia-mode design doc).
     if lambda_c > 0:
-        # Fold sqrt(lambda_c) and 1/dt^2 into A and b so that:
-        #   ||A_c @ dqa + b_c||^2 = lambda_c * ||cddot - cddot_ref||^2
-        s_c = np.sqrt(lambda_c) / dt**2
+        # Fold sqrt(lambda_c), 1/sigma_a and 1/dt^2 into A and b so that:
+        #   ||A_c @ dqa + b_c||^2 = lambda_c/sigma_a^2 * ||cddot - cddot_ref||^2
+        s_c = np.sqrt(lambda_c) / (sigma_a * dt**2)
         A_c = s_c * Jc                                          # (3, nv_a)
         b_c = (s_c * (c0 - 2.0*np.asarray(c_tm1) + np.asarray(c_tm2))
-               - np.sqrt(lambda_c) * np.asarray(cddot_ref))    # (3,)
+               - (np.sqrt(lambda_c) / sigma_a) * np.asarray(cddot_ref))  # (3,)
         terms.append(cp.sum_squares(A_c @ dqa + b_c))
 
     # --- W^c_pos: CoM absolute position anchor ---
@@ -182,9 +192,9 @@ def build_centroidal_terms(rt, q_t0, q_tm1, c_tm1, c_tm2, cddot_ref, c_ref, dqa,
         Ag = rt.pin.centroidal_map(q_t0)                       # (6, nv)
         v0, Jd = rt.pin.difference_and_jac(q_tm1, q_t0)       # v0: (nv,), Jd: (nv, nv)
         AgL = Ag[3:6, :]                                       # (3, nv)
-        # v_active contribution via Jd columns for active joints
-        A_L = np.sqrt(lambda_l) * (AgL @ Jd[:, rt.v_a_indices])  # (3, nv_a)
-        b_L = np.sqrt(lambda_l) * (AgL @ v0)                   # (3,)
+        # v_active contribution via Jd columns for active joints; sigma_L normalises scale
+        A_L = (np.sqrt(lambda_l) / sigma_L) * (AgL @ Jd[:, rt.v_a_indices])  # (3, nv_a)
+        b_L = (np.sqrt(lambda_l) / sigma_L) * (AgL @ v0)          # (3,)
         terms.append(cp.sum_squares(A_L @ dqa + b_L))
 
     return terms

@@ -48,3 +48,27 @@ def test_sigma_R_scales_style_quadratically(rt):
     s1 = sum(float(t.value) for t in t1)
     s2 = sum(float(t.value) for t in t2)
     np.testing.assert_allclose(s2, s1 / 4.0, rtol=1e-9)
+
+
+def test_sigma_a_sigma_L_scale_centroidal(rt):
+    """σ_a scales W^c by 1/σ_a²; σ_L scales W^L by 1/σ_L², at fixed dqa."""
+    from HoloNew.src.test_socp.centroidal import build_centroidal_terms
+    pm = rt.pin
+    rng = np.random.default_rng(1)
+    q0 = pm.qpos_mj_to_q_pin(rt.q_init_full[:36])
+    q1 = pin.integrate(pm.model, q0, 0.02 * rng.standard_normal(pm.model.nv))
+    c0 = pm.com(q0)
+    dqa = cp.Variable(rt.nv_a); dqa.value = 0.01 * rng.standard_normal(rt.nv_a)
+    # non-zero cddot_ref so the reference-subtraction branch of b_c is exercised
+    # (it must carry the same 1/sigma_a factor as the Jc@dqa part).
+    kw = dict(rt=rt, q_t0=q0, q_tm1=q1, c_tm1=c0, c_tm2=c0,
+              cddot_ref=np.array([0.3, -1.2, 9.81]), c_ref=c0, dqa=dqa,
+              lambda_c_pos=0.0, dt=1/30.0)
+    wc1 = build_centroidal_terms(lambda_c=1.0, lambda_l=0.0, sigma_a=1.0, sigma_L=1.0, **kw)
+    wc2 = build_centroidal_terms(lambda_c=1.0, lambda_l=0.0, sigma_a=2.0, sigma_L=1.0, **kw)
+    np.testing.assert_allclose(sum(float(t.value) for t in wc2),
+                               sum(float(t.value) for t in wc1) / 4.0, rtol=1e-9)
+    wl1 = build_centroidal_terms(lambda_c=0.0, lambda_l=1.0, sigma_a=1.0, sigma_L=1.0, **kw)
+    wl2 = build_centroidal_terms(lambda_c=0.0, lambda_l=1.0, sigma_a=1.0, sigma_L=2.0, **kw)
+    np.testing.assert_allclose(sum(float(t.value) for t in wl2),
+                               sum(float(t.value) for t in wl1) / 4.0, rtol=1e-9)
