@@ -88,6 +88,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         lambda_ws: float = 0.0,
+        sigma_R: float = 1.0,
         activate_centroidal: bool = False,
         lambda_c: float = 0.0,
         lambda_c_pos: float = 0.0,
@@ -292,6 +293,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.activate_rot_tracking = activate_rot_tracking
         # W^s Style (additive pelvis-relative orientation matching; default 0 = off).
         self.lambda_ws = lambda_ws
+        self.sigma_R = sigma_R
 
         # Brick 4 — Centroidal W^c / W^c_pos / W^L (default off; parity preserved).
         self.activate_centroidal = activate_centroidal
@@ -468,37 +470,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 Jr_body = R_c.T @ Jr
                 obj_terms.append(w_r * cp.sum_squares(Jr_body @ dqa - e))
 
-        # W^s Style (additive, flat): pelvis-relative joint-orientation matching (S_k) +
-        # pelvis tilt against gravity (S_B), ADDED on top of the GMR world tracking — no
-        # mode swap. Per-body weights are normalized (sum to 1) so lambda_ws is a pure
-        # priority (lambda^s). See the spec's Style Component.
-        #   S_k: R~_k = R_B^-1 R_k  ->  (R_B_ref)^-1 R_t, linearized with the pelvis fixed
-        #        (R_target = R_B0 (R_B_ref)^-1 R_t, then match the world R_k -> R_target).
-        #   S_B: ||(R_B_ref)^T zhat - R_B^T zhat||^2 (yaw-free pelvis tilt).
-        if self.lambda_ws > 0 and self.activate_rot_tracking:
-            from HoloNew.src.test_socp.style import pelvis_tilt_residual
-            pelvis_body = "pelvis"
-            R_B0 = self.body_rotation(q, pelvis_body)
-            R_Bref = next((R_t for frame, (p_t, R_t, w_p, w_r) in frame_targets.items()
-                           if self.robot_link_names[frame] == pelvis_body), None)
-            w_tot = sum(w_r for frame, (p_t, R_t, w_p, w_r) in frame_targets.items()
-                        if w_r > 0)
-            if R_Bref is not None and w_tot > 0:
-                for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
-                    if w_r <= 0:
-                        continue
-                    body = self.robot_link_names[frame]
-                    omega = self.lambda_ws * (w_r / w_tot)   # normalized intra-style weight
-                    if body == pelvis_body:
-                        r0, A = pelvis_tilt_residual(self, q, R_Bref)        # S_B
-                        obj_terms.append(omega * cp.sum_squares(A @ dqa - r0))
-                    else:
-                        _, Jr = self._body_jac(q, body)                      # S_k
-                        R_c = self.body_rotation(q, body)
-                        R_target = R_B0 @ R_Bref.T @ R_t
-                        e = Rotation.from_matrix(R_c.T @ R_target).as_rotvec()
-                        Jr_body = R_c.T @ Jr
-                        obj_terms.append(omega * cp.sum_squares(Jr_body @ dqa - e))
+        # W^s Style: pelvis-relative joint-orientation matching (S_k) + pelvis
+        # tilt against gravity (S_B), each residual divided by σ_R. See style.py.
+        from HoloNew.src.test_socp.style import build_style_terms
+        obj_terms.extend(build_style_terms(
+            self, q, frame_targets, dqa,
+            lambda_ws=self.lambda_ws, sigma_R=self.sigma_R,
+            style_weights=getattr(self, "style_weights", None)))
 
         constraints = [cp.SOC(self.step_size, dqa)]
         # §1 Variables: freeze q_a (joints) or T_B (base) by pinning their tangent block
