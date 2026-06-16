@@ -82,6 +82,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         sigma_qddot: float = 1.0,
         sigma_Vdot: float = 1.0,
         lambda_smooth: float = 0.0,
+        lambda_qdiag: float = 0.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
         activate_ws: bool = False,
@@ -266,6 +267,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
 
         # Native-Holosoma objective ports (default 0.0 = off; solve is unchanged).
         self.lambda_smooth = lambda_smooth
+        self.lambda_qdiag = lambda_qdiag
+        # Per-actuated-joint Q_diag weights from MANUAL_COST (0 elsewhere), mirroring
+        # Holosoma's self.Q_diag. Indexed by actuated-joint position (0..ROBOT_DOF-1).
+        self._q_diag_joints = np.zeros(task_constants.ROBOT_DOF)
+        for _k, _v in getattr(task_constants, "MANUAL_COST", {}).items():
+            self._q_diag_joints[int(_k)] = float(_v)
 
         # Temporal regularization weights (default 0.0 = off; solve is unchanged).
         self.lambda_r = lambda_r
@@ -802,6 +809,16 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             dqa_smooth = q_t_last[joint_qpos] - q_a_n_last[joint_qpos]   # (n_joint,)
             obj_terms.append(
                 self.lambda_smooth * cp.sum_squares(dqa[joint_cols] - dqa_smooth))
+
+        # W^qdiag (native Holosoma): per-joint regularizer on the absolute new joint
+        # config. Matches Holosoma's ||sqrt(Q_diag) (dqa + q_a_n_last)||^2 on the
+        # actuated joints (Q_diag from MANUAL_COST, 0 elsewhere).
+        if self.lambda_qdiag > 0:
+            joint_cols = np.where(self.v_a_indices >= 6)[0]
+            joint_qpos = self.v_a_indices[joint_cols] + 1
+            sw = np.sqrt(self.lambda_qdiag * self._q_diag_joints[:joint_cols.size])
+            new_joints = dqa[joint_cols] + q_a_n_last[joint_qpos]
+            obj_terms.append(cp.sum_squares(cp.multiply(sw, new_joints)))
 
         prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
         try:

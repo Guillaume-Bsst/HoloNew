@@ -99,6 +99,9 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # W^smooth: step-toward-previous-frame joint smoothness (Holosoma smooth_weight).
     activate_smooth: bool = False
     lambda_smooth: float = 0.2
+    # W^qdiag: absolute joint-config regularizer, per-joint weights from MANUAL_COST.
+    activate_qdiag: bool = False
+    lambda_qdiag: float = 1.0
 
     # === §3 CONSTRAINTS ===
 
