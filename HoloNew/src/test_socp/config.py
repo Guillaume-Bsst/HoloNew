@@ -105,8 +105,10 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_o_pos: float = 10.0
 
     # [TEST] W^r Temporal reg (tangent-space accel); sigma_* = per-DOF noise scale (joints / base).
+    # lambda_r re-tuned to 0.5 for the single-pass solve (the old two-pass value 0.2 is
+    # counterproductive single-pass; 0.5 cuts jerk ~47% within the tracking slack).
     activate_wr: bool = False
-    lambda_r: float = 0.2
+    lambda_r: float = 0.5
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
 

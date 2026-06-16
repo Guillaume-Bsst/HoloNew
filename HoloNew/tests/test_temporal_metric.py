@@ -13,10 +13,10 @@ first two frames see zero reference velocity, creating a transient that
 disproportionately inflates the K=20 tracking figure by ~0.008 m).  K=30
 resolves the transient while still finishing in < 15 s.
 
-Chosen parameters (tuned 2026-06-13):
-  lambda_r=0.2, sigma_qddot=20.0, sigma_Vdot=20.0
-  off:  jerk=0.003640, track=0.040217 m
-  on:   jerk=0.002990, track=0.049173 m  (−17.9 % jerk, +0.009 m slack)
+Chosen parameters (re-tuned 2026-06-16 for the single-pass solve):
+  lambda_r=0.5, sigma_qddot=20.0, sigma_Vdot=20.0
+  off:  jerk=0.003685, track=0.0502 m
+  on:   jerk=0.001950, track=0.0514 m  (−47 % jerk, +0.0012 m slack)
 """
 import numpy as np
 import pytest
@@ -27,7 +27,9 @@ from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
 from HoloNew.evaluation.metrics import compute_smoothness
 
 # Tuned values — record here so the assertion parameters are traceable.
-_TUNED_LR = 0.2
+# Re-tuned to 0.5 for the single-pass solve (2026-06-16): the old two-pass value 0.2
+# is counterproductive single-pass (it raised jerk); 0.5 cuts jerk within the slack.
+_TUNED_LR = 0.5
 _TUNED_SQ = 20.0
 _TUNED_SV = 20.0
 _K = 30   # see module docstring for rationale
@@ -57,9 +59,9 @@ def _solve(lr, sq, sV, K=_K):
 def test_wr_reduces_jerk():
     """W^r must reduce joint jerk without wrecking pelvis tracking.
 
-    Observed values (K=30, sub3_largebox_003, robot_only):
-      off (lambda_r=0): jerk=0.003640, track=0.040 m
-      on  (lr=0.2, sq=20, sV=20): jerk=0.002990 (−17.9 %), track=0.049 m (+0.009 m)
+    Observed values (K=30, sub3_largebox_003, robot_only, single-pass):
+      off (lambda_r=0): jerk=0.003685, track=0.050 m
+      on  (lr=0.5, sq=20, sV=20): jerk=0.001950 (−47 %), track=0.051 m (+0.0012 m)
     """
     j_off, t_off = _solve(0.0, 1.0, 1.0)
     j_on,  t_on  = _solve(_TUNED_LR, _TUNED_SQ, _TUNED_SV)
