@@ -78,6 +78,8 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # Each cost term has its own activate_* switch (config §3): the switch alone decides,
     # so resolve the EFFECTIVE weight here (tuned value when on, 0 when off) and feed the
     # solver, whose gating stays the simple "weight > 0". One flag per weight.
+    kwargs["L_floor"] = sc.L_floor
+    kwargs["L_object"] = sc.L_object
     kwargs["lambda_d"] = sc.lambda_d if sc.activate_wd else 0.0
     kwargs["lambda_x"] = sc.lambda_x if sc.activate_wx else 0.0
     kwargs["lambda_p"] = sc.lambda_p if sc.activate_wp else 0.0

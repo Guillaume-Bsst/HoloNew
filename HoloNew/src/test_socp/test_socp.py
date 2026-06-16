@@ -110,6 +110,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         load_object_scene: bool = True,
         activate_persistence: bool = False,
         persistence_tol: float = 0.005,
+        L_floor: float | None = None,
+        L_object: float | None = None,
         **_ignored,
     ):
         """Initialise the retargeter from task constants.
@@ -330,6 +332,12 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.activate_persistence = activate_persistence
         self.persistence_tol = persistence_tol
 
+        # Brick 3 — Per-entity field ranges (activation distance + positional scale).
+        # None = AUTO: resolve at access time against smplx_ground_probe.margin
+        # (which is set by from_config after __init__ returns).
+        self._L_floor_cfg = L_floor
+        self._L_object_cfg = L_object
+
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
         available_bodies = {self.robot_model.body(i).name for i in range(self.robot_model.nbody)}
@@ -345,6 +353,28 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             if actual != frame:
                 print(f"[TestSocp] Remapped body: '{frame}' -> '{actual}'")
             self.robot_link_names[frame] = actual
+
+    @property
+    def L_floor(self) -> float:
+        """Per-entity floor field range (activation distance + positional scale).
+
+        AUTO (None at construction) resolves to smplx_ground_probe.margin once
+        the probe is available (set by from_config after __init__).
+        """
+        if self._L_floor_cfg is not None:
+            return self._L_floor_cfg
+        return self.smplx_ground_probe.margin
+
+    @property
+    def L_object(self) -> float:
+        """Per-entity object field range (activation distance + positional scale).
+
+        AUTO (None at construction) resolves to smplx_ground_probe.margin once
+        the probe is available (set by from_config after __init__).
+        """
+        if self._L_object_cfg is not None:
+            return self._L_object_cfg
+        return self.smplx_ground_probe.margin
 
     def _body_jac(self, q: np.ndarray, body_name: str):
         """World-frame (Jp, Jr) for a body, reduced to active tangent columns.
@@ -753,7 +783,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and self.lambda_obj_floor > 0
                 and getattr(self, "object_surface_local", None) is not None):
             from HoloNew.src.test_socp.movable import build_object_floor_terms
-            _L_floor = (self.smplx_ground_probe.margin
+            _L_floor = (self.L_floor
                         if self.smplx_ground_probe is not None else 0.1)
             obj_terms += build_object_floor_terms(
                 self, dxi_obj, obj_pose, self.lambda_obj_floor, _L_floor)
@@ -1080,18 +1110,20 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                     robot_control_points, query_entities, frame_references, _activation,
                 )
                 _q_pin_solved = self.pin.qpos_mj_to_q_pin(q[:36])
-                _L = self.smplx_ground_probe.margin
+                _L_obj = self.L_object
+                _L_flr = self.L_floor
                 _p_world = robot_control_points(self, _q_pin_solved)
-                _fobj_s, _fflr_s = query_entities(self, _p_world, _obj_pose, margin=_L)
+                _fobj_s, _fflr_s = query_entities(
+                    self, _p_world, _obj_pose, margin_obj=_L_obj, margin_flr=_L_flr)
                 _d_obj_ref, _, _d_flr_ref, _, _ = frame_references(self, t)
                 self._p_state["p_prev_world"] = _p_world
                 self._p_state["obj_prev"] = _obj_pose.copy()
                 self._p_state["d_prev_obj"] = np.asarray(_fobj_s.distance, dtype=np.float64)
                 self._p_state["d_prev_flr"] = np.asarray(_fflr_s.distance, dtype=np.float64)
                 self._p_state["a_prev_obj"] = np.array(
-                    [_activation(float(_d_obj_ref[i]), _L) for i in range(len(_d_obj_ref))])
+                    [_activation(float(_d_obj_ref[i]), _L_obj) for i in range(len(_d_obj_ref))])
                 self._p_state["a_prev_flr"] = np.array(
-                    [_activation(float(_d_flr_ref[i]), _L) for i in range(len(_d_flr_ref))])
+                    [_activation(float(_d_flr_ref[i]), _L_flr) for i in range(len(_d_flr_ref))])
             if urdf is not None:
                 Tw = link_world_transforms(urdf, q, self.correspondence.link_names)
                 g1_pts.append(transported_points(
@@ -1150,7 +1182,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 _activation, frame_references, query_entities, robot_control_points)
             corr = self.correspondence
             M = corr.link_idx.shape[0]
-            Lm = self.smplx_ground_probe.margin
+            Lm = self.L_floor  # foot-slip is a floor-channel diagnostic
             foot = [i for i in range(M) if any(k in corr.link_names[corr.link_idx[i]].lower()
                     for k in ("ankle", "foot", "toe"))]
             I3 = np.eye(3)

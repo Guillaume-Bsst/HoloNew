@@ -87,6 +87,10 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wp: bool = False
     lambda_p: float = 1.0       # seed; P now (σ_v·dt)²-normalized
     sigma_v: float = 0.05
+    # [TEST] per-entity field range Lⱼ (activation distance AND positional scale).
+    # None = AUTO: inherit the SDF probe margin (current shared value).
+    L_floor: float | None = None
+    L_object: float | None = None
     #object carrier → floor (object<->environment pair); separate weight, needs activate_tm.
     activate_obj_floor: bool = False
     lambda_obj_floor: float = 5.0

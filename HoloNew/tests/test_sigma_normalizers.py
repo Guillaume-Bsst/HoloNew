@@ -125,3 +125,17 @@ def test_self_collision_margin_feeds_tolerance(rt):
     # The module rt was built from the default config (self_collision_margin=0.02);
     # the builder fed it into SelfCollisionConfig.tolerance -> _self_collision_tolerance.
     assert rt._self_collision_tolerance == 0.02
+
+
+def test_L_floor_object_fields_and_attrs(rt):
+    """Per-entity field ranges (Brick 3): config fields + resolved rt attrs."""
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    c = TestSocpRetargeterConfig()
+    assert hasattr(c, "L_floor") and hasattr(c, "L_object")
+    # AUTO defaults (None) => both resolve to the shared probe margin on the rt.
+    assert c.L_floor is None and c.L_object is None
+    assert hasattr(rt, "L_floor") and hasattr(rt, "L_object")
+    assert rt.L_floor > 0 and rt.L_object > 0
+    # default (AUTO) reproduces the shared margin exactly
+    m = rt.smplx_ground_probe.margin
+    assert rt.L_floor == m and rt.L_object == m

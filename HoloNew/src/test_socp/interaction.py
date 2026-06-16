@@ -100,7 +100,8 @@ def frame_references(rt, t: int):
                 else rt.human_quat[t])
     pf = rt.smplx_ground_probe(t, _probe_q, rt.gmr_grounded[:, 0][t])
     hi = rt.correspondence.human_idx
-    fflr = floor_field(pf.points, rt.smplx_ground_probe.margin)
+    L_flr = getattr(rt, "L_floor", rt.smplx_ground_probe.margin)
+    fflr = floor_field(pf.points, L_flr)
     refs = (pf.field.distance[hi], pf.field.witness[hi],
             fflr.distance[hi], fflr.witness[hi],
             np.asarray(pf.points, dtype=np.float64)[hi])   # (M, 3) world source points
@@ -111,7 +112,9 @@ def frame_references(rt, t: int):
 
 
 def query_entities(rt, pts_world: np.ndarray, obj_pose: np.ndarray,
-                   margin: float | None = None):
+                   margin: float | None = None,
+                   margin_obj: float | None = None,
+                   margin_flr: float | None = None):
     """Query the object SDF and floor at robot control points.
 
     Returns:
@@ -123,24 +126,33 @@ def query_entities(rt, pts_world: np.ndarray, obj_pose: np.ndarray,
         pts_world: (M, 3) world positions of the robot control points.
         obj_pose: (7,) [qw, qx, qy, qz, x, y, z] object pose, as stored in
             smplx_ground_probe.obj_quat[t] / obj_trans[t].
-        margin: SDF query band half-width. Defaults to
+        margin: Shared SDF query band half-width (legacy). Used as fallback
+            for margin_obj and margin_flr when those are None. Defaults to
             rt.smplx_ground_probe.margin when the probe is available.
+        margin_obj: Per-entity band half-width for the object SDF channel.
+            Defaults to margin (or rt.smplx_ground_probe.margin).
+        margin_flr: Per-entity band half-width for the floor channel.
+            Defaults to margin (or rt.smplx_ground_probe.margin).
     """
     if margin is None:
         margin = rt.smplx_ground_probe.margin
+    if margin_obj is None:
+        margin_obj = margin
+    if margin_flr is None:
+        margin_flr = margin
 
     # Object SDF: query in the object-local frame (mirrors smplx_field exactly).
     # Floor-only mode (no object): no object SDF -> an
     # all-inactive object field, so only the floor channel contributes.
     if getattr(rt, "object_sdf", None) is None:
         from HoloNew.src.test_socp.contact.contact_field import inactive_field
-        fobj = inactive_field(pts_world.shape[0], margin)
+        fobj = inactive_field(pts_world.shape[0], margin_obj)
     else:
         pts_local = _world_to_object_local(pts_world, obj_pose)
-        fobj = rt.object_sdf.query(pts_local, margin)
+        fobj = rt.object_sdf.query(pts_local, margin_obj)
 
     # Floor: analytic z=0 field in the world frame.
-    fflr = floor_field(pts_world.astype(np.float32), margin)
+    fflr = floor_field(pts_world.astype(np.float32), margin_flr)
 
     return fobj, fflr
 
@@ -215,9 +227,9 @@ def build_obj_surface_nonpen_constraints(rt, q_pin: np.ndarray, dqa, t: int,
         return []
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
-    L = rt.smplx_ground_probe.margin
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
     P = robot_control_points(rt, q_pin)
-    fobj, _ = query_entities(rt, P, obj_pose, margin=L)
+    fobj, _ = query_entities(rt, P, obj_pose, margin_obj=L_obj)
     active = np.where(np.asarray(fobj.active, dtype=bool))[0]
     if active.size == 0:
         return []
@@ -290,7 +302,8 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
 
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
-    L = rt.smplx_ground_probe.margin
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
+    L_flr = getattr(rt, "L_floor", rt.smplx_ground_probe.margin)
 
     # Precompute per-link point counts for 1/N_k normalization.
     n_links = len(corr.link_names)
@@ -303,8 +316,8 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
     # World positions of all robot control points.
     P = robot_control_points(rt, q_pin)
 
-    # Robot-side field queries.
-    fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
+    # Robot-side field queries (per-entity margins).
+    fobj, fflr = query_entities(rt, P, obj_pose, margin_obj=L_obj, margin_flr=L_flr)
 
     # Source-side references (object-local frame / world frame).
     # p_ref (world source points) is used only by build_p_terms; ignored here.
@@ -317,11 +330,11 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
 
     # --- Active-set selection ---
     # Object channel: alpha > 0 AND field marked active.
-    alpha_obj = np.array([_activation(d_obj_ref[i], L) for i in range(M)])
+    alpha_obj = np.array([_activation(d_obj_ref[i], L_obj) for i in range(M)])
     active_obj = (alpha_obj > 0) & np.asarray(fobj.active, dtype=bool)
 
     # Floor channel: alpha > 0 AND field marked active.
-    alpha_flr = np.array([_activation(d_flr_ref[i], L) for i in range(M)])
+    alpha_flr = np.array([_activation(d_flr_ref[i], L_flr) for i in range(M)])
     active_flr = (alpha_flr > 0) & np.asarray(fflr.active, dtype=bool)
 
     # Union of active indices for a single batched Jacobian pass.
@@ -358,7 +371,7 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
     # --- Object channel (object-local frame) ---
     for i in np.where(active_obj)[0]:
         alpha = alpha_obj[i]
-        w = alpha / (L ** 2 * Nk[i])
+        w = alpha / (L_obj ** 2 * Nk[i])
         Ji = jacs[idx_to_pos[i]]
         Jloc = Robj.T @ Ji                   # (3, nv_a): object-local point Jacobian
         n0 = np.asarray(fobj.direction[i], dtype=float)   # object-local unit normal
@@ -401,7 +414,7 @@ def build_dx_terms(rt, q_pin: np.ndarray, dqa, t: int,
     # --- Floor channel (world frame) ---
     for i in np.where(active_flr)[0]:
         alpha = alpha_flr[i]
-        w = alpha / (L ** 2 * Nk[i])
+        w = alpha / (L_flr ** 2 * Nk[i])
         Ji = jacs[idx_to_pos[i]]              # (3, nv_a): world-frame point Jacobian
         n0 = np.asarray(fflr.direction[i], dtype=float)   # world-frame unit normal
         d0 = float(fflr.distance[i])
@@ -516,7 +529,8 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     state = rt._p_state
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
-    L = rt.smplx_ground_probe.margin
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
+    L_flr = getattr(rt, "L_floor", rt.smplx_ground_probe.margin)
     scale_sq = _p_scale_sq(lambda_p, sigma_v, dt)
 
     # Per-link point counts for 1/N_k normalisation.
@@ -536,8 +550,8 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     # Current world positions of robot control points.
     P = robot_control_points(rt, q_pin)             # (M, 3)
 
-    # Robot-side field at current config.
-    fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
+    # Robot-side field at current config (per-entity margins).
+    fobj, fflr = query_entities(rt, P, obj_pose, margin_obj=L_obj, margin_flr=L_flr)
 
     # Source references at t and t-1.
     d_obj_ref_t,  _,  d_flr_ref_t,  _, p_ref_t   = frame_references(rt, t)
@@ -556,20 +570,24 @@ def build_p_terms(rt, q_pin: np.ndarray, dqa, t: int,
     dp_ref_world = p_ref_t - p_ref_tm1   # (M, 3)
 
     # --- Activation masks ---
-    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L) for i in range(M)])
-    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L) for i in range(M)])
+    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L_obj) for i in range(M)])
+    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L_flr) for i in range(M)])
 
-    def _hat(d_prev_i):
-        """Previous solved robot-side activation α̂^{t-1}."""
-        return _activation(float(d_prev_i), L)
+    def _hat_obj(d_prev_i):
+        """Previous solved robot-side activation α̂^{t-1} (object channel)."""
+        return _activation(float(d_prev_i), L_obj)
+
+    def _hat_flr(d_prev_i):
+        """Previous solved robot-side activation α̂^{t-1} (floor channel)."""
+        return _activation(float(d_prev_i), L_flr)
 
     # Active sets: γ > 0 AND current robot-side field is marked active.
     gamma_obj = np.minimum(np.minimum(alpha_obj_t, a_prev_obj),
-                           np.array([_hat(d_prev_obj[i]) for i in range(M)]))
+                           np.array([_hat_obj(d_prev_obj[i]) for i in range(M)]))
     active_obj = (gamma_obj > 0) & np.asarray(fobj.active, dtype=bool)
 
     gamma_flr = np.minimum(np.minimum(alpha_flr_t, a_prev_flr),
-                           np.array([_hat(d_prev_flr[i]) for i in range(M)]))
+                           np.array([_hat_flr(d_prev_flr[i]) for i in range(M)]))
     active_flr = (gamma_flr > 0) & np.asarray(fflr.active, dtype=bool)
 
     active_union = np.where(active_obj | active_flr)[0]
@@ -693,7 +711,8 @@ def build_p_constraints(rt, q_pin: np.ndarray, dqa, t: int,
     state = rt._p_state
     corr = rt.correspondence
     M = corr.link_idx.shape[0]
-    L = rt.smplx_ground_probe.margin
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
+    L_flr = getattr(rt, "L_floor", rt.smplx_ground_probe.margin)
 
     # Current and previous object-to-world rotation matrices. Floor-only mode
     # (obj_pose is None) has no active object-channel carriers, so these are unused.
@@ -706,8 +725,8 @@ def build_p_constraints(rt, q_pin: np.ndarray, dqa, t: int,
     # Current world positions of robot control points.
     P = robot_control_points(rt, q_pin)
 
-    # Robot-side field at current config.
-    fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
+    # Robot-side field at current config (per-entity margins).
+    fobj, fflr = query_entities(rt, P, obj_pose, margin_obj=L_obj, margin_flr=L_flr)
 
     # Source references at t and t-1.
     d_obj_ref_t,  _,  d_flr_ref_t,  _, p_ref_t   = frame_references(rt, t)
@@ -723,19 +742,22 @@ def build_p_constraints(rt, q_pin: np.ndarray, dqa, t: int,
     # Source point displacement in world frame.
     dp_ref_world = p_ref_t - p_ref_tm1
 
-    # Activation masks (same logic as build_p_terms).
-    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L) for i in range(M)])
-    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L) for i in range(M)])
+    # Activation masks (same logic as build_p_terms, with per-entity L).
+    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L_obj) for i in range(M)])
+    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L_flr) for i in range(M)])
 
-    def _hat(d_prev_i):
-        return _activation(float(d_prev_i), L)
+    def _hat_obj(d_prev_i):
+        return _activation(float(d_prev_i), L_obj)
+
+    def _hat_flr(d_prev_i):
+        return _activation(float(d_prev_i), L_flr)
 
     gamma_obj = np.minimum(np.minimum(alpha_obj_t, a_prev_obj),
-                           np.array([_hat(d_prev_obj[i]) for i in range(M)]))
+                           np.array([_hat_obj(d_prev_obj[i]) for i in range(M)]))
     active_obj = (gamma_obj > 0) & np.asarray(fobj.active, dtype=bool)
 
     gamma_flr = np.minimum(np.minimum(alpha_flr_t, a_prev_flr),
-                           np.array([_hat(d_prev_flr[i]) for i in range(M)]))
+                           np.array([_hat_flr(d_prev_flr[i]) for i in range(M)]))
     active_flr = (gamma_flr > 0) & np.asarray(fflr.active, dtype=bool)
 
     active_union = np.where(active_obj | active_flr)[0]
