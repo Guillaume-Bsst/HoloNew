@@ -234,10 +234,15 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
             rt.gmr_ground["pos"], rt._lumped_masses, rt._dt)
 
     # Load object poses in MuJoCo qpos order for per-frame object qpos drive.
-    # Only when the flag is on and the task has a real object; otherwise leave
-    # None so the retarget loop's object-qpos block is always skipped (parity).
+    # Requires the object SCENE (load_object_scene) — that is what swaps in the xml
+    # with the object free joint (has_dynamic_object). Without it there is nothing to
+    # drive, so leave None and the retarget loop's object-qpos block is skipped. This
+    # keeps the loading condition consistent with the model-swap condition; otherwise
+    # `activate_obj_non_penetration` alone (with load_object_scene=False, the GMR
+    # baseline default) loads poses with no free joint and trips the guard below.
     rt._obj_poses_mj = None
-    if sc.activate_obj_non_penetration and rt.object_name not in (None, "ground"):
+    if (sc.activate_obj_non_penetration and sc.load_object_scene
+            and rt.object_name not in (None, "ground")):
         from HoloNew.examples.robot_retarget import convert_object_poses_to_mujoco_order
         from HoloNew.src.utils import load_intermimic_data
         _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
