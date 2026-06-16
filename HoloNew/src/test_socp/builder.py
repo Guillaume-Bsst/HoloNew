@@ -222,10 +222,12 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # NOT smpl_scale: pass None straight through so scale() takes its native branch and the
     # z placement matches GMR / gmr_socp. (XY native = smpl_scale is correct; Z is not.)
     _rob_z = sc.scale_z_robot
-    # Object placement uses the same convention (None -> AUTO = smpl_scale). Our defaults
-    # keep the object raw (1.0 / 1.0) so its trajectory is unchanged.
+    # Object native default per axis (matches gmr_socp): XY -> smpl_scale (placed with the
+    # robot), Z -> raw 1.0 (the object is a rigid body, not morphed, so its native Z is the
+    # raw grounded height). Our defaults keep the object raw (1.0 / 1.0) so its trajectory
+    # is unchanged; the None fallbacks only matter when an axis is explicitly set to AUTO.
     _obj_xy = sc.scale_xy_object if sc.scale_xy_object is not None else smpl_scale
-    _obj_z = sc.scale_z_object if sc.scale_z_object is not None else smpl_scale
+    _obj_z = sc.scale_z_object if sc.scale_z_object is not None else 1.0
     rt.gmr_stages = compute_stages(
         rt.gmr_grounded, human_quat, scale_xy=_rob_xy, scale_z=_rob_z,
     )
