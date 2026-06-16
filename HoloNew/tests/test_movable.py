@@ -49,18 +49,18 @@ def test_wo_term_matches_numpy():
     T2 = _rand_se3(rng)
     vdot_ref = rng.standard_normal(3)
     omega_ref = rng.standard_normal(3)
-    lam_o, lam_w, dt = 2.0, 3.0, 1.0 / 30.0
+    lam_o, dt = 2.0, 1.0 / 30.0
     dxi = cp.Variable(6)
     val = 0.02 * rng.standard_normal(6)
     dxi.value = val
-    term = build_wo_term(T0, T1, T2, vdot_ref, omega_ref, dxi, lam_o, lam_w, dt)
+    term = build_wo_term(T0, T1, T2, vdot_ref, omega_ref, dxi, lam_o, dt)
     # Independent numpy ground truth at val: object pose = exp6(val)*T0
     Tcur = pin.exp6(val) * T0
     V_t = pin.log6(T1.inverse() * Tcur).vector / dt       # [v; omega] at t
     V_tm1 = pin.log6(T2.inverse() * T1).vector / dt
     vdot = (V_t[:3] - V_tm1[:3]) / dt
     omega = V_t[3:6]
-    gt = lam_o * float(np.sum((vdot - vdot_ref) ** 2)) + lam_w * float(np.sum((omega - omega_ref) ** 2))
+    gt = lam_o * (float(np.sum((vdot - vdot_ref) ** 2)) + float(np.sum((omega - omega_ref) ** 2)))
     np.testing.assert_allclose(float(term.value), gt, rtol=1e-3)
 
 
@@ -231,7 +231,6 @@ def test_movable_when_enabled_stays_finite():
     # W^o on with its tuned weights.
     assert rt.activate_tm is True
     assert rt.lambda_o == 1.0
-    assert rt.lambda_omega == 1.0
 
     res = rt.retarget(max_frames=6)
     assert np.all(np.isfinite(res.qpos)), "qpos contains non-finite values with movable on"
@@ -271,7 +270,6 @@ def test_movable_with_interaction_bilateral_solve():
     # Enable movable + bilateral D/X.
     rt.activate_tm = True
     rt.lambda_o = 1.0
-    rt.lambda_omega = 1.0
     rt.lambda_d = 1.0
     rt.lambda_x = 1.0
     # The D/X terms require ground non-penetration to stay stable.

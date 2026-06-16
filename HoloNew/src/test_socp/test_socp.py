@@ -99,7 +99,6 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         activate_tb: bool = True,
         activate_tm: bool = False,
         lambda_o: float = 0.0,
-        lambda_omega: float = 0.0,
         lambda_o_pos: float = 0.0,
         lambda_obj_floor: float = 0.0,
         activate_obj_surface_nonpen: bool = False,
@@ -309,7 +308,6 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.activate_tb = activate_tb
         self.activate_tm = activate_tm
         self.lambda_o = lambda_o
-        self.lambda_omega = lambda_omega
         self.lambda_o_pos = lambda_o_pos
         self.lambda_obj_floor = lambda_obj_floor
         self.activate_obj_surface_nonpen = activate_obj_surface_nonpen
@@ -704,7 +702,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         if (dxi_obj is not None
                 and obj_pose_tm1 is not None
                 and obj_pose_tm2 is not None
-                and (self.lambda_o > 0 or self.lambda_omega > 0)
+                and self.lambda_o > 0
                 and frame_idx >= 2):
             from HoloNew.src.test_socp.movable import build_wo_term, pose_to_se3
             T_obj0 = pose_to_se3(obj_pose)
@@ -715,7 +713,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             obj_terms.append(build_wo_term(
                 T_obj0, T_obj_tm1, T_obj_tm2,
                 _vdot_ref, _omega_ref,
-                dxi_obj, self.lambda_o, self.lambda_omega, self._dt,
+                dxi_obj, self.lambda_o, self._dt,
             ))
 
         # W^o position anchor: pins the absolute object position to the reference

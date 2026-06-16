@@ -98,7 +98,6 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["activate_tb"] = sc.activate_tb
     kwargs["activate_tm"] = sc.activate_tm
     kwargs["lambda_o"] = sc.lambda_o if sc.activate_wo else 0.0
-    kwargs["lambda_omega"] = sc.lambda_omega if sc.activate_wo else 0.0
     kwargs["lambda_o_pos"] = sc.lambda_o_pos if sc.activate_wo_pos else 0.0
     kwargs["lambda_obj_floor"] = sc.lambda_obj_floor if sc.activate_obj_floor else 0.0
     kwargs["activate_obj_surface_nonpen"] = sc.activate_obj_surface_nonpen

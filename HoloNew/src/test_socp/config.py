@@ -96,11 +96,11 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     lambda_l_track: float = 5.0
 
     # [TEST] W^o Movable-object motion reg (needs activate_tm):
-    # lambda_o*||vdot - vdot_ref||^2 + lambda_omega*||omega - omega_ref||^2.
+    # lambda_o * ( ||(vdot - vdot_ref)/sigma_ao||^2 + ||(omega - omega_ref)/sigma_omega||^2 ).
+    # Single lambda_o; sigma_ao/sigma_omega carry the linear/angular asymmetry (Task 1.6).
     # activate_wo_pos: absolute object-position anchor. (object<->floor contact = activate_obj_floor.)
     activate_wo: bool = False
     lambda_o: float = 1.0
-    lambda_omega: float = 1.0
     activate_wo_pos: bool = False
     lambda_o_pos: float = 10.0
 

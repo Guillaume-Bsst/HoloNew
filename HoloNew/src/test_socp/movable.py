@@ -117,10 +117,16 @@ def build_wo_term(
     omega_ref,
     dxi,
     lambda_o,
-    lambda_omega,
     dt,
+    sigma_ao=1.0,
+    sigma_omega=1.0,
 ):
-    """W^o: lambda_o*||vdot - vdot_ref||^2 + lambda_omega*||omega - omega_ref||^2,
+    """W^o: single lambda_o weight with sigma_ao/sigma_omega carrying the
+    linear/angular asymmetry.
+
+    cost = lambda_o * ( ||(vdot - vdot_ref) / sigma_ao||^2
+                      + ||(omega - omega_ref) / sigma_omega||^2 )
+
     linearized in the object tangent step dxi (object pose T = exp6(dxi) * T_obj0).
 
     The object velocity at t is V_t = (1/dt) log6(T_obj_tm1^{-1} exp6(dxi) T_obj0).
@@ -142,9 +148,14 @@ def build_wo_term(
         vdot_ref: (3,) linear acceleration reference.
         omega_ref: (3,) angular velocity reference.
         dxi: cp.Variable of shape (6,), world-frame SE(3) tangent step.
-        lambda_o: weight on the linear acceleration term.
-        lambda_omega: weight on the angular velocity term.
+        lambda_o: single weight on both the linear acceleration and angular
+            velocity terms. The linear/angular asymmetry is carried by sigma_ao
+            and sigma_omega.
         dt: timestep in seconds.
+        sigma_ao: characteristic scale for the linear acceleration residual
+            (divides the linear residual). Default 1.0 (no scaling).
+        sigma_omega: characteristic scale for the angular velocity residual
+            (divides the angular residual). Default 1.0 (no scaling).
 
     Returns:
         A scalar cvxpy expression (the W^o cost).
@@ -164,8 +175,8 @@ def build_wo_term(
     A_omega = J[3:6, :]                                          # (3, 6)
     b_omega = v0[3:6] - np.asarray(omega_ref)                   # (3,)
 
-    r1 = np.sqrt(lambda_o) * (A_vdot @ dxi + b_vdot)
-    r2 = np.sqrt(lambda_omega) * (A_omega @ dxi + b_omega)
+    r1 = (np.sqrt(lambda_o) / sigma_ao) * (A_vdot @ dxi + b_vdot)
+    r2 = (np.sqrt(lambda_o) / sigma_omega) * (A_omega @ dxi + b_omega)
     return cp.sum_squares(r1) + cp.sum_squares(r2)
 
 

@@ -72,3 +72,25 @@ def test_sigma_a_sigma_L_scale_centroidal(rt):
     wl2 = build_centroidal_terms(lambda_c=0.0, lambda_l=1.0, sigma_a=1.0, sigma_L=2.0, **kw)
     np.testing.assert_allclose(sum(float(t.value) for t in wl2),
                                sum(float(t.value) for t in wl1) / 4.0, rtol=1e-9)
+
+
+def test_wo_sigma_split_single_lambda():
+    """Collapsed W^o: one λ_o; σ_ao scales the linear residual, σ_omega the
+    angular one. cost = λ_o(||(vdot-ref)/σ_ao||² + ||(omega-ref)/σ_omega||²)."""
+    from HoloNew.src.test_socp.movable import build_wo_term
+    rng = np.random.default_rng(0)
+    T0 = pin.exp6(0.1*rng.standard_normal(6)) * pin.SE3.Identity()
+    T1 = pin.exp6(0.1*rng.standard_normal(6)) * pin.SE3.Identity()
+    T2 = pin.exp6(0.1*rng.standard_normal(6)) * pin.SE3.Identity()
+    vdot_ref, omega_ref = rng.standard_normal(3), rng.standard_normal(3)
+    dt = 1/30.0
+    dxi = cp.Variable(6); val = 0.02*rng.standard_normal(6); dxi.value = val
+    term = build_wo_term(T0, T1, T2, vdot_ref, omega_ref, dxi,
+                         lambda_o=2.0, dt=dt, sigma_ao=3.0, sigma_omega=5.0)
+    Tcur = pin.exp6(val) * T0
+    V_t = pin.log6(T1.inverse() * Tcur).vector / dt
+    V_tm1 = pin.log6(T2.inverse() * T1).vector / dt
+    vdot = (V_t[:3] - V_tm1[:3]) / dt
+    omega = V_t[3:6]
+    gt = 2.0 * (np.sum(((vdot - vdot_ref)/3.0)**2) + np.sum(((omega - omega_ref)/5.0)**2))
+    np.testing.assert_allclose(float(term.value), gt, rtol=1e-3)
