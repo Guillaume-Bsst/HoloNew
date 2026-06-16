@@ -44,6 +44,13 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # [GMR] per-point position / orientation tracking (values in IK_MATCH_TABLE1/2). Core objective.
     activate_pos_tracking: bool = True
     activate_rot_tracking: bool = True
+    # [TEST] global priority λ + characteristic scale σ for the GMR tracking, per channel.
+    # Each residual becomes λ·w/σ²·‖·‖² with the per-point w_p/w_r as the intra-distribution.
+    # Defaults 1.0 = behavior-preserving (effective weight == legacy w_p/w_r); σ in m / rad.
+    lambda_pos: float = 1.0
+    sigma_p: float = 1.0
+    lambda_rot: float = 1.0
+    sigma_rot: float = 1.0
 
     # [HOLO] General joint-space regularizers (flat ports of Holosoma's regularization
     # terms; useful in TEST on their own). NOTE: Holosoma's Laplacian deformation term
@@ -105,7 +112,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wl: bool = False
     lambda_l: float = 1.0       # seed; was 1e-4
     activate_wl_track: bool = False
-    lambda_l_track: float = 5.0
+    lambda_l_track: float = 1.0
 
     # [TEST] W^o Movable-object motion reg (needs activate_tm):
     # lambda_o * ( ||(vdot - vdot_ref)/sigma_ao||^2 + ||(omega - omega_ref)/sigma_omega||^2 ).
@@ -120,7 +127,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # lambda_r re-tuned to 0.5 for the single-pass solve (the old two-pass value 0.2 is
     # counterproductive single-pass; 0.5 cuts jerk ~47% within the tracking slack).
     activate_wr: bool = False
-    lambda_r: float = 0.5
+    lambda_r: float = 1.0
     sigma_qddot: float = 20.0
     sigma_Vdot: float = 20.0
 

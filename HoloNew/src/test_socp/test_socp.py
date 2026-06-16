@@ -23,7 +23,6 @@ import cvxpy as cp
 import mujoco
 import numpy as np
 import pinocchio as pin
-from scipy.spatial.transform import Rotation
 
 from HoloNew.config_types.retargeter import FootLockConfig, SelfCollisionConfig
 from .holosoma_constraints import HolosomaConstraintsMixin
@@ -87,6 +86,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         nominal_tau: float = 10.0,
         activate_pos_tracking: bool = True,
         activate_rot_tracking: bool = True,
+        lambda_pos: float = 1.0,
+        sigma_p: float = 1.0,
+        lambda_rot: float = 1.0,
+        sigma_rot: float = 1.0,
         lambda_ws: float = 0.0,
         style_weights: dict | None = None,
         sigma_R: float = 0.2,
@@ -297,6 +300,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # IK match tables). Toggle each channel on/off; the table values still apply.
         self.activate_pos_tracking = activate_pos_tracking
         self.activate_rot_tracking = activate_rot_tracking
+        # GMR tracking: global priority λ + characteristic scale σ per channel.
+        self.lambda_pos = lambda_pos
+        self.sigma_p = sigma_p
+        self.lambda_rot = lambda_rot
+        self.sigma_rot = sigma_rot
         # W^s Style (additive pelvis-relative orientation matching; default 0 = off).
         self.lambda_ws = lambda_ws
         self.sigma_R = sigma_R
@@ -496,21 +504,15 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
 
         obj_terms = []
         # World-frame tracking (GMR): always runs; gated per body by activate_pos/rot.
-        for frame, (p_t, R_t, w_p, w_r) in frame_targets.items():
-            body = self.robot_link_names[frame]
-            Jp, Jr = self._body_jac(q, body)
-
-            if self.activate_pos_tracking and w_p > 0:
-                p_c = self.body_position(q, body)
-                obj_terms.append(w_p * cp.sum_squares(Jp @ dqa - (p_t - p_c)))
-
-            if self.activate_rot_tracking and w_r > 0:
-                R_c = self.body_rotation(q, body)
-                # Body-frame orientation error + body-frame angular Jacobian:
-                # body_omega ≈ (R_c.T @ Jr) @ dqa,  e = log(R_c.T @ R_t).
-                e = Rotation.from_matrix(R_c.T @ R_t).as_rotvec()
-                Jr_body = R_c.T @ Jr
-                obj_terms.append(w_r * cp.sum_squares(Jr_body @ dqa - e))
+        # Global priority λ + characteristic scale σ folded per channel (defaults 1.0
+        # => effective weight == legacy w_p/w_r). See tracking.build_tracking_terms.
+        from HoloNew.src.test_socp.tracking import build_tracking_terms
+        obj_terms.extend(build_tracking_terms(
+            self, frame_targets, dqa, q,
+            lambda_pos=self.lambda_pos, sigma_p=self.sigma_p,
+            lambda_rot=self.lambda_rot, sigma_rot=self.sigma_rot,
+            activate_pos=self.activate_pos_tracking,
+            activate_rot=self.activate_rot_tracking))
 
         # W^s Style: pelvis-relative joint-orientation matching (S_k) + pelvis
         # tilt against gravity (S_B), each residual divided by σ_R. See style.py.

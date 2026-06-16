@@ -98,6 +98,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["nominal_tau"] = sc.nominal_tau
     kwargs["activate_pos_tracking"] = sc.activate_pos_tracking
     kwargs["activate_rot_tracking"] = sc.activate_rot_tracking
+    kwargs["lambda_pos"] = sc.lambda_pos
+    kwargs["sigma_p"] = sc.sigma_p
+    kwargs["lambda_rot"] = sc.lambda_rot
+    kwargs["sigma_rot"] = sc.sigma_rot
     kwargs["lambda_ws"] = sc.lambda_ws if sc.activate_ws else 0.0
     # Centroidal: one switch per term; the solver's master activate_centroidal is the OR.
     kwargs["activate_centroidal"] = sc.activate_wc or sc.activate_wc_pos or sc.activate_wl
