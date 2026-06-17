@@ -44,6 +44,20 @@ def test_dist_channels_named_positionally():
     assert "diag/human_flr_dist/probe_001" in ch
 
 
+def test_dist_channels_aggregated_by_segment_min():
+    # 4 probes -> 2 segments; per segment we keep the min signed distance (closest).
+    flr = np.array([[0.3, 0.1, 0.9, 0.5],
+                    [0.2, 0.4, 0.6, 0.8]])           # (T=2, N=4)
+    ctx = SignalContext(probe_segments=np.array([0, 0, 1, 1]),
+                        probe_segment_names=["pelvis", "left_foot"])
+    ch = run_all(_fake_result(qpos=np.zeros((2, 9)), human_flr_dist=flr), ctx)
+    assert "diag/human_flr_dist/pelvis" in ch
+    assert "diag/human_flr_dist/left_foot" in ch
+    assert not any("probe_" in k for k in ch)        # no positional fallback
+    np.testing.assert_allclose(ch["diag/human_flr_dist/pelvis"], [0.1, 0.2])   # min of cols 0,1
+    np.testing.assert_allclose(ch["diag/human_flr_dist/left_foot"], [0.5, 0.6])  # min of cols 2,3
+
+
 def test_foot_slip_scalar_channel():
     res = _fake_result(foot_slip=np.array([0.0, 1.0, 2.0, 3.0]))
     ch = run_all(res)

@@ -65,16 +65,33 @@ def _foot_slip(result, ctx) -> dict[str, np.ndarray]:
     return {"diag/foot_slip": np.asarray(fs)} if fs is not None else {}
 
 
-def _distances(result, ctx) -> dict[str, np.ndarray]:
+def _seg_min_channels(prefix: str, arr: np.ndarray, segs: np.ndarray,
+                      names) -> dict[str, np.ndarray]:
+    """Aggregate (T, N) per-probe distances to per-segment minima (closest to surface)."""
+    segs = np.asarray(segs)
     out: dict[str, np.ndarray] = {}
-    flr = getattr(result, "human_flr_dist", None)
-    if flr is not None:
-        flr = np.asarray(flr)
-        out |= vec_channels("diag/human_flr_dist", flr, _probe_leaves(flr.shape[1]))
-    obj = getattr(result, "human_obj_dist", None)
-    if obj is not None:
-        obj = np.asarray(obj)
-        out |= vec_channels("diag/human_obj_dist", obj, _probe_leaves(obj.shape[1]))
+    for s in np.unique(segs):
+        nm = names[int(s)] if names is not None and int(s) < len(names) else f"seg_{int(s):02d}"
+        out[f"{prefix}/{nm}"] = arr[:, segs == s].min(axis=1)
+    return out
+
+
+def _distances(result, ctx) -> dict[str, np.ndarray]:
+    """Human-side SDF distances, aggregated per body segment when ctx provides probe
+    segment labels (else one column per probe)."""
+    segs = getattr(ctx, "probe_segments", None) if ctx is not None else None
+    names = getattr(ctx, "probe_segment_names", None) if ctx is not None else None
+    out: dict[str, np.ndarray] = {}
+    for field, prefix in (("human_flr_dist", "diag/human_flr_dist"),
+                          ("human_obj_dist", "diag/human_obj_dist")):
+        arr = getattr(result, field, None)
+        if arr is None:
+            continue
+        arr = np.asarray(arr)
+        if segs is not None and len(segs) == arr.shape[1]:
+            out |= _seg_min_channels(prefix, arr, segs, names)
+        else:
+            out |= vec_channels(prefix, arr, _probe_leaves(arr.shape[1]))
     return out
 
 

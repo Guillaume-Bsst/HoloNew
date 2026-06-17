@@ -28,3 +28,8 @@ class SignalContext:
     # retargeter (FK / GMR-grounded reference): tracking, style, contacts. Keeps those
     # heavy, rt-dependent computations out of the pure producers.
     extra_channels: dict[str, np.ndarray] | None = None
+    # Per-probe body-segment label (N,) + the segment-name list (indexed by label), so
+    # the human SDF distances aggregate per body part instead of one column per probe.
+    # None -> the distance producer falls back to positional per-probe channels.
+    probe_segments: np.ndarray | None = None
+    probe_segment_names: list[str] | None = None
