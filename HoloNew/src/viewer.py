@@ -108,7 +108,13 @@ class Viewer:
                  object_sdf_cols: np.ndarray | None = None,
                  object_sdf_floor_pts: np.ndarray | None = None,
                  object_sdf_floor_cols: np.ndarray | None = None,
+                 interaction_L_floor: float = CONTACT_MARGIN_M,
+                 interaction_L_object: float = CONTACT_MARGIN_M,
                  human_body: object | None = None) -> None:
+        # Contact bands used for the overlays' active masks + colour scales, per channel
+        # (the run's L_floor / L_object), so the viewer matches what the solver activates.
+        self._L_flr = float(interaction_L_floor)
+        self._L_obj = float(interaction_L_object)
         self.robot_model_path = robot_model_path
         self.object_model_path = object_model_path
         self.has_dynamic_object = has_dynamic_object
@@ -676,14 +682,15 @@ class Viewer:
         elif self._sdf_handle is not None:
             self._sdf_handle.visible = False
 
-    def _draw_signed_cloud(self, handle_attr, name, pts, dist, show):
-        """Persistent signed-distance point cloud, updated in place; hidden when show=False."""
+    def _draw_signed_cloud(self, handle_attr, name, pts, dist, show, margin=CONTACT_MARGIN_M):
+        """Persistent signed-distance point cloud, updated in place; hidden when show=False.
+        `margin` is the contact band used for the colour scale (the run's L per channel)."""
         h = getattr(self, handle_attr)
         if not show:
             if h is not None:
                 h.visible = False
             return
-        cols = signed_distance_colors(dist, CONTACT_MARGIN_M)
+        cols = signed_distance_colors(dist, margin)
         if h is None:
             h = self.server.scene.add_point_cloud(
                 name, points=pts.astype(np.float32), colors=cols, point_size=0.01)
@@ -697,18 +704,19 @@ class Viewer:
         """TEST-SOCP overlays: human contact (Grounded stage) + G1 transport (Robot stage)."""
         method = self._methods.get(self._method_dd.value)
         stage = self._stage_dd.value
+        _Lmix = max(self._L_flr, self._L_obj)   # combined min(obj,flr) clouds: widest band
         show_human = (method is not None and self._tog_human.value
                       and method.human_probe_pts is not None and stage == "Grounded")
         self._draw_signed_cloud(
             "_human_handle", "/test/human",
             method.human_probe_pts[frame] if show_human else None,
-            method.human_dist[frame] if show_human else None, show_human)
+            method.human_dist[frame] if show_human else None, show_human, margin=_Lmix)
         show_g1 = (method is not None and self._tog_g1_transport.value
                    and method.g1_transport_pts is not None and stage == ROBOT_STAGE)
         self._draw_signed_cloud(
             "_g1_transport_handle", "/test/g1_transport",
             method.g1_transport_pts[frame] if show_g1 else None,
-            method.g1_dist[frame] if show_g1 else None, show_g1)
+            method.g1_dist[frame] if show_g1 else None, show_g1, margin=_Lmix)
         # Object / floor "contact" footprints (SDF mode, like test_pipe's witness_cloud):
         # the witness points of the human channels for the ACTIVE probes — the contact
         # footprint on the object / floor. Gated to the Grounded stage (they belong with
@@ -720,11 +728,11 @@ class Viewer:
                   and pose is not None)
         if show_o:
             d = method.human_obj_dist[frame]
-            a = d < CONTACT_MARGIN_M
+            a = d < self._L_obj
             wit = transform_points_local_to_world(
                 pose[frame, 3:7], pose[frame, :3], method.human_witness[frame][a])
             self._draw_signed_cloud("_object_contact_handle", "/test/object_contact",
-                                    wit, d[a], bool(a.any()))
+                                    wit, d[a], bool(a.any()), margin=self._L_obj)
         else:
             self._draw_signed_cloud("_object_contact_handle", "/test/object_contact",
                                     None, None, False)
@@ -733,18 +741,18 @@ class Viewer:
                   and method.human_probe_pts is not None and method.human_flr_dist is not None)
         if show_f:
             d = method.human_flr_dist[frame]
-            a = d < CONTACT_MARGIN_M
+            a = d < self._L_flr
             fw = method.human_probe_pts[frame][a].copy()
             fw[:, 2] = 0.0
             self._draw_signed_cloud("_floor_contact_handle", "/test/floor_contact",
-                                    fw, d[a], bool(a.any()))
+                                    fw, d[a], bool(a.any()), margin=self._L_flr)
         else:
             self._draw_signed_cloud("_floor_contact_handle", "/test/floor_contact",
                                     None, None, False)
 
-    def _draw_segments(self, name, a, b, dist):
+    def _draw_segments(self, name, a, b, dist, margin=CONTACT_MARGIN_M):
         segs = np.stack([a, b], axis=1).astype(np.float32)            # (K, 2, 3)
-        cols = np.repeat(signed_distance_colors(dist, CONTACT_MARGIN_M)[:, None, :], 2, axis=1)
+        cols = np.repeat(signed_distance_colors(dist, margin)[:, None, :], 2, axis=1)
         h = self.server.scene.add_line_segments(name, segs, cols, line_width=1.5)
         self._dynamic_handles.append(h)
 
@@ -770,19 +778,21 @@ class Viewer:
             if (show_obj and has_obj_pose and method.human_witness is not None
                     and method.human_obj_dist is not None):
                 d_obj = method.human_obj_dist[frame]
-                a_obj = d_obj < CONTACT_MARGIN_M
+                a_obj = d_obj < self._L_obj
                 if a_obj.any():
                     wit = transform_points_local_to_world(
                         obj_quat, obj_trans, method.human_witness[frame][a_obj])
-                    self._draw_segments("/test/dir_human_obj", probes[a_obj], wit, d_obj[a_obj])
+                    self._draw_segments("/test/dir_human_obj", probes[a_obj], wit,
+                                        d_obj[a_obj], margin=self._L_obj)
             # Floor channel: world-frame witness, NOT lifted by the object pose.
             if (show_flr and method.human_flr_witness is not None
                     and method.human_flr_dist is not None):
                 d_flr = method.human_flr_dist[frame]
-                a_flr = d_flr < CONTACT_MARGIN_M
+                a_flr = d_flr < self._L_flr
                 if a_flr.any():
                     self._draw_segments("/test/dir_human_flr", probes[a_flr],
-                                        method.human_flr_witness[frame][a_flr], d_flr[a_flr])
+                                        method.human_flr_witness[frame][a_flr], d_flr[a_flr],
+                                        margin=self._L_flr)
         # G1 transport is a correspondence onto the solved robot; it has both an object
         # and a floor channel, each gated on its own toggle (mirrors the human probes).
         if stage == ROBOT_STAGE and method.g1_transport_pts is not None:
@@ -792,19 +802,19 @@ class Viewer:
             if (show_obj and has_obj_pose and method.g1_obj_witness is not None
                     and method.g1_obj_dist is not None):
                 d = method.g1_obj_dist[frame]
-                a = d < CONTACT_MARGIN_M
+                a = d < self._L_obj
                 if a.any():
                     wit = transform_points_local_to_world(
                         obj_quat, obj_trans, method.g1_obj_witness[frame][a])
-                    self._draw_segments("/test/dir_g1_obj", g1[a], wit, d[a])
+                    self._draw_segments("/test/dir_g1_obj", g1[a], wit, d[a], margin=self._L_obj)
             # Floor channel: world-frame witness, NOT lifted by the object pose.
             if (show_flr and method.g1_flr_witness is not None
                     and method.g1_flr_dist is not None):
                 d = method.g1_flr_dist[frame]
-                a = d < CONTACT_MARGIN_M
+                a = d < self._L_flr
                 if a.any():
                     self._draw_segments("/test/dir_g1_flr", g1[a],
-                                        method.g1_flr_witness[frame][a], d[a])
+                                        method.g1_flr_witness[frame][a], d[a], margin=self._L_flr)
 
     def _draw_object_floor(self, frame: int) -> None:
         """Object-as-carrier <-> floor channel (mirrors the human/G1 floor channel for the
@@ -827,17 +837,20 @@ class Viewer:
             return
         world = transform_points_local_to_world(quat, trans, surf)   # (M, 3)
         d = world[:, 2]                                              # floor signed distance = height
+        # Object<->floor is the FLOOR channel for the object carrier -> band = L_floor.
+        _Lf = self._L_flr
         # All surface points, height-coloured (independent of the contact band).
         self._draw_signed_cloud("_object_surface_handle", "/test/object_surface",
-                                world if show_pts else None, d if show_pts else None, show_pts)
-        near = d < CONTACT_MARGIN_M
+                                world if show_pts else None, d if show_pts else None, show_pts,
+                                margin=_Lf)
+        near = d < _Lf
         wit = world.copy(); wit[:, 2] = 0.0                         # floor witness (project to z=0)
         if show_dir and near.any():
-            self._draw_segments("/test/dir_object_floor", world[near], wit[near], d[near])
+            self._draw_segments("/test/dir_object_floor", world[near], wit[near], d[near], margin=_Lf)
         show_con_now = show_con and bool(near.any())
         self._draw_signed_cloud("_object_floor_contact_handle", "/test/object_floor_contact",
                                 wit[near] if show_con_now else None,
-                                d[near] if show_con_now else None, show_con_now)
+                                d[near] if show_con_now else None, show_con_now, margin=_Lf)
 
     def _draw_sdf_floor(self) -> None:
         """Static analytic floor SDF band (world), toggled visible/invisible."""

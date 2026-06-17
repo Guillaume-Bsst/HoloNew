@@ -84,6 +84,30 @@ def test_object_surface_points_visible_and_persistent(robot_urdf):
     v.close()
 
 
+def test_object_floor_active_band_follows_L_floor(robot_urdf):
+    # The active/near band tracks the run's L_floor, not a hardcoded 0.10: a point 0.15 m
+    # above the floor is "near" under L_floor=0.20 but not under 0.10 (the audited bug).
+    surf = np.array([[0.0, 0.0, 0.0]], np.float32)
+    solved = np.tile([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.15], (2, 1)).astype(np.float32)
+    m = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((2, 36)),
+                  stages={"Original": np.zeros((2, 5, 3)), "Robot": np.zeros((2, 5, 3))},
+                  object_surface_local=surf, solved_object_poses=solved)
+    pose_raw = np.tile([0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 0.0], (2, 1)).astype(np.float32)
+    for L, expect in ((0.20, True), (0.10, False)):
+        v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+                   stage_keys=("test_socp",), object_pose_raw=pose_raw,
+                   object_pose_scaled=pose_raw, interaction_L_floor=L)
+        v.bind_methods([m])
+        v._stage_dd.value = "Original"
+        v._tog_obj_floor_contact.value = True
+        v._tog_solved_obj.value = True
+        v._redraw(0)
+        h = v._object_floor_contact_handle
+        visible = h is not None and bool(h.visible)   # None = never created = not near
+        assert visible is expect, f"L_floor={L}"
+        v.close()
+
+
 def test_object_floor_absent_is_noop(robot_urdf):
     # No object_surface_local on the method -> the channel is a no-op, must not raise.
     m = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((2, 36)),

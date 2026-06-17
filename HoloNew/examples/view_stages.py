@@ -326,6 +326,13 @@ def view(cfg: ViewStagesConfig) -> None:
     # stages. 'Mapped' is now the raw pre-scale bodies (commit ccadf61), so it is raw
     # too — only Scaled/Offset/Floor/Robot carry the placement. Native size on every stage.
     object_scaled_stages = ("Scaled", "Offset", "Floor", ROBOT_STAGE)
+    # Interaction bands for the viewer overlays' active masks + colour scales, from the
+    # TEST-SOCP config (per channel), so the viewer matches what the solver activates.
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    _vsc = (cfg.retargeter if isinstance(cfg.retargeter, TestSocpRetargeterConfig)
+            else TestSocpRetargeterConfig())
+    _vL_flr = _vsc.L_floor if _vsc.L_floor is not None else _vsc.L_interaction
+    _vL_obj = _vsc.L_object if _vsc.L_object is not None else _vsc.L_interaction
     viewer = Viewer(
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
         object_model_path=None,
@@ -342,6 +349,8 @@ def view(cfg: ViewStagesConfig) -> None:
         object_sdf_cols=object_sdf_cols,
         object_sdf_floor_pts=object_sdf_floor_pts,
         object_sdf_floor_cols=object_sdf_floor_cols,
+        interaction_L_floor=_vL_flr,
+        interaction_L_object=_vL_obj,
         human_body=human_body,
     )
     viewer.bind_methods(methods)
