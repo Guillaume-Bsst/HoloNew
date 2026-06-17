@@ -10,10 +10,12 @@ import pytest
 
 from HoloNew.examples.robot_retarget import RetargetingConfig
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
-from HoloNew.evaluation.export.contact_signals import contact_channels
+from HoloNew.evaluation.export.contact_signals import (
+    contact_channels, contact_arrays, contact_scoreboard)
 
 MAX_FRAMES = 4
-_SIGNALS = ("robot_dist", "robot_active", "ref_dist", "ref_active", "slip")
+_SIGNALS = ("robot_dist", "robot_active", "robot_active_phys",
+            "ref_dist", "ref_active", "ref_active_phys", "slip")
 
 
 def _solve(task_type):
@@ -54,6 +56,24 @@ def test_robot_only_has_no_object_channel(floor_run):
     rt, res = floor_run
     ch = contact_channels(rt, res)
     assert not any(k.startswith("contacts/object/") for k in ch)
+
+
+def test_physical_active_independent_of_L(floor_run):
+    rt, res = floor_run
+    # A tighter physical threshold can only shrink (never grow) the active set.
+    a_loose, _ = contact_arrays(rt, res, threshold=0.05)
+    a_tight, _ = contact_arrays(rt, res, threshold=0.01)
+    assert a_tight["floor"]["robot_active_phys"].sum() <= a_loose["floor"]["robot_active_phys"].sum()
+
+
+def test_contact_scoreboard_canonical_keys(floor_run):
+    rt, res = floor_run
+    arrays, _ = contact_arrays(rt, res)
+    sb = contact_scoreboard(arrays)
+    assert "floor" in sb
+    for k in ("contact_precision", "contact_recall", "contact_f1",
+              "contact_place_err", "contact_slip_mean"):
+        assert k in sb["floor"]
 
 
 def test_object_interaction_has_object_channel():

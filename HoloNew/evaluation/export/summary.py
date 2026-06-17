@@ -23,8 +23,15 @@ def reduce_channel(a: np.ndarray) -> dict[str, float]:
     }
 
 
-def write_summary(path, channels: dict[str, np.ndarray]) -> dict[str, dict[str, float]]:
-    summary = {name: reduce_channel(arr) for name, arr in channels.items()}
+def write_summary(path, channels: dict[str, np.ndarray],
+                  scoreboard: dict | None = None) -> dict:
+    """Write {"scoreboard": canonical 7-family scalars, "channels": per-channel stats}.
+
+    ``scoreboard`` is the canonical headline (see export.scoreboard); ``channels`` keeps
+    the generic per-channel mean/rms/min/max for quick per-signal inspection.
+    """
+    summary = {"scoreboard": scoreboard or {},
+               "channels": {name: reduce_channel(arr) for name, arr in channels.items()}}
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(summary, indent=2))

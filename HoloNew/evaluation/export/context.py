@@ -33,3 +33,7 @@ class SignalContext:
     # None -> the distance producer falls back to positional per-probe channels.
     probe_segments: np.ndarray | None = None
     probe_segment_names: list[str] | None = None
+    # Fixed physical contact half-width (m), independent of the solver's interaction
+    # length L, so the *_active_phys flags + the canonical contact scoreboard are
+    # comparable across runs/methods. Matches eval_retargeting's 2 cm default.
+    contact_threshold: float = 0.02
