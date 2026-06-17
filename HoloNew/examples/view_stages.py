@@ -33,8 +33,9 @@ from HoloNew.src import skeleton
 from HoloNew.src.test_socp.contact.backends.sdf import (
     band_points,
     load_or_build_object_sdf,
+    object_sdf_cache_path,
 )
-from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
+from HoloNew.src.test_socp.contact.constants import OMOMO_DIR_DEFAULT
 from HoloNew.src.test_socp.contact.viz import signed_distance_colors
 from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.test_socp.correspondence.human_body import HumanBody
@@ -142,19 +143,26 @@ def view(cfg: ViewStagesConfig) -> None:
     object_sdf_pts = object_sdf_cols = None
     object_sdf_floor_pts = object_sdf_floor_cols = None
     if data_format == "smplh":
+        # Interaction lengths from the TEST-SOCP config, so the SDF band shells the viewer
+        # draws match the bands the solver actually uses (floor + object channels).
+        from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+        _sc = (cfg.retargeter if isinstance(cfg.retargeter, TestSocpRetargeterConfig)
+               else TestSocpRetargeterConfig())
+        _L_flr_view = _sc.L_floor if _sc.L_floor is not None else _sc.L_interaction
+        _L_view = _sc.L_object if _sc.L_object is not None else _sc.L_interaction
         # Analytic floor SDF band: a thin sheet stack over the floor extent at z layers in
-        # [-margin, margin], coloured by signed z distance (drawn by the "SDF Floor" toggle).
+        # [-L_floor, L_floor], coloured by signed z distance (drawn by the "SDF Floor" toggle).
         from HoloNew.src.test_socp.contact.probes import make_floor_grid
         _cx = float(raw_joints[:, 0, 0].mean())
         _cy = float(raw_joints[:, 0, 1].mean())
         _base = make_floor_grid(center_xy=(_cx, _cy), density=80.0)
         _layers = []
-        for _z in np.linspace(-CONTACT_MARGIN_M, CONTACT_MARGIN_M, 3):
+        for _z in np.linspace(-_L_flr_view, _L_flr_view, 3):
             _l = _base.copy()
             _l[:, 2] = _z
             _layers.append(_l)
         object_sdf_floor_pts = np.concatenate(_layers).astype(np.float32)
-        object_sdf_floor_cols = signed_distance_colors(object_sdf_floor_pts[:, 2], CONTACT_MARGIN_M)
+        object_sdf_floor_cols = signed_distance_colors(object_sdf_floor_pts[:, 2], _L_flr_view)
 
         parts = cfg.task_name.split("_")
         obj_file = Path("models") / parts[1] / f"{parts[1]}.obj" if len(parts) >= 2 else None
@@ -174,14 +182,16 @@ def view(cfg: ViewStagesConfig) -> None:
 
                 # Object SDF for the "SDF Object" band-shell viz. Uses the SAME keyed,
                 # disk-cached field as the solve (load_or_build_object_sdf), resolved at the
-                # run's interaction length, so the viewer draws the band the solver actually
-                # uses — no separate fixed-band <obj>_sdf.npz to drift out of sync / regenerate.
-                from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
-                _sc = (cfg.retargeter if isinstance(cfg.retargeter, TestSocpRetargeterConfig)
-                       else TestSocpRetargeterConfig())
-                _L_view = _sc.L_object if _sc.L_object is not None else _sc.L_interaction
+                # run's interaction length (_L_view from the config above), so the viewer
+                # draws the band the solver actually uses — no fixed-band file to drift.
+                _cache = object_sdf_cache_path(str(obj_file), _L_view, _sc.sdf_resolution,
+                                               "assets/contact")
+                _existed = _cache.exists()
                 sdf = load_or_build_object_sdf(str(obj_file), _L_view, _sc.sdf_resolution,
                                                cache_dir="assets/contact")
+                logger.info("Object SDF %s: %s  (L=%.3f m, res=%.3f m, %d nodes)",
+                            "loaded" if _existed else "built+cached", _cache.name,
+                            _L_view, _sc.sdf_resolution, int(np.prod(sdf.dims)))
                 band_pts, band_dist = band_points(sdf, _L_view)
                 object_sdf_pts = band_pts
                 object_sdf_cols = signed_distance_colors(band_dist, _L_view)
