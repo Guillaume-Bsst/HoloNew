@@ -57,11 +57,17 @@ def _distances(result) -> dict[str, np.ndarray]:
     return out
 
 
+def _solver_cost(result) -> dict[str, np.ndarray]:
+    c = getattr(result, "per_frame_cost", None)
+    return {"solver/cost": np.asarray(c)} if c is not None else {}
+
+
 PRODUCERS = [
     ("com", _com),
     ("ang_momentum", _ang_momentum),
     ("foot_slip", _foot_slip),
     ("distances", _distances),
+    ("solver_cost", _solver_cost),
 ]
 
 

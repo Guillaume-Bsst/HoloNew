@@ -32,3 +32,4 @@ class RetargetResult:
     angular_momentum: np.ndarray | None = None     # (T, 3)  centroidal angular momentum L (W^L diagnostic)
     angular_momentum_ref: np.ndarray | None = None # (T, 3)  W^L reference angular momentum (grounded target)
     foot_slip: np.ndarray | None = None            # (T,)    mean tangential foot slip at floor contacts (no-slip)
+    per_frame_cost: np.ndarray | None = None       # (T,)    SQP objective value at each solved frame (solver health)

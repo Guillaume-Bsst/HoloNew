@@ -988,6 +988,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             T = min(T, int(max_frames))
         q = np.copy(self.q_init_full)
         out = []
+        costs = []  # per-frame SQP objective value (solver-health diagnostic)
         # q_prev: previous-frame foot anchor for foot-sticking; both passes use the same anchor,
         # updated once per frame (after both passes). Frame 0 anchors to init config.
         q_prev = np.copy(self.q_init_full)
@@ -1186,7 +1187,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             _obj_pose_ref_tm1 = (self._obj_poses_raw[t - 1]
                                  if (getattr(self, "_obj_poses_raw", None) is not None and t >= 1)
                                  else None)
-            q, _, _frame_solved_obj = self.iterate(q, q, q_prev, tg, n_iter=_n_iter,
+            q, _frame_cost, _frame_solved_obj = self.iterate(q, q, q_prev, tg, n_iter=_n_iter,
                                 frame_idx=t, foot_sticking=_fs, obj_pose=_obj_pose,
                                 obj_pose_ref=_obj_pose_ref,
                                 obj_pose_ref_tm1=_obj_pose_ref_tm1,
@@ -1252,8 +1253,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             if self.has_dynamic_object and _frame_solved_obj is not None:
                 q[-7:] = np.concatenate([_frame_solved_obj[4:7], _frame_solved_obj[0:4]])
             out.append(np.copy(q))
+            costs.append(float(_frame_cost))
 
         res = RetargetResult(qpos=np.array(out), stages={}, cost=0.0)
+        res.per_frame_cost = np.asarray(costs, dtype=np.float64)
         if probe_pts:
             res.human_probe_pts = np.stack(probe_pts)
             res.human_obj_dist = np.stack(probe_obj)
