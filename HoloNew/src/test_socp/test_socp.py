@@ -119,8 +119,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         load_object_scene: bool = True,
         activate_persistence: bool = False,
         persistence_tol: float = 0.005,
+        L_interaction: float = 0.10,
         L_floor: float | None = None,
         L_object: float | None = None,
+        sdf_resolution: float = 0.01,
         **_ignored,
     ):
         """Initialise the retargeter from task constants.
@@ -241,10 +243,9 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # None until from_config populates it; not used in the solve yet.
         self.correspondence = None
 
-        # Contact assets (loaded by from_config from the bundled artifacts).
-        # None until from_config populates them; not used in the solve yet.
+        # Object SDF: built/loaded by from_config, keyed by the configured (L, resolution).
+        # None until from_config populates it (and for object-less / floor-only tasks).
         self.object_sdf = None
-        self.contact_fields = None
         # Object surface control points (object-local), sampled from the object
         # mesh by from_config for the object<->floor inertia term. None until set.
         self.object_surface_local = None
@@ -356,11 +357,13 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.activate_persistence = activate_persistence
         self.persistence_tol = persistence_tol
 
-        # Brick 3 — Per-entity field ranges (activation distance + positional scale).
-        # None = AUTO: resolve at access time against smplx_ground_probe.margin
-        # (which is set by from_config after __init__ returns).
+        # Brick 3 — Interaction length. L_interaction is the master range; L_floor/L_object
+        # are optional per-channel overrides (None = inherit the master, then the probe
+        # margin, set by from_config after __init__). sdf_resolution sets the SDF voxel.
+        self._L_interaction_cfg = L_interaction
         self._L_floor_cfg = L_floor
         self._L_object_cfg = L_object
+        self.sdf_resolution = sdf_resolution
 
         # Build robot_link_names: map each IK table frame -> actual G1 body name,
         # applying the remap for the two missing toe bodies.
@@ -380,24 +383,22 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
 
     @property
     def L_floor(self) -> float:
-        """Per-entity floor field range (activation distance + positional scale).
-
-        AUTO (None at construction) resolves to smplx_ground_probe.margin once
-        the probe is available (set by from_config after __init__).
-        """
+        """Floor field range (activation distance + positional scale): the L_floor override
+        if set, else the master L_interaction, else the probe margin (legacy AUTO)."""
         if self._L_floor_cfg is not None:
             return self._L_floor_cfg
+        if self._L_interaction_cfg is not None:
+            return self._L_interaction_cfg
         return self.smplx_ground_probe.margin
 
     @property
     def L_object(self) -> float:
-        """Per-entity object field range (activation distance + positional scale).
-
-        AUTO (None at construction) resolves to smplx_ground_probe.margin once
-        the probe is available (set by from_config after __init__).
-        """
+        """Object field range (activation distance + positional scale): the L_object
+        override if set, else the master L_interaction, else the probe margin (legacy)."""
         if self._L_object_cfg is not None:
             return self._L_object_cfg
+        if self._L_interaction_cfg is not None:
+            return self._L_interaction_cfg
         return self.smplx_ground_probe.margin
 
     def _body_jac(self, q: np.ndarray, body_name: str):

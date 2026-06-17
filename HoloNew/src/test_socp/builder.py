@@ -78,8 +78,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # Each cost term has its own activate_* switch (config §3): the switch alone decides,
     # so resolve the EFFECTIVE weight here (tuned value when on, 0 when off) and feed the
     # solver, whose gating stays the simple "weight > 0". One flag per weight.
+    kwargs["L_interaction"] = sc.L_interaction
     kwargs["L_floor"] = sc.L_floor
     kwargs["L_object"] = sc.L_object
+    kwargs["sdf_resolution"] = sc.sdf_resolution
     kwargs["lambda_d"] = sc.lambda_d if sc.activate_wd else 0.0
     kwargs["lambda_x"] = sc.lambda_x if sc.activate_wx else 0.0
     kwargs["lambda_p"] = sc.lambda_p if sc.activate_wp else 0.0
@@ -308,25 +310,34 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         rt.correspondence = build_table(SMPLX_MODEL_DIR_DEFAULT, "neutral", None,
                                         G1_29DOF_URDF, HUMAN_GRID_DENSITY, G1_DENSITY, OT_REG)
 
-    # Load bundled contact assets (data only — NOT used in the solve yet;
-    # will be wired into the objective in a later task).
-    from HoloNew.src.test_socp.contact.backends.sdf import load_object_sdf
-    from HoloNew.src.test_socp.contact.contact_io import load_contact_fields
+    # Object SDF: built on demand and disk-cached, keyed by the configured (L, resolution)
+    # so the field's band always matches the run's interaction length. No fixed bundled
+    # asset, no full-motion contact precompute (that violated the online principle).
+    from HoloNew.src.test_socp.contact.backends.sdf import load_or_build_object_sdf
     _contact_assets = Path(__file__).resolve().parent.parent.parent / "assets" / "contact"
-    _sdf_path = _contact_assets / "largebox_sdf.npz"
-    _contact_path = _contact_assets / f"contact_{cfg.task_name}.npz"
-    # Load the object SDF only for tasks that actually have an object. robot_only
-    # (object_name "ground", e.g. smplx locomotion clips with no .pt object poses)
-    # must not pull in object loading. Floor-only inertia keeps object_sdf=None.
-    if _sdf_path.exists() and rt.object_name not in (None, "ground"):
-        rt.object_sdf = load_object_sdf(_sdf_path)
-    if _contact_path.exists():
-        rt.contact_fields = load_contact_fields(_contact_path)
+    # Effective interaction lengths: master L_interaction, with optional per-channel
+    # overrides. The object SDF band must cover L_object; the field query margin must reach
+    # max(L_floor, L_object) so nothing is clamped before L (see L audit).
+    _L_obj_eff = sc.L_object if sc.L_object is not None else sc.L_interaction
+    _L_flr_eff = sc.L_floor if sc.L_floor is not None else sc.L_interaction
+    _probe_margin = float(max(_L_flr_eff, _L_obj_eff))
+    _sdf_res = sc.sdf_resolution
+    _mesh_file = getattr(constants, "OBJECT_MESH_FILE", None)
+    # Build/load the object SDF only for tasks that actually have an object. robot_only
+    # (object_name "ground", e.g. smplx locomotion clips with no .pt object poses) must not
+    # pull in object loading. Floor-only inertia keeps object_sdf=None.
+    if rt.object_name not in (None, "ground"):
+        if _mesh_file is not None and Path(_mesh_file).exists():
+            # Load the cache matching (L, resolution); bake + cache it if absent.
+            rt.object_sdf = load_or_build_object_sdf(
+                _mesh_file, _L_obj_eff, _sdf_res, cache_dir=_contact_assets)
+        else:
+            print(f"[TestSocp] object mesh not found ({_mesh_file}); no object SDF "
+                  f"(floor-only). Set OBJECT_MESH_FILE to enable the object channel.")
 
     # Object surface control points (object-local) for the object<->floor
     # inertia term. Sampled once from the object mesh; only needed when the
-    # object pose is a variable (movable) on an object task.
-    _mesh_file = getattr(constants, "OBJECT_MESH_FILE", None)
+    # object pose is a variable (movable) on an object task. (_mesh_file computed above.)
     if (rt.object_sdf is not None and _mesh_file is not None
             and Path(_mesh_file).exists()):
         from HoloNew.src.test_socp.movable import sample_object_surface
@@ -365,9 +376,11 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         # AMASS (smplx) clips carry their own betas/gender and pose the body from
         # the 22 SMPL-order joints; OMOMO loads betas via task metadata.
         _is_smplx = rt._smplx_betas is not None
+        # Query margin = max channel L so the field reports the true distance out to L
+        # (no clamp before L); per-channel activation is re-gated by L_floor/L_object.
         rt.smplx_ground_probe = build_smplx_ground_probe(
             cfg.task_name, OMOMO_DIR_DEFAULT, SMPLX_MODEL_DIR_DEFAULT,
-            rt.object_sdf, _obj_poses_arg, CONTACT_MARGIN_M, HUMAN_GRID_DENSITY,
+            rt.object_sdf, _obj_poses_arg, _probe_margin, HUMAN_GRID_DENSITY,
             cache=corr_cache,
             betas=(rt._smplx_betas if _is_smplx else None),
             gender=(rt._smplx_gender if _is_smplx else None),

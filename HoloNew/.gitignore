@@ -23,3 +23,6 @@ converted_res/
 data_utils/lafan1
 *.sh
 *.bvh
+
+# On-demand object-SDF caches (rebaked per interaction length; not tracked)
+assets/contact/*_L*_r*.npz

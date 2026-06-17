@@ -105,10 +105,18 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     activate_wp_obj: bool = False
     lambda_p_obj: float = 1.0
     sigma_v_obj: float = 0.05
-    # [TEST] per-entity field range Lⱼ (activation distance AND positional scale).
-    # None = AUTO: inherit the SDF probe margin (current shared value).
+    # [TEST] Interaction length L — the master field range, source of truth. Drives the
+    # object-SDF bake band, the field QUERY margin (so distances are not clamped before L),
+    # and the per-channel activation range. Raising it lets contacts engage farther; the
+    # object SDF is rebaked + disk-cached on demand, keyed by (L, sdf_resolution).
+    L_interaction: float = 0.10
+    # [TEST] per-entity field range Lⱼ (activation distance AND positional scale) — optional
+    # overrides of L_interaction. None = inherit L_interaction (then the probe margin).
     L_floor: float | None = None
     L_object: float | None = None
+    # [TEST] object-SDF grid voxel size (metres). Finer = more accurate + bigger grid
+    # (memory/bake grow ~ (bbox+2L)^3 / res^3). Part of the SDF cache key.
+    sdf_resolution: float = 0.01
 
     # [TEST] W^c/W^L Centroidal (W^c/W^L from frame >= 2, W^c_pos from frame 0):
     # W^c = ||c_ddot - c_ddot_ref||^2, W^c_pos = ||c - c_ref||^2, W^L = ||L||^2.

@@ -266,6 +266,37 @@ def sdf_surface_distance_torch(probe_pts, sdf: ObjectSDF, margin: float):
     return _SDFDistance.apply(probe_pts)
 
 
+def object_sdf_cache_path(mesh_file, margin: float, resolution: float, cache_dir=None):
+    """Disk cache path for an object SDF, keyed by (mesh stem, band L, resolution).
+
+    Distinct (L, resolution) get distinct files so runs with different interaction
+    lengths never collide: e.g. ``largebox_L0.30_r0.010.npz``."""
+    from pathlib import Path
+    mesh_file = Path(mesh_file)
+    cache_dir = Path(cache_dir) if cache_dir is not None else mesh_file.parent
+    return cache_dir / f"{mesh_file.stem}_L{float(margin):.2f}_r{float(resolution):.3f}.npz"
+
+
+def load_or_build_object_sdf(mesh_file, margin: float, resolution: float,
+                             cache_dir=None) -> "ObjectSDF":
+    """Object SDF for ``mesh_file`` with a near-surface band of half-width ``margin``,
+    built on demand and cached to disk keyed by (L, resolution).
+
+    The band L sets the activation/positional range of the object interaction: the grid
+    covers it so the field reports the true signed distance out to L (beyond it the field
+    is out of grid -> inactive). First call at a given (L, resolution) bakes via Coal and
+    caches; later calls load. Lets runs use different L without recomputing each time."""
+    import trimesh
+    path = object_sdf_cache_path(mesh_file, margin, resolution, cache_dir)
+    if path.exists():
+        return load_object_sdf(path)
+    mesh = trimesh.load(str(mesh_file), force="mesh")
+    sdf = build_object_field(mesh, float(margin), float(resolution))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    save_object_sdf(sdf, path)
+    return sdf
+
+
 def save_object_sdf(sdf: ObjectSDF, path) -> None:
     """Serialise an ObjectSDF to a compressed .npz (compute once, cache on disk).
 

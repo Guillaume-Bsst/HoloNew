@@ -32,11 +32,9 @@ from HoloNew.examples.robot_retarget import (
 from HoloNew.src import skeleton
 from HoloNew.src.test_socp.contact.backends.sdf import (
     band_points,
-    build_object_field,
-    load_object_sdf,
-    save_object_sdf,
+    load_or_build_object_sdf,
 )
-from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION, OMOMO_DIR_DEFAULT
+from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
 from HoloNew.src.test_socp.contact.viz import signed_distance_colors
 from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.test_socp.correspondence.human_body import HumanBody
@@ -174,23 +172,19 @@ def view(cfg: ViewStagesConfig) -> None:
                 object_points_local, _ = load_object_data(
                     str(obj_file), smpl_scale=smpl_scale, sample_count=100)
 
-                # Object SDF "boosted" with Coal's witness + active flag. Auto-cached under
-                # assets/contact/<obj>_sdf.npz: load it if present, else build it once (the
-                # only Coal pass) and cache it, BEFORE the solvers run. The near-surface band
-                # shell is what the viewer's "SDF Object" toggle draws.
-                sdf_path = Path("assets/contact") / f"{parts[1]}_sdf.npz"
-                if sdf_path.exists():
-                    sdf = load_object_sdf(sdf_path)
-                    logger.info("Loaded object SDF cache: %s", sdf_path)
-                else:
-                    sdf = build_object_field(mesh, CONTACT_MARGIN_M, OBJECT_FIELD_RESOLUTION)
-                    sdf_path.parent.mkdir(parents=True, exist_ok=True)
-                    save_object_sdf(sdf, sdf_path)
-                    logger.info("Built + cached object SDF (%d nodes): %s",
-                                int(np.prod(sdf.dims)), sdf_path)
-                band_pts, band_dist = band_points(sdf, CONTACT_MARGIN_M)
+                # Object SDF for the "SDF Object" band-shell viz. Uses the SAME keyed,
+                # disk-cached field as the solve (load_or_build_object_sdf), resolved at the
+                # run's interaction length, so the viewer draws the band the solver actually
+                # uses — no separate fixed-band <obj>_sdf.npz to drift out of sync / regenerate.
+                from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+                _sc = (cfg.retargeter if isinstance(cfg.retargeter, TestSocpRetargeterConfig)
+                       else TestSocpRetargeterConfig())
+                _L_view = _sc.L_object if _sc.L_object is not None else _sc.L_interaction
+                sdf = load_or_build_object_sdf(str(obj_file), _L_view, _sc.sdf_resolution,
+                                               cache_dir="assets/contact")
+                band_pts, band_dist = band_points(sdf, _L_view)
                 object_sdf_pts = band_pts
-                object_sdf_cols = signed_distance_colors(band_dist, CONTACT_MARGIN_M)
+                object_sdf_cols = signed_distance_colors(band_dist, _L_view)
             else:
                 logger.warning("No object mesh at %s; object disabled.", obj_file)
         except Exception as exc:  # noqa: BLE001
