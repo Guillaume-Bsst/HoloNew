@@ -111,5 +111,13 @@ def test_effort_emits_margin_vel_saturated_with_limits():
     np.testing.assert_allclose(ch["effort/joint_margin/left_hip"][-1], 0.0, atol=1e-9)
 
 
+def test_extra_channels_emitted_verbatim():
+    qpos = np.zeros((4, 9))
+    qpos[:, 3] = 1.0
+    ctx = SignalContext(extra_channels={"tracking/mpjpe/LeftFoot": np.arange(4.0)})
+    ch = run_all(_fake_result(qpos=qpos), ctx)
+    np.testing.assert_allclose(ch["tracking/mpjpe/LeftFoot"], [0, 1, 2, 3])
+
+
 def test_registry_is_list_of_named_callables():
     assert PRODUCERS and all(callable(fn) for _, fn in PRODUCERS)

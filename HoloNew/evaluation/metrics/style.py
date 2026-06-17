@@ -10,18 +10,17 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 
-def compute_style(rot: np.ndarray, pos: np.ndarray,
-                 rot_ref: np.ndarray, pos_ref: np.ndarray,
-                 pelvis_idx: int, tracked: np.ndarray) -> dict[str, float]:
-    """Pelvis-frame orientation and shape fidelity of a solved motion vs a reference.
+def style_series(rot: np.ndarray, pos: np.ndarray,
+                rot_ref: np.ndarray, pos_ref: np.ndarray,
+                pelvis_idx: int, tracked: np.ndarray) -> dict[str, np.ndarray]:
+    """Per-frame, per-link pelvis-frame orientation / shape error arrays.
 
     rot, rot_ref: (T, K, 3, 3) per-link world rotations (solved / reference).
-    pos, pos_ref: (T, K, 3) per-link world positions.
-    pelvis_idx: index of the pelvis/root link along K.
-    tracked: (K,) bool mask of the non-pelvis links to score.
-
-    Returns ``style_orient_err`` (rad) and ``style_shape_err`` (m), each the mean
-    over frames and tracked links.
+    pos, pos_ref: (T, K, 3) per-link world positions. pelvis_idx: pelvis index along K.
+    Returns ``orient`` (T, K; geodesic, rad) and ``shape`` (T, K; m), both in the pelvis
+    frame (heading/translation invariant). ``compute_style`` is the mean of these over
+    the tracked mask, so series and scalar can't drift. ``tracked`` is accepted for a
+    symmetric signature but does not gate the per-link arrays (the caller masks).
     """
     B = pelvis_idx
     RBt = np.transpose(rot[:, B], (0, 2, 1))          # (T,3,3)  R_B^T
@@ -43,8 +42,17 @@ def compute_style(rot: np.ndarray, pos: np.ndarray,
     q_ref = np.einsum("tij,tkj->tki", RBt_ref, dp_ref)
     shape = np.linalg.norm(q - q_ref, axis=-1)             # (T,K)
 
+    return {"orient": ang, "shape": shape}
+
+
+def compute_style(rot: np.ndarray, pos: np.ndarray,
+                 rot_ref: np.ndarray, pos_ref: np.ndarray,
+                 pelvis_idx: int, tracked: np.ndarray) -> dict[str, float]:
+    """Pelvis-frame orientation (rad) and shape (m) fidelity, meaned over frames and
+    tracked links (reduces ``style_series``)."""
+    s = style_series(rot, pos, rot_ref, pos_ref, pelvis_idx, tracked)
     m = np.asarray(tracked, dtype=bool)
     return {
-        "style_orient_err": float(np.mean(ang[:, m])),
-        "style_shape_err": float(np.mean(shape[:, m])),
+        "style_orient_err": float(np.mean(s["orient"][:, m])),
+        "style_shape_err": float(np.mean(s["shape"][:, m])),
     }

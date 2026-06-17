@@ -135,6 +135,12 @@ def _effort(result, ctx) -> dict[str, np.ndarray]:
     return out
 
 
+def _extra(result, ctx) -> dict[str, np.ndarray]:
+    """Emit CLI-injected channels (tracking / style / contacts) verbatim."""
+    ex = getattr(ctx, "extra_channels", None) if ctx is not None else None
+    return {k: np.asarray(v) for k, v in ex.items()} if ex else {}
+
+
 PRODUCERS = [
     ("com", _com),
     ("ang_momentum", _ang_momentum),
@@ -143,6 +149,7 @@ PRODUCERS = [
     ("solver_cost", _solver_cost),
     ("smoothness", _smoothness),
     ("effort", _effort),
+    ("extra", _extra),
 ]
 
 
