@@ -125,6 +125,22 @@ def test_effort_emits_margin_vel_saturated_with_limits():
     np.testing.assert_allclose(ch["effort/joint_margin/left_hip"][-1], 0.0, atol=1e-9)
 
 
+def test_dynamics_derived_channels():
+    T = 6
+    com = np.cumsum(np.ones((T, 3)), axis=0) * 0.1     # constant velocity -> ~0 accel err
+    ctx = SignalContext(dt=0.1)
+    ch = run_all(_fake_result(qpos=np.zeros((T, 9)), com=com, com_ref=com.copy(),
+                              angular_momentum=np.ones((T, 3))), ctx)
+    assert ch["dynamics/com_accel_err"].shape == (T,)
+    np.testing.assert_allclose(ch["dynamics/com_accel_err"], 0.0, atol=1e-9)
+    np.testing.assert_allclose(ch["dynamics/ang_momentum_mag"], np.sqrt(3.0))
+
+
+def test_dynamics_off_without_com_ref():
+    ch = run_all(_fake_result(qpos=np.zeros((6, 9)), com=np.ones((6, 3))), SignalContext())
+    assert not any(k.startswith("dynamics/com_accel_err") for k in ch)
+
+
 def test_extra_channels_emitted_verbatim():
     qpos = np.zeros((4, 9))
     qpos[:, 3] = 1.0

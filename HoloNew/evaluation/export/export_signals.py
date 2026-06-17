@@ -103,11 +103,12 @@ def main(cfg: Args) -> None:
     extra: dict = {}
     try:
         from HoloNew.evaluation.reference_context import ReferenceContext
-        from HoloNew.evaluation.export.reference_signals import tracking_channels
+        from HoloNew.evaluation.export.reference_signals import tracking_channels, roots_channels
         ref_ctx = ReferenceContext.from_rt(rt)
         extra.update(tracking_channels(ref_ctx, res.qpos))
-    except Exception as exc:  # noqa: BLE001 - tracking is optional, never crash the export
-        print(f"WARNING: tracking channels unavailable ({exc}); skipping.", file=sys.stderr)
+        extra.update(roots_channels(ref_ctx, res.qpos))
+    except Exception as exc:  # noqa: BLE001 - tracking/roots are optional, never crash the export
+        print(f"WARNING: tracking/roots channels unavailable ({exc}); skipping.", file=sys.stderr)
     try:
         from HoloNew.evaluation.export.contact_signals import contact_channels
         extra.update(contact_channels(rt, res))

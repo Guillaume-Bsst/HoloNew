@@ -1,6 +1,21 @@
 import numpy as np
 
-from HoloNew.evaluation.metrics.dynamics import compute_dynamics
+from HoloNew.evaluation.metrics.dynamics import compute_dynamics, dynamics_series
+
+
+def test_series_shapes_and_reduce_parity():
+    rng = np.random.RandomState(0)
+    T, dt = 10, 0.1
+    com = rng.randn(T, 3)
+    ref = rng.randn(T, 3)
+    L = rng.randn(T, 3)
+    s = dynamics_series(com, ref, dt, L=L, L_ref=np.zeros((T, 3)))
+    assert s["com_accel_err"].shape == (T - 2,)   # 2nd finite difference
+    assert s["ang_momentum_mag"].shape == (T,)
+    m = compute_dynamics(com, ref, dt, L=L, L_ref=np.zeros((T, 3)))
+    np.testing.assert_allclose(m["com_accel_err"], np.mean(s["com_accel_err"]))
+    np.testing.assert_allclose(
+        m["ang_momentum_rms"], np.sqrt(np.mean(s["ang_momentum_mag"] ** 2)))
 
 
 def test_matching_com_zero_accel_err():

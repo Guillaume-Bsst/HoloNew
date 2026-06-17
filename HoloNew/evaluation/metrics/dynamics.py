@@ -8,21 +8,29 @@ def _ddot(x: np.ndarray, dt: float) -> np.ndarray:
     return np.diff(x, n=2, axis=0) / dt ** 2
 
 
+def dynamics_series(com: np.ndarray, ref_com: np.ndarray, dt: float, *,
+                   L: np.ndarray | None = None,
+                   L_ref: np.ndarray | None = None) -> dict[str, np.ndarray]:
+    """Per-frame CoM-acceleration error and angular-momentum magnitude arrays.
+
+    com, ref_com: (T, 3) robot / reference CoM. ``com_accel_err`` (T-2,) is the per-frame
+    norm of the difference of their 2nd finite differences (m/s^2). When L is given,
+    ``ang_momentum_mag`` (T,) is |L| (or |L - L_ref|). ``compute_dynamics`` reduces these,
+    so series and scalar can't drift.
+    """
+    out = {"com_accel_err": np.linalg.norm(_ddot(com, dt) - _ddot(ref_com, dt), axis=-1)}
+    if L is not None:
+        Lc = L if L_ref is None else (L - L_ref)
+        out["ang_momentum_mag"] = np.sqrt(np.sum(np.square(Lc), axis=-1))
+    return out
+
+
 def compute_dynamics(com: np.ndarray, ref_com: np.ndarray, dt: float, *,
                     L: np.ndarray | None = None,
                     L_ref: np.ndarray | None = None) -> dict[str, float]:
-    """CoM-acceleration tracking error and centroidal angular-momentum RMS.
-
-    com, ref_com: (T, 3) robot and reference CoM trajectories. ``com_accel_err`` is
-    the mean norm of the difference of their 2nd finite differences (m/s^2) — the
-    same definition as the centroidal A/B test.
-    L, L_ref: optional (T, 3) centroidal angular momentum (and reference). When L is
-    given, ``ang_momentum_rms`` is the RMS magnitude of L (or L - L_ref).
-    """
-    cdd = _ddot(com, dt)
-    rdd = _ddot(ref_com, dt)
-    out = {"com_accel_err": float(np.mean(np.linalg.norm(cdd - rdd, axis=-1)))}
-    if L is not None:
-        Lc = L if L_ref is None else (L - L_ref)
-        out["ang_momentum_rms"] = float(np.sqrt(np.mean(np.sum(np.square(Lc), axis=-1))))
+    """CoM-acceleration tracking error and centroidal angular-momentum RMS (reduces the series)."""
+    s = dynamics_series(com, ref_com, dt, L=L, L_ref=L_ref)
+    out = {"com_accel_err": float(np.mean(s["com_accel_err"]))}
+    if "ang_momentum_mag" in s:
+        out["ang_momentum_rms"] = float(np.sqrt(np.mean(np.square(s["ang_momentum_mag"]))))
     return out

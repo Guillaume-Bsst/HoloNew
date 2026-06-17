@@ -41,3 +41,23 @@ def tracking_channels(ref_ctx, qpos: np.ndarray) -> dict[str, np.ndarray]:
             out[f"tracking/orient/{nm}"] = ss["orient"][:, k]
     out["tracking/base_track"] = ts["base_track"]
     return out
+
+
+def roots_channels(ref_ctx, qpos: np.ndarray) -> dict[str, np.ndarray]:
+    """Per-frame robot floating-base pose error vs the reference pelvis.
+
+    Returns {roots/base_pos_err (m), roots/base_rot_err (rad)}, length T' = min(T, ref T).
+    Object-pose roots are intentionally left out for now (the trailing-7 qpos object
+    convention needs verifying against ReferenceContext.score_roots first).
+    """
+    from scipy.spatial.transform import Rotation as R
+    from HoloNew.evaluation.metrics.roots import pose_error_series
+
+    qpos = np.asarray(qpos)
+    T = min(int(qpos.shape[0]), int(ref_ctx._gpos.shape[0]))
+    Rref, pref = ref_ctx.reference_RP(T)
+    pelvis = ref_ctx.pelvis_idx
+    base_pos = qpos[:T, 0:3]
+    base_rot = R.from_quat(qpos[:T, 3:7][:, [1, 2, 3, 0]]).as_matrix()  # wxyz -> xyzw
+    e = pose_error_series(base_pos, base_rot, pref[:, pelvis], Rref[:, pelvis])
+    return {"roots/base_pos_err": e["pos_err"], "roots/base_rot_err": e["rot_err"]}

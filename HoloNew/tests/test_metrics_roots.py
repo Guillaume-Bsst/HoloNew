@@ -1,7 +1,22 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from HoloNew.evaluation.metrics.roots import compute_pose_error
+from HoloNew.evaluation.metrics.roots import compute_pose_error, pose_error_series
+
+
+def test_series_shapes_and_reduce_parity():
+    rng = np.random.RandomState(7)
+    T = 6
+    pos = rng.randn(T, 3)
+    rot = R.random(T, random_state=rng).as_matrix()
+    pos_ref = rng.randn(T, 3)
+    rot_ref = R.random(T, random_state=rng).as_matrix()
+    s = pose_error_series(pos, rot, pos_ref, rot_ref)
+    assert s["pos_err"].shape == (T,)
+    assert s["rot_err"].shape == (T,)
+    m = compute_pose_error(pos, rot, pos_ref, rot_ref)
+    np.testing.assert_allclose(m["pos_err"], np.mean(s["pos_err"]))
+    np.testing.assert_allclose(m["rot_err"], np.mean(s["rot_err"]))
 
 
 def _poses(T=6, seed=0):
