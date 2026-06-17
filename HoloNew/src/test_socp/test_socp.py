@@ -820,7 +820,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             # D/X: object surface points vs the floor field.
             if self.lambda_d_obj > 0 or self.lambda_x_obj > 0:
                 obj_terms += build_object_floor_terms(
-                    self, dxi_obj, obj_pose, self.lambda_d_obj, self.lambda_x_obj, _L_floor)
+                    self, dxi_obj, obj_pose, self.lambda_d_obj, self.lambda_x_obj, _L_floor,
+                    obj_pose_ref=obj_pose_ref)
             # P: tangential no-slip of the object on the floor, tracking the reference
             # object's slide. Needs the previous SOLVED pose + reference[t] & [t-1] (frame>=1).
             if (self.lambda_p_obj > 0 and obj_pose_tm1 is not None
@@ -1261,6 +1262,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             if g1_pts:
                 res.g1_transport_pts = np.stack(g1_pts)
                 res.human_idx = self.correspondence.human_idx
+        # Object-as-carrier surface samples (object<->floor channel). Static object-local
+        # set; the viewer lifts it per frame by the solved/reference object pose.
+        if getattr(self, "object_surface_local", None) is not None:
+            res.object_surface_local = np.asarray(self.object_surface_local)
         # Diagnostics for the viewer. The solved object pose is already collected at
         # no extra cost; CoM / angular momentum / foot-slip are computed post-hoc
         # from the solved trajectory only when collect_diagnostics is on (keeps the

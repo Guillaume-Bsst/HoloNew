@@ -82,6 +82,7 @@ class MethodViz:
     g1_obj_dist: np.ndarray | None = None       # (T, M)    each G1 point's human-source object distance
     g1_flr_dist: np.ndarray | None = None       # (T, M)    each G1 point's human-source floor distance
     g1_flr_witness: np.ndarray | None = None    # (T, M, 3) WORLD-frame floor witness per G1 point
+    object_surface_local: np.ndarray | None = None  # (M, 3) object-local surface samples (object<->floor carrier)
     # TEST-SOCP solve diagnostics.
     solved_object_poses: np.ndarray | None = None  # (T, 7) the method's SOLVED object pose [wxyz,xyz]
     com: np.ndarray | None = None                  # (T, 3) robot CoM
@@ -143,6 +144,8 @@ class Viewer:
         self._g1_transport_handle = None
         self._object_contact_handle = None
         self._floor_contact_handle = None
+        self._object_surface_handle = None
+        self._object_floor_contact_handle = None
         self._sdf_floor_handle = None
         # Persistent centroidal-diagnostic handles (CoM marker + its ground shadow),
         # plus the grounded CoM target marker + shadow drawn alongside.
@@ -274,6 +277,10 @@ class Viewer:
             self._tog_dir_floor = self.server.gui.add_checkbox("Floor directions", False)
             self._tog_object_contact = self.server.gui.add_checkbox("Object contact", False)
             self._tog_floor_contact = self.server.gui.add_checkbox("Floor contact", False)
+            # Object-as-carrier <-> floor channel (follows the solved/reference object pose).
+            self._tog_obj_surface = self.server.gui.add_checkbox("Object surface pts", False)
+            self._tog_dir_obj_floor = self.server.gui.add_checkbox("Object->Floor directions", False)
+            self._tog_obj_floor_contact = self.server.gui.add_checkbox("Object->Floor contact", False)
 
         # TEST-SOCP solve diagnostics: the SOLVED object pose (movable/inertia) and
         # the per-frame CoM / foot-slip / angular-momentum readout.
@@ -285,6 +292,7 @@ class Viewer:
         for _cb in (self._tog_sdf, self._tog_sdf_floor, self._tog_human,
                     self._tog_g1_transport, self._tog_dir_object, self._tog_dir_floor,
                     self._tog_object_contact, self._tog_floor_contact,
+                    self._tog_obj_surface, self._tog_dir_obj_floor, self._tog_obj_floor_contact,
                     self._tog_solved_obj, self._tog_com, self._tog_L):
             @_cb.on_update
             def _(_evt):
@@ -438,6 +446,20 @@ class Viewer:
         else:
             self._smplx_handle.vertices = verts
             self._smplx_handle.visible = True
+
+    def _solved_or_ref_object_pose(self, frame: int, stage: str):
+        """Object (quat_wxyz, trans, ok) honouring the 'Solved object pose' toggle:
+        the SOLVED pose when on (order [qw,qx,qy,qz, x,y,z], quat at [:4]), else the
+        stage REFERENCE pose (order [x,y,z, qw,qx,qy,qz], quat at [3:7]) — the same pose
+        the box is drawn at for this stage. ok=False when neither is available."""
+        method = self._methods.get(self._method_dd.value) if hasattr(self, "_methods") else None
+        sp = method.solved_object_poses if method is not None else None
+        if self._tog_solved_obj.value and sp is not None and frame < len(sp):
+            return sp[frame][:4], sp[frame][4:7], True
+        pose = self._object_pose(stage)
+        if pose is not None:
+            return pose[frame, 3:7], pose[frame, :3], True
+        return None, None, False
 
     def _object_pose(self, stage: str):
         """Object pose for the given stage: the active method's placed pose on a scaled
@@ -739,19 +761,9 @@ class Viewer:
         if method is None:
             return
         stage = self._stage_dd.value
-        pose = self._object_pose(stage)
-        # Object pose used to lift the object-local witnesses. When "Solved object pose"
-        # is on, lift by the SOLVED object pose (so the directions point at the solved
-        # object); otherwise lift by the reference pose (the default). Reference order is
-        # [x,y,z, qw,qx,qy,qz] (quat at [3:7]); solved is [qw,qx,qy,qz, x,y,z] (quat at [:4]).
-        _sp_seq = method.solved_object_poses
-        if (self._tog_solved_obj.value and _sp_seq is not None and frame < len(_sp_seq)):
-            obj_quat, obj_trans, has_obj_pose = _sp_seq[frame][:4], _sp_seq[frame][4:7], True
-        elif pose is not None:
-            obj_quat, obj_trans, has_obj_pose = pose[frame, 3:7], pose[frame, :3], True
-        else:
-            obj_quat = obj_trans = None
-            has_obj_pose = False
+        # Object pose used to lift the object-local witnesses, honouring "Solved object
+        # pose" (solved when on, else the stage reference pose) — see helper.
+        obj_quat, obj_trans, has_obj_pose = self._solved_or_ref_object_pose(frame, stage)
         if stage == "Grounded" and method.human_probe_pts is not None:
             probes = method.human_probe_pts[frame]
             # Object channel: object-local witness, lifted by the object pose.
@@ -793,6 +805,39 @@ class Viewer:
                 if a.any():
                     self._draw_segments("/test/dir_g1_flr", g1[a],
                                         method.g1_flr_witness[frame][a], d[a])
+
+    def _draw_object_floor(self, frame: int) -> None:
+        """Object-as-carrier <-> floor channel (mirrors the human/G1 floor channel for the
+        object). The static object-local surface samples are lifted by the object pose —
+        SOLVED or stage-reference per 'Solved object pose', exactly like the box and the
+        robot/box directions — then split into three independently-toggled overlays:
+        all surface points (height-coloured), near-floor probe->witness directions, and the
+        near-floor contact footprint on the floor (witness = the point projected to z=0)."""
+        method = self._methods.get(self._method_dd.value)
+        surf = method.object_surface_local if method is not None else None
+        show_pts = self._tog_obj_surface.value
+        show_dir = self._tog_dir_obj_floor.value
+        show_con = self._tog_obj_floor_contact.value
+        quat, trans, ok = (self._solved_or_ref_object_pose(frame, self._stage_dd.value)
+                           if surf is not None else (None, None, False))
+        if surf is None or not ok or not (show_pts or show_dir or show_con):
+            self._draw_signed_cloud("_object_surface_handle", "/test/object_surface", None, None, False)
+            self._draw_signed_cloud("_object_floor_contact_handle", "/test/object_floor_contact",
+                                    None, None, False)
+            return
+        world = transform_points_local_to_world(quat, trans, surf)   # (M, 3)
+        d = world[:, 2]                                              # floor signed distance = height
+        # All surface points, height-coloured (independent of the contact band).
+        self._draw_signed_cloud("_object_surface_handle", "/test/object_surface",
+                                world if show_pts else None, d if show_pts else None, show_pts)
+        near = d < CONTACT_MARGIN_M
+        wit = world.copy(); wit[:, 2] = 0.0                         # floor witness (project to z=0)
+        if show_dir and near.any():
+            self._draw_segments("/test/dir_object_floor", world[near], wit[near], d[near])
+        show_con_now = show_con and bool(near.any())
+        self._draw_signed_cloud("_object_floor_contact_handle", "/test/object_floor_contact",
+                                wit[near] if show_con_now else None,
+                                d[near] if show_con_now else None, show_con_now)
 
     def _draw_sdf_floor(self) -> None:
         """Static analytic floor SDF band (world), toggled visible/invisible."""
@@ -879,6 +924,7 @@ class Viewer:
         self._draw_sdf(frame)
         self._draw_interaction(frame)
         self._draw_directions(frame)
+        self._draw_object_floor(frame)
         self._draw_sdf_floor()
         self._draw_diagnostics(frame)
         self._draw_centroidal(frame)

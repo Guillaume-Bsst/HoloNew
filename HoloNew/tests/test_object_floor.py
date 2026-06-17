@@ -35,6 +35,39 @@ def test_inertia_bundle_object_placed_by_contacts():
     assert rt.object_surface_local is not None and rt.object_surface_local.shape[1] == 3
 
 
+class _StubRT:
+    """Minimal rt for the object<->floor D/X unit test (only object_surface_local is read)."""
+    def __init__(self, pts):
+        self.object_surface_local = pts
+
+
+def test_object_floor_d_x_pull_displaced_box_toward_reference():
+    """D/X must drive a displaced warm-start box BACK to the reference floor contact.
+
+    Regression for the missing target: without the reference target the residual is
+    ``A @ dxi`` (minimised at dxi=0), so the box never aligns no matter the weight. With
+    the target it must push the contact down to the reference floor height AND pull the
+    tangential footprint back to the reference."""
+    from HoloNew.src.test_socp.movable import build_object_floor_terms
+    # Box bottom face (object-local), symmetric so rotation does not dominate the fit.
+    pts = np.array([[0.1, 0.1, -0.1], [0.1, -0.1, -0.1],
+                    [-0.1, 0.1, -0.1], [-0.1, -0.1, -0.1]], float)
+    rt = _StubRT(pts)
+    # Reference: box resting on the floor (bottom at z=0), centred at x=0.
+    obj_pose_ref = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.1], float)
+    # Warm-start: floating 5 cm (bottom z=0.05, in-band) and shifted +5 cm in x.
+    obj_pose = np.array([1.0, 0.0, 0.0, 0.0, 0.05, 0.0, 0.15], float)
+    dxi = cp.Variable(6)
+    terms = build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj=10.0,
+                                     lambda_x_obj=10.0, margin=0.1,
+                                     obj_pose_ref=obj_pose_ref)
+    assert len(terms) == 2
+    cp.Problem(cp.Minimize(sum(terms))).solve()
+    v = dxi.value
+    assert v[2] < -0.02, f"D did not pull the box down to the floor: dxi_z={v[2]:.3f}"
+    assert v[0] < -0.02, f"X did not pull the box back in x: dxi_x={v[0]:.3f}"
+
+
 def test_object_floor_term_assembles_finite():
     """build_object_floor_terms returns finite cvxpy terms at a test dxi."""
     from HoloNew.src.test_socp.movable import build_object_floor_terms

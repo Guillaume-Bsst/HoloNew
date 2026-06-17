@@ -289,6 +289,9 @@ def view(cfg: ViewStagesConfig) -> None:
             # Contact-cloud colour = strongest proximity across both channels (mirrors
             # human_dist), so a G1 point near the floor colours from the floor channel.
             mv.g1_dist = np.minimum(res.human_obj_dist, res.human_flr_dist)[:, res.human_idx]
+        # Object-as-carrier surface samples (object<->floor channel); lifted per frame
+        # by the solved/reference object pose in the viewer.
+        mv.object_surface_local = res.object_surface_local
         # Object placement for THIS method on its scaled stages (GMR centres it by
         # smpl_scale, TEST keeps it raw). Derived from the raw object pose + the method's
         # object knobs, so it is correct even when the solve-only _obj_poses_mj is None.

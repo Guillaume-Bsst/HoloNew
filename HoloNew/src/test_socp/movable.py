@@ -81,7 +81,8 @@ def sample_object_surface(mesh_file: str, density: float = 200.0,
     return np.asarray(pts, dtype=np.float64)
 
 
-def build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj, lambda_x_obj, margin):
+def build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj, lambda_x_obj, margin,
+                             obj_pose_ref=None):
     """Object<->floor D + X (the object-environment pair, object = carrier). Object
     surface points are carried by the object pose T = exp6(dxi)*T0 and query the
     analytic floor field (z=0 plane). Each near-floor point gets a D (normal/height)
@@ -90,17 +91,24 @@ def build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj, lambda_x_obj, marg
     floor distance, so the term acts only when the object is near the floor and
     VANISHES when it is lifted (-> object free -> W^o ballistic).
 
-    Linearization point is the object pose (obj_pose); the residual is zero at dxi=0
-    and penalizes motion of the floor-contact points away from it. For a world point
-    p, p(dxi) ~= p0 + [I, -skew(p0)] @ dxi (left-compose).
+    Linearization point is the object pose (obj_pose). Mirroring the robot floor D/X
+    (interaction.build_dx_terms), each residual carries a REFERENCE TARGET drawn from
+    obj_pose_ref: D drives the near-floor point's floor distance from its current value
+    d0 toward the reference object's floor distance d_ref, and X drives its tangential
+    (x,y) footprint toward the reference object's footprint. WITHOUT this target the
+    residual is just A@dxi (minimised at dxi=0), so the box only freezes at the
+    warm-start and never aligns regardless of the weight. obj_pose_ref=None keeps that
+    legacy no-target behaviour. For a world point p, p(dxi) ~= p0 + [I, -skew(p0)] @ dxi.
 
     Args:
         rt: retargeter (provides rt.object_surface_local).
         dxi: cp.Variable(6), object SE(3) tangent step.
-        obj_pose: (7,) [qw,qx,qy,qz,x,y,z] object pose at this frame.
+        obj_pose: (7,) [qw,qx,qy,qz,x,y,z] object pose at this frame (linearization point).
         lambda_d_obj: object-floor normal-proximity (D) weight (0 disables).
         lambda_x_obj: object-floor tangential-placement (X) weight (0 disables).
         margin: floor activation band L (metres).
+        obj_pose_ref: (7,) reference object pose providing the D/X contact target.
+            None -> zero target (legacy motion-penalty behaviour).
 
     Returns:
         List of up to two cvxpy expressions [D_term, X_term] (empty if no active
@@ -112,31 +120,47 @@ def build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj, lambda_x_obj, marg
     p_local = rt.object_surface_local                       # (M, 3)
     M = p_local.shape[0]
     T0 = pose_to_se3(obj_pose)
-    p_w0 = p_local @ T0.rotation.T + T0.translation         # (M, 3) world
-    d_ref = p_w0[:, 2]                                       # floor signed distance (z)
+    p_w0 = p_local @ T0.rotation.T + T0.translation         # (M, 3) world at linearization
+    d0 = p_w0[:, 2]                                          # floor signed distance (z)
 
-    alpha = np.array([_activation(float(d_ref[i]), margin) for i in range(M)])
+    alpha = np.array([_activation(float(d0[i]), margin) for i in range(M)])
     active = np.where(alpha > 0)[0]
     if active.size == 0:
         return []
+
+    # Reference contact target: the near-floor points are driven toward the REFERENCE
+    # object's floor distance / footprint (so the solved box reproduces the reference
+    # contact, not just the warm-start). None -> target == current pose -> zero target.
+    if obj_pose_ref is not None:
+        Tref = pose_to_se3(obj_pose_ref)
+        p_ref = p_local @ Tref.rotation.T + Tref.translation   # (M, 3) reference world
+    else:
+        p_ref = p_w0
 
     z = np.array([0.0, 0.0, 1.0])
     Pi0 = np.eye(3) - np.outer(z, z)
     w = alpha[active] / (margin * margin * M)               # (na,) per-point weight
 
     A_D = np.empty((active.size, 6))          # D: z^T [I,-skew(p0)] per point
+    c_D = np.empty(active.size)               # D target: ref height - current height
     AX_blocks = []                            # X: Pi0 [I,-skew(p0)] per point
+    rX_blocks = []                            # X target: Pi0 (ref footprint - current)
     for k, i in enumerate(active):
         Ji = np.hstack([np.eye(3), -_skew(p_w0[i])])        # (3, 6)
-        A_D[k] = np.sqrt(lambda_d_obj * w[k]) * (z @ Ji)
-        AX_blocks.append(np.sqrt(lambda_x_obj * w[k]) * (Pi0 @ Ji))
+        sd = np.sqrt(lambda_d_obj * w[k])
+        A_D[k] = sd * (z @ Ji)
+        c_D[k] = sd * float(p_ref[i, 2] - p_w0[i, 2])
+        sx = np.sqrt(lambda_x_obj * w[k])
+        AX_blocks.append(sx * (Pi0 @ Ji))
+        rX_blocks.append(sx * (Pi0 @ (p_ref[i] - p_w0[i])))
     A_X = np.vstack(AX_blocks)                                # (3*na, 6)
+    r_X = np.concatenate(rX_blocks)                           # (3*na,)
 
     terms = []
     if lambda_d_obj > 0:
-        terms.append(cp.sum_squares(A_D @ dxi))
+        terms.append(cp.sum_squares(A_D @ dxi - c_D))
     if lambda_x_obj > 0:
-        terms.append(cp.sum_squares(A_X @ dxi))
+        terms.append(cp.sum_squares(A_X @ dxi - r_X))
     return terms
 
 
