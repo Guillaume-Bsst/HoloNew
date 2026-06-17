@@ -86,6 +86,18 @@ def main(cfg: Args) -> None:
             ctx.joint_limit_cols, ctx.joint_limit_lower = cols, lo
             ctx.joint_limit_upper, ctx.joint_limit_names = hi, names
 
+    # Per-probe segment labels, so the human SDF distances aggregate per body part.
+    try:
+        probe = getattr(rt, "smplx_ground_probe", None)
+        if probe is not None:
+            from HoloNew.src.test_socp.correspondence.segments import point_segments, SEGMENTS
+            hb = probe.human_body
+            lbs = hb.model.lbs_weights.detach().cpu().numpy()
+            ctx.probe_segments = point_segments(lbs, hb.faces, probe.cache.tri_idx, probe.cache.bary)
+            ctx.probe_segment_names = SEGMENTS
+    except Exception as exc:  # noqa: BLE001 - fall back to positional probe channels
+        print(f"WARNING: probe segment labels unavailable ({exc}); per-probe columns.", file=sys.stderr)
+
     # Reference/FK + contact families. Each degrades gracefully (a warning, no channels)
     # rather than failing the whole export if its machinery is unavailable for this run.
     extra: dict = {}
