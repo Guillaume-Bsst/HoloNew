@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from HoloNew.evaluation.export.producers import PRODUCERS, vec_channels, run_all
+from HoloNew.evaluation.export.producers import PRODUCERS, vec_channels, run_all, pad_to_T
+from HoloNew.evaluation.export.context import SignalContext
 
 
 def _fake_result(**over):
@@ -58,6 +59,32 @@ def test_solver_cost_scalar_channel():
 def test_solver_cost_absent_emits_nothing():
     ch = run_all(_fake_result())
     assert not any(k.startswith("solver/") for k in ch)
+
+
+def test_pad_to_T_right_aligns_with_edge_replicate():
+    out = pad_to_T(np.array([5.0, 6.0, 7.0]), 5)
+    # Right-aligned: real samples at the tail, leading edge replicated.
+    np.testing.assert_allclose(out, [5.0, 5.0, 5.0, 6.0, 7.0])
+    # Longer-than-T is truncated to the first T.
+    np.testing.assert_allclose(pad_to_T(np.arange(5.0), 3), [0.0, 1.0, 2.0])
+
+
+def test_smoothness_off_without_explicit_dof():
+    # Default context (dof=None) must not emit smoothness (avoids object-DOF misread).
+    res = _fake_result(qpos=np.zeros((6, 43)))
+    assert not any(k.startswith("smoothness/") for k in run_all(res, SignalContext()))
+
+
+def test_smoothness_emits_padded_per_joint_channels_with_dof():
+    T, dof = 6, 2
+    qpos = np.zeros((T, 7 + dof))
+    qpos[:, 3] = 1.0  # identity base quaternion (wxyz), so omega is well-defined
+    qpos[:, 7] = np.arange(T) ** 2  # joint 0 has non-trivial accel
+    ch = run_all(_fake_result(qpos=qpos), SignalContext(dt=0.1, dof=dof))
+    assert "smoothness/joint_accel/joint_000" in ch
+    assert "smoothness/joint_jerk/joint_001" in ch
+    assert "smoothness/base_pos_accel" in ch
+    assert ch["smoothness/joint_accel/joint_000"].shape == (T,)
 
 
 def test_registry_is_list_of_named_callables():

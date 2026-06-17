@@ -17,28 +17,36 @@ def _base_angular_velocity(quat_wxyz: np.ndarray, dt: float) -> np.ndarray:
     return rel.as_rotvec() / dt
 
 
-def compute_smoothness(qpos: np.ndarray, dof: int, dt: float) -> dict[str, float]:
-    """Acceleration / jerk RMS of the base and actuated joints.
+def smoothness_series(qpos: np.ndarray, dof: int, dt: float) -> dict[str, np.ndarray]:
+    """Per-frame finite-difference arrays underlying the smoothness scalars.
 
     qpos: (T, 7+dof[+7]) with [0:3] base xyz, [3:7] base quat wxyz, [7:7+dof] joints.
-    Accelerations are 2nd finite differences / dt**2; jerk is the 3rd / dt**3.
-    ``joint_jerk_meanabs`` is the per-frame (no-dt) definition kept for continuity
-    with the W^r A/B test.
+    Returns the raw (un-reduced) arrays, with the natural finite-difference lengths
+    (accel = T-2, jerk = T-3): ``base_acc`` / ``base_ang_acc`` (m/s^2, rad/s^2),
+    ``joint_accel`` (m or rad /s^2), ``joint_jerk`` (.../s^3), and ``joint_jerk_nodt``
+    (the no-dt 3rd difference kept for the W^r continuity scalar). ``compute_smoothness``
+    is exactly the reduction of these arrays, so the exported series and the scoreboard
+    scalar can never drift.
     """
     base_pos = qpos[:, 0:3]
     quat = qpos[:, 3:7]
     joints = qpos[:, 7:7 + dof]
-
-    base_acc = np.diff(base_pos, n=2, axis=0) / dt ** 2
-    omega = _base_angular_velocity(quat, dt)
-    base_ang_acc = np.diff(omega, n=1, axis=0) / dt
-    j_acc = np.diff(joints, n=2, axis=0) / dt ** 2
-    j_jerk = np.diff(joints, n=3, axis=0) / dt ** 3
-
     return {
-        "base_pos_accel_rms": _rms(base_acc),
-        "base_ang_accel_rms": _rms(base_ang_acc),
-        "joint_accel_rms": _rms(j_acc),
-        "joint_jerk_rms": _rms(j_jerk),
-        "joint_jerk_meanabs": float(np.mean(np.abs(np.diff(joints, n=3, axis=0)))),
+        "base_acc": np.diff(base_pos, n=2, axis=0) / dt ** 2,
+        "base_ang_acc": np.diff(_base_angular_velocity(quat, dt), n=1, axis=0) / dt,
+        "joint_accel": np.diff(joints, n=2, axis=0) / dt ** 2,
+        "joint_jerk": np.diff(joints, n=3, axis=0) / dt ** 3,
+        "joint_jerk_nodt": np.diff(joints, n=3, axis=0),
+    }
+
+
+def compute_smoothness(qpos: np.ndarray, dof: int, dt: float) -> dict[str, float]:
+    """Acceleration / jerk RMS of the base and actuated joints (reduces the series)."""
+    s = smoothness_series(qpos, dof, dt)
+    return {
+        "base_pos_accel_rms": _rms(s["base_acc"]),
+        "base_ang_accel_rms": _rms(s["base_ang_acc"]),
+        "joint_accel_rms": _rms(s["joint_accel"]),
+        "joint_jerk_rms": _rms(s["joint_jerk"]),
+        "joint_jerk_meanabs": float(np.mean(np.abs(s["joint_jerk_nodt"]))),
     }

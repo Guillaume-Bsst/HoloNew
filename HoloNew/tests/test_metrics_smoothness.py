@@ -1,6 +1,6 @@
 import numpy as np
 
-from HoloNew.evaluation.metrics.smoothness import compute_smoothness
+from HoloNew.evaluation.metrics.smoothness import compute_smoothness, smoothness_series
 
 
 def _qpos_const_vel(T=20, dof=5):
@@ -28,3 +28,22 @@ def test_known_joint_accel():
     qpos = np.hstack([base, q[:, None]])
     m = compute_smoothness(qpos, dof=1, dt=dt)
     assert abs(m["joint_accel_rms"] - a) < 1e-6
+
+
+def test_series_shapes_and_reduce_parity():
+    qpos = _qpos_const_vel(T=20, dof=5)
+    dt = 1 / 30.0
+    s = smoothness_series(qpos, dof=5, dt=dt)
+    # Finite-difference natural lengths: accel = T-2, jerk = T-3.
+    assert s["base_acc"].shape == (18, 3)
+    assert s["base_ang_acc"].shape == (18, 3)
+    assert s["joint_accel"].shape == (18, 5)
+    assert s["joint_jerk"].shape == (17, 5)
+    # The scoreboard scalars are exactly the reductions of the series arrays.
+    m = compute_smoothness(qpos, dof=5, dt=dt)
+    np.testing.assert_allclose(
+        np.sqrt(np.mean(s["joint_accel"] ** 2)), m["joint_accel_rms"])
+    np.testing.assert_allclose(
+        np.sqrt(np.mean(s["joint_jerk"] ** 2)), m["joint_jerk_rms"])
+    np.testing.assert_allclose(
+        np.mean(np.abs(s["joint_jerk_nodt"])), m["joint_jerk_meanabs"])
