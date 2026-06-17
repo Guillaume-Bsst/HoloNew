@@ -21,14 +21,14 @@ from HoloNew.evaluation.export.flatten import to_columns
 from HoloNew.evaluation.export.summary import write_summary
 
 
-def write_run(sig: RunSignals, out_dir, task_name: str):
+def write_run(sig: RunSignals, out_dir, task_name: str, scoreboard: dict | None = None):
     """Write the CSV + summary for a collected RunSignals. Returns (csv_path, json_path)."""
     out_dir = Path(out_dir)
     csv_path = out_dir / f"{task_name}_signals.csv"
     json_path = out_dir / f"{task_name}_summary.json"
     header, table = to_columns(sig.time, sig.channels)
     write_csv(csv_path, header, table)
-    write_summary(json_path, sig.channels)
+    write_summary(json_path, sig.channels, scoreboard=scoreboard)
     return csv_path, json_path
 
 
@@ -98,9 +98,10 @@ def main(cfg: Args) -> None:
     except Exception as exc:  # noqa: BLE001 - fall back to positional probe channels
         print(f"WARNING: probe segment labels unavailable ({exc}); per-probe columns.", file=sys.stderr)
 
-    # Reference/FK + contact families. Each degrades gracefully (a warning, no channels)
-    # rather than failing the whole export if its machinery is unavailable for this run.
+    # Reference/FK + contact families. Each degrades gracefully (recorded in the
+    # manifest, no channels) rather than failing the whole export.
     extra: dict = {}
+    errors: dict = {}
     try:
         from HoloNew.evaluation.reference_context import ReferenceContext
         from HoloNew.evaluation.export.reference_signals import tracking_channels, roots_channels
@@ -108,11 +109,17 @@ def main(cfg: Args) -> None:
         extra.update(tracking_channels(ref_ctx, res.qpos))
         extra.update(roots_channels(ref_ctx, res.qpos))
     except Exception as exc:  # noqa: BLE001 - tracking/roots are optional, never crash the export
+        errors["tracking"] = errors["roots"] = str(exc)
         print(f"WARNING: tracking/roots channels unavailable ({exc}); skipping.", file=sys.stderr)
+
+    contact_arr = None
     try:
-        from HoloNew.evaluation.export.contact_signals import contact_channels
-        extra.update(contact_channels(rt, res))
+        from HoloNew.evaluation.export.contact_signals import (
+            contact_arrays, contact_channels_from_arrays)
+        contact_arr, corr = contact_arrays(rt, res, ctx.contact_threshold)
+        extra.update(contact_channels_from_arrays(contact_arr, corr))
     except Exception as exc:  # noqa: BLE001 - contacts are optional, never crash the export
+        errors["contacts"] = str(exc)
         print(f"WARNING: contact channels unavailable ({exc}); skipping.", file=sys.stderr)
     ctx.extra_channels = extra
 
@@ -121,9 +128,15 @@ def main(cfg: Args) -> None:
         print("WARNING: no diagnostics collected (collect_diagnostics off or empty); "
               "CSV will contain only the 'time' column.", file=sys.stderr)
 
-    csv_path, json_path = write_run(sig, cfg.out, cfg.task_name)
+    from HoloNew.evaluation.export.scoreboard import compute_scoreboard
+    from HoloNew.evaluation.export.manifest import write_manifest
+    sb = compute_scoreboard(sig.channels, res, ctx, contact_arr)
+    csv_path, json_path = write_run(sig, cfg.out, cfg.task_name, scoreboard=sb)
+    manifest = write_manifest(Path(cfg.out) / f"{cfg.task_name}_manifest.json", sig.channels, errors)
     print(csv_path)
     print(json_path)
+    if manifest["missing"]:
+        print(f"NOTE: families with no channels: {', '.join(manifest['missing'])}", file=sys.stderr)
 
 
 if __name__ == "__main__":
