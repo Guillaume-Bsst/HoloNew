@@ -9,7 +9,8 @@ from HoloNew.evaluation.export.producers import PRODUCERS, vec_channels, run_all
 def _fake_result(**over):
     base = dict(qpos=np.zeros((4, 43)), com=None, com_ref=None,
                 angular_momentum=None, angular_momentum_ref=None,
-                foot_slip=None, human_flr_dist=None, human_obj_dist=None)
+                foot_slip=None, human_flr_dist=None, human_obj_dist=None,
+                per_frame_cost=None)
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -46,6 +47,17 @@ def test_foot_slip_scalar_channel():
     res = _fake_result(foot_slip=np.array([0.0, 1.0, 2.0, 3.0]))
     ch = run_all(res)
     np.testing.assert_allclose(ch["diag/foot_slip"], [0.0, 1.0, 2.0, 3.0])
+
+
+def test_solver_cost_scalar_channel():
+    res = _fake_result(per_frame_cost=np.array([1.0, 2.0, 3.0, 4.0]))
+    ch = run_all(res)
+    np.testing.assert_allclose(ch["solver/cost"], [1.0, 2.0, 3.0, 4.0])
+
+
+def test_solver_cost_absent_emits_nothing():
+    ch = run_all(_fake_result())
+    assert not any(k.startswith("solver/") for k in ch)
 
 
 def test_registry_is_list_of_named_callables():
