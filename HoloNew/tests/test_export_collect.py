@@ -28,7 +28,16 @@ def test_no_diagnostics_gives_empty_channels():
     assert RunSignals(_result(), fps=30.0).channels == {}
 
 
-def test_mismatched_leading_axis_raises():
-    # foot_slip length 3 but qpos T=5
+def test_shorter_channel_raises():
+    # foot_slip length 3 but qpos T=5 -> genuine misalignment
     with pytest.raises(ValueError):
         RunSignals(_result(T=5, foot_slip=np.zeros(3)), fps=30.0)
+
+
+def test_longer_reference_channel_is_prefix_aligned():
+    # com_ref carries the full source trajectory (longer than a truncated solve);
+    # it is frame-aligned from frame 0, so it must be sliced to T, not rejected.
+    full_ref = np.arange(8 * 3, dtype=float).reshape(8, 3)
+    sig = RunSignals(_result(T=5, com_ref=full_ref), fps=30.0)
+    assert sig.channels["dynamics/com_ref/x"].shape == (5,)
+    np.testing.assert_allclose(sig.channels["dynamics/com_ref/x"], full_ref[:5, 0])

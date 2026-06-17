@@ -18,7 +18,10 @@ class RunSignals:
         self.channels: dict[str, np.ndarray] = {}
         for name, arr in run_all(result).items():
             arr = np.asarray(arr)
-            if arr.shape[0] != self.T:
+            if arr.shape[0] < self.T:
                 raise ValueError(
-                    f"channel {name!r}: leading axis {arr.shape[0]} != T={self.T}")
-            self.channels[name] = arr
+                    f"channel {name!r}: leading axis {arr.shape[0]} < T={self.T}")
+            # Reference channels (e.g. *_ref) carry the full source trajectory; when
+            # the solve is truncated (max_frames) they run longer than T but stay
+            # frame-aligned from frame 0, so prefix-align them to T.
+            self.channels[name] = arr[:self.T]
