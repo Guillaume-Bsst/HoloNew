@@ -139,7 +139,10 @@ def build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj, lambda_x_obj, marg
 
     z = np.array([0.0, 0.0, 1.0])
     Pi0 = np.eye(3) - np.outer(z, z)
-    w = alpha[active] / (margin * margin * M)               # (na,) per-point weight
+    # Normalise by the CONTACT PATCH (active points), not the full surface-sample count M:
+    # the floor term must not be diluted by points sampled away from the floor (top/sides),
+    # so lambda_d_obj/lambda_x_obj stay comparable to the robot's per-link-normalised lambdas.
+    w = alpha[active] / (margin * margin * active.size)     # (na,) per-point weight
 
     A_D = np.empty((active.size, 6))          # D: z^T [I,-skew(p0)] per point
     c_D = np.empty(active.size)               # D target: ref height - current height
@@ -221,7 +224,9 @@ def build_object_floor_persistence(rt, dxi, obj_pose, obj_pose_prev, ref_t, ref_
         Bi = np.hstack([np.eye(3), -_skew(p_w0[i])])        # (3, 6)
         dp_obj_const = p_w0[i] - p_prev[i]
         dp_ref = p_ref_t[i] - p_ref_tm1[i]
-        sw = float(np.sqrt(scale_sq * alpha[i] / M))
+        # Normalise by the contact patch (active points), not the full sample count M,
+        # so the no-slip term isn't diluted by off-floor surface points (mirrors D/X).
+        sw = float(np.sqrt(scale_sq * alpha[i] / active.size))
         B_rows.append(sw * (Pi0 @ Bi))                      # (3, 6)
         # residual = Π0·(dp_obj_const + Bi·dxi − dp_ref); rhs = Π0·(dp_ref − dp_obj_const)
         r_rows.append(sw * (Pi0 @ (dp_ref - dp_obj_const)))

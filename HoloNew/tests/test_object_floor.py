@@ -68,6 +68,33 @@ def test_object_floor_d_x_pull_displaced_box_toward_reference():
     assert v[0] < -0.02, f"X did not pull the box back in x: dxi_x={v[0]:.3f}"
 
 
+def test_object_floor_weight_independent_of_inactive_point_count():
+    """The per-contact D weight must depend on the CONTACT PATCH (active points), not on
+    how much of the object is sampled away from the floor. Adding far/inactive surface
+    points (top, sides) must not dilute the floor-contact term — otherwise lambda_d_obj is
+    not comparable to the robot's lambda_d (which normalises per carrier link)."""
+    from HoloNew.src.test_socp.movable import build_object_floor_terms
+    bottom = np.array([[0.1, 0.1, -0.1], [0.1, -0.1, -0.1],
+                       [-0.1, 0.1, -0.1], [-0.1, -0.1, -0.1]], float)
+    far = np.array([[0.1, 0.1, 1.0], [-0.1, -0.1, 1.0]], float)   # high -> inactive
+    obj_pose_ref = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.10], float)  # bottom on floor
+    obj_pose = np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.15], float)      # bottom at z=0.05
+
+    def d_term_at_zero(pts):
+        rt = _StubRT(pts)
+        dxi = cp.Variable(6); dxi.value = np.zeros(6)
+        terms = build_object_floor_terms(rt, dxi, obj_pose, lambda_d_obj=10.0,
+                                         lambda_x_obj=0.0, margin=0.10,
+                                         obj_pose_ref=obj_pose_ref)
+        return float(terms[0].value)   # D term value at dxi=0 (= sum of squared targets)
+
+    v_few = d_term_at_zero(bottom)
+    v_many = d_term_at_zero(np.vstack([bottom, far]))
+    assert v_few > 0
+    assert abs(v_few - v_many) < 1e-9, (
+        f"inactive points leak into the contact weight: {v_few} vs {v_many}")
+
+
 def test_object_floor_term_assembles_finite():
     """build_object_floor_terms returns finite cvxpy terms at a test dxi."""
     from HoloNew.src.test_socp.movable import build_object_floor_terms
