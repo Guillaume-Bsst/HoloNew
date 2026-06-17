@@ -110,6 +110,31 @@ def _smoothness(result, ctx) -> dict[str, np.ndarray]:
     return out
 
 
+def _effort(result, ctx) -> dict[str, np.ndarray]:
+    """Per-frame limit margin / saturation / velocity for the limited joints.
+
+    Off unless ctx carries the limited-joint columns + bounds. ``margin`` / ``saturated``
+    are frame-aligned (T); ``vel`` (T-1) is right-aligned via pad_to_T.
+    """
+    cols = getattr(ctx, "joint_limit_cols", None) if ctx is not None else None
+    if ctx is None or ctx.dof is None or cols is None or len(cols) == 0:
+        return {}
+    qpos = np.asarray(result.qpos)
+    T = qpos.shape[0]
+    if T < 2:
+        return {}
+    joints = qpos[:, 7:7 + int(ctx.dof)][:, np.asarray(cols, dtype=int)]   # (T, C)
+    from HoloNew.evaluation.metrics.effort import effort_series
+    s = effort_series(joints, ctx.joint_limit_lower, ctx.joint_limit_upper, ctx.dt)
+    names = ctx.joint_limit_names or [f"joint_{int(c):03d}" for c in cols]
+    out: dict[str, np.ndarray] = {}
+    for i, nm in enumerate(names):
+        out[f"effort/joint_margin/{nm}"] = pad_to_T(s["margin"][:, i], T)
+        out[f"effort/joint_vel/{nm}"] = pad_to_T(s["vel"][:, i], T)
+        out[f"effort/saturated/{nm}"] = pad_to_T(s["saturated"][:, i].astype(float), T)
+    return out
+
+
 PRODUCERS = [
     ("com", _com),
     ("ang_momentum", _ang_momentum),
@@ -117,6 +142,7 @@ PRODUCERS = [
     ("distances", _distances),
     ("solver_cost", _solver_cost),
     ("smoothness", _smoothness),
+    ("effort", _effort),
 ]
 
 

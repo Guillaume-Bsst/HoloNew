@@ -10,9 +10,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass
 class SignalContext:
     dt: float = 1.0 / 30.0
     dof: int | None = None
     joint_names: list[str] | None = None
+    # Limited-joint ranges for the effort family: columns into the dof joint block plus
+    # their bounds and names. None (default) -> the effort producer stays off.
+    joint_limit_cols: np.ndarray | None = None
+    joint_limit_lower: np.ndarray | None = None
+    joint_limit_upper: np.ndarray | None = None
+    joint_limit_names: list[str] | None = None
