@@ -24,3 +24,7 @@ class SignalContext:
     joint_limit_lower: np.ndarray | None = None
     joint_limit_upper: np.ndarray | None = None
     joint_limit_names: list[str] | None = None
+    # Pre-computed (T,) channels injected by the CLI for families that need the
+    # retargeter (FK / GMR-grounded reference): tracking, style, contacts. Keeps those
+    # heavy, rt-dependent computations out of the pure producers.
+    extra_channels: dict[str, np.ndarray] | None = None

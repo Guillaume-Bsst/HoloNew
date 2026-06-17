@@ -85,6 +85,17 @@ def main(cfg: Args) -> None:
         if cols.size:
             ctx.joint_limit_cols, ctx.joint_limit_lower = cols, lo
             ctx.joint_limit_upper, ctx.joint_limit_names = hi, names
+
+    # Reference/FK families (tracking + per-link orientation). Degrade gracefully if the
+    # reference machinery is unavailable for this run rather than failing the export.
+    try:
+        from HoloNew.evaluation.reference_context import ReferenceContext
+        from HoloNew.evaluation.export.reference_signals import tracking_channels
+        ref_ctx = ReferenceContext.from_rt(rt)
+        ctx.extra_channels = tracking_channels(ref_ctx, res.qpos)
+    except Exception as exc:  # noqa: BLE001 - tracking is optional, never crash the export
+        print(f"WARNING: tracking channels unavailable ({exc}); skipping.", file=sys.stderr)
+
     sig = RunSignals(res, fps=fps, ctx=ctx)
     if not sig.channels:
         print("WARNING: no diagnostics collected (collect_diagnostics off or empty); "
