@@ -1,22 +1,19 @@
 """Per-frame contact channels for the floor + object interaction channels.
 
-For every robot correspondence control point and each channel we emit, per frame: the
-robot-side signed distance to the surface and its in-contact flag (from query_entities
-on the solved trajectory), the reference (human-side) signed distance + flag, and the
-tangential slip during sustained contact. Mirrors the geometry of
-TestSocpRetargeter._fill_diagnostics but keeps every per-point series instead of
-reducing to a single foot-slip scalar. Floor is always present; the object channel is
-emitted only when the run carries an object SDF.
+For every robot correspondence control point and each channel we compute, per frame:
+the robot-side signed distance to the surface and its in-contact flag (from
+query_entities on the solved trajectory), the reference (human-side) signed distance +
+flag, and the tangential slip during sustained contact. Mirrors the geometry of
+TestSocpRetargeter._fill_diagnostics but keeps every per-frame value.
+
+The ~8k correspondence points are then aggregated **per robot link** (the body part is
+the unit a user reasons about): signed distance -> min (closest point / deepest
+penetration), active -> any, slip -> max (worst drift on the link). Floor is always
+present; the object channel is emitted only when the run carries an object SDF.
 """
 from __future__ import annotations
 
 import numpy as np
-
-
-def _point_names(corr) -> list[str]:
-    """Per-control-point labels: '<link>_<global index>' (unique, groups by link)."""
-    return [f"{corr.link_names[corr.link_idx[i]]}_{i:03d}"
-            for i in range(corr.link_idx.shape[0])]
 
 
 def _slip_row(active_t, active_tm1, direction, rel):
@@ -30,11 +27,11 @@ def _slip_row(active_t, active_tm1, direction, rel):
 
 
 def contact_channels(rt, res) -> dict[str, np.ndarray]:
-    """Per-point floor (+ object) contact channels for the solved trajectory.
+    """Per-link floor (+ object) contact channels for the solved trajectory.
 
-    Returns {contacts/<channel>/<signal>/<point>: (T,)} with channel in {floor, object},
-    signal in {robot_dist, robot_active, ref_dist, ref_active, slip}. Empty if the run
-    lacks a correspondence / source probe.
+    Returns {contacts/<channel>/<signal>/<link>: (T,)} with channel in {floor, object},
+    signal in {robot_dist, robot_active, ref_dist, ref_active, slip}, aggregated over
+    each link's correspondence points. Empty if the run lacks a correspondence / probe.
     """
     from HoloNew.src.test_socp.interaction import (
         robot_control_points, query_entities, frame_references)
@@ -83,17 +80,19 @@ def contact_channels(rt, res) -> dict[str, np.ndarray]:
             ract_prev[ch] = np.asarray(f.active, dtype=bool)
         Pt_prev, pr_prev = Pt, pr
 
-    names = _point_names(corr)
+    link_ids = np.asarray(corr.link_idx)
+    present = [li for li in range(len(corr.link_names)) if np.any(link_ids == li)]
     out: dict[str, np.ndarray] = {}
 
     def _emit(ch: str):
-        for i in range(M):
-            p = names[i]
-            out[f"contacts/{ch}/robot_dist/{p}"] = rd[ch][:, i]
-            out[f"contacts/{ch}/robot_active/{p}"] = ra[ch][:, i]
-            out[f"contacts/{ch}/ref_dist/{p}"] = fd[ch][:, i]
-            out[f"contacts/{ch}/ref_active/{p}"] = fa[ch][:, i]
-            out[f"contacts/{ch}/slip/{p}"] = sl[ch][:, i]
+        for li in present:
+            idx = np.nonzero(link_ids == li)[0]
+            nm = corr.link_names[li]
+            out[f"contacts/{ch}/robot_dist/{nm}"] = rd[ch][:, idx].min(axis=1)
+            out[f"contacts/{ch}/robot_active/{nm}"] = ra[ch][:, idx].max(axis=1)
+            out[f"contacts/{ch}/ref_dist/{nm}"] = fd[ch][:, idx].min(axis=1)
+            out[f"contacts/{ch}/ref_active/{nm}"] = fa[ch][:, idx].max(axis=1)
+            out[f"contacts/{ch}/slip/{nm}"] = sl[ch][:, idx].max(axis=1)
 
     _emit("floor")
     if has_obj:
