@@ -11,6 +11,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
 import tyro
 
 from HoloNew.evaluation.export.collect import RunSignals
@@ -40,6 +41,29 @@ class Args:
     max_frames: int | None = None
 
 
+def _limited_joint_ranges(model, dof: int):
+    """(cols, lower, upper, names) of limited actuated joints, aligned to qpos[:, 7:7+dof].
+
+    Mirrors RetargetingEvaluator._limited_joint_ranges so the effort margins line up with
+    the dof joint block; also returns each limited joint's name for the export labels.
+    """
+    import mujoco
+
+    cols, lo, hi, names = [], [], [], []
+    for j in range(model.njnt):
+        if model.jnt_type[j] not in (mujoco.mjtJoint.mjJNT_HINGE, mujoco.mjtJoint.mjJNT_SLIDE):
+            continue
+        if not model.jnt_limited[j]:
+            continue
+        col = int(model.jnt_qposadr[j]) - 7
+        if 0 <= col < dof:
+            cols.append(col)
+            lo.append(float(model.jnt_range[j, 0]))
+            hi.append(float(model.jnt_range[j, 1]))
+            names.append(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, j) or f"joint_{col:03d}")
+    return np.array(cols, dtype=int), np.array(lo), np.array(hi), names
+
+
 def main(cfg: Args) -> None:
     from HoloNew.config_types.retargeting import RetargetingConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
@@ -53,7 +77,14 @@ def main(cfg: Args) -> None:
     dt = getattr(rt, "_dt", None)
     fps = (1.0 / float(dt)) if dt else 30.0
     dof = getattr(getattr(rt, "task_constants", None), "ROBOT_DOF", None)
-    ctx = SignalContext(dt=(1.0 / fps), dof=int(dof) if dof is not None else None)
+    dof = int(dof) if dof is not None else None
+    ctx = SignalContext(dt=(1.0 / fps), dof=dof)
+    model = getattr(rt, "robot_model", None)
+    if dof is not None and model is not None:
+        cols, lo, hi, names = _limited_joint_ranges(model, dof)
+        if cols.size:
+            ctx.joint_limit_cols, ctx.joint_limit_lower = cols, lo
+            ctx.joint_limit_upper, ctx.joint_limit_names = hi, names
     sig = RunSignals(res, fps=fps, ctx=ctx)
     if not sig.channels:
         print("WARNING: no diagnostics collected (collect_diagnostics off or empty); "

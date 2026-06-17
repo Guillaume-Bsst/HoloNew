@@ -87,5 +87,29 @@ def test_smoothness_emits_padded_per_joint_channels_with_dof():
     assert ch["smoothness/joint_accel/joint_000"].shape == (T,)
 
 
+def test_effort_off_without_limits():
+    qpos = np.zeros((6, 9))
+    qpos[:, 3] = 1.0  # valid base quaternion (other producers may run)
+    res = _fake_result(qpos=qpos)
+    assert not any(k.startswith("effort/") for k in run_all(res, SignalContext(dt=0.1, dof=2)))
+
+
+def test_effort_emits_margin_vel_saturated_with_limits():
+    T, dof = 6, 2
+    qpos = np.zeros((T, 7 + dof))
+    qpos[:, 3] = 1.0
+    qpos[:, 7] = np.linspace(-1.0, 1.0, T)  # limited joint 0 sweeps its range
+    ctx = SignalContext(
+        dt=0.1, dof=dof,
+        joint_limit_cols=np.array([0]), joint_limit_lower=np.array([-1.0]),
+        joint_limit_upper=np.array([1.0]), joint_limit_names=["left_hip"])
+    ch = run_all(_fake_result(qpos=qpos), ctx)
+    assert ch["effort/joint_margin/left_hip"].shape == (T,)
+    assert "effort/joint_vel/left_hip" in ch
+    assert "effort/saturated/left_hip" in ch
+    # margin at the sweep endpoints (joint at limit) is ~0.
+    np.testing.assert_allclose(ch["effort/joint_margin/left_hip"][-1], 0.0, atol=1e-9)
+
+
 def test_registry_is_list_of_named_callables():
     assert PRODUCERS and all(callable(fn) for _, fn in PRODUCERS)
