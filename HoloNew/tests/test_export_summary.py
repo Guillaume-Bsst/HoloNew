@@ -18,6 +18,8 @@ def test_reduce_channel_empty_is_zeros():
 
 def test_write_summary_json(tmp_path):
     path = tmp_path / "run_summary.json"
-    write_summary(path, {"diag/foot_slip": np.array([0.0, 1.0])})
+    write_summary(path, {"diag/foot_slip": np.array([0.0, 1.0])},
+                  scoreboard={"smoothness": {"joint_jerk_rms": 1.5}})
     data = json.loads(path.read_text())
-    assert data["diag/foot_slip"]["max"] == 1.0
+    assert data["channels"]["diag/foot_slip"]["max"] == 1.0
+    assert data["scoreboard"]["smoothness"]["joint_jerk_rms"] == 1.5

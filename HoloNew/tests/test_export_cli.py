@@ -28,4 +28,5 @@ def test_write_run_emits_both_files(tmp_path):
 
     import json
     summary = json.loads(json_path.read_text())
-    assert "diag/foot_slip" in summary
+    assert "diag/foot_slip" in summary["channels"]
+    assert "scoreboard" in summary
