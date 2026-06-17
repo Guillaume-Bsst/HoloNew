@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from HoloNew.evaluation.metrics.style import compute_style
+from HoloNew.evaluation.metrics.style import compute_style, style_series
 
 
 def _random_motion(T=6, K=5, seed=0):
@@ -42,3 +42,18 @@ def test_heading_invariance():
     m = compute_style(rot_y, pos_y, rot, pos, pelvis_idx=0, tracked=tracked)
     assert m["style_orient_err"] < 1e-9
     assert m["style_shape_err"] < 1e-9
+
+
+def test_series_shapes_and_reduce_parity():
+    rot, pos, tracked = _random_motion(seed=3)
+    T, K = rot.shape[0], rot.shape[1]
+    s = style_series(rot, pos, rot.copy(), pos.copy(), pelvis_idx=0, tracked=tracked)
+    assert s["orient"].shape == (T, K)   # per-frame, per-link
+    assert s["shape"].shape == (T, K)
+    # Reducing over the tracked mask reproduces the scoreboard scalars.
+    rot2, pos2, _ = _random_motion(seed=4)
+    s2 = style_series(rot, pos, rot2, pos2, pelvis_idx=0, tracked=tracked)
+    m = compute_style(rot, pos, rot2, pos2, pelvis_idx=0, tracked=tracked)
+    msk = tracked.astype(bool)
+    np.testing.assert_allclose(m["style_orient_err"], np.mean(s2["orient"][:, msk]))
+    np.testing.assert_allclose(m["style_shape_err"], np.mean(s2["shape"][:, msk]))
