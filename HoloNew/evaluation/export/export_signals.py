@@ -14,6 +14,7 @@ from pathlib import Path
 import tyro
 
 from HoloNew.evaluation.export.collect import RunSignals
+from HoloNew.evaluation.export.context import SignalContext
 from HoloNew.evaluation.export.csv_writer import write_csv
 from HoloNew.evaluation.export.flatten import to_columns
 from HoloNew.evaluation.export.summary import write_summary
@@ -51,7 +52,9 @@ def main(cfg: Args) -> None:
 
     dt = getattr(rt, "_dt", None)
     fps = (1.0 / float(dt)) if dt else 30.0
-    sig = RunSignals(res, fps=fps)
+    dof = getattr(getattr(rt, "task_constants", None), "ROBOT_DOF", None)
+    ctx = SignalContext(dt=(1.0 / fps), dof=int(dof) if dof is not None else None)
+    sig = RunSignals(res, fps=fps, ctx=ctx)
     if not sig.channels:
         print("WARNING: no diagnostics collected (collect_diagnostics off or empty); "
               "CSV will contain only the 'time' column.", file=sys.stderr)

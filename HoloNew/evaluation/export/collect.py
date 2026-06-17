@@ -8,15 +8,18 @@ from __future__ import annotations
 
 import numpy as np
 
+from .context import SignalContext
 from .producers import run_all
 
 
 class RunSignals:
-    def __init__(self, result, fps: float = 30.0):
+    def __init__(self, result, fps: float = 30.0, ctx: SignalContext | None = None):
+        if ctx is None:
+            ctx = SignalContext(dt=1.0 / float(fps))
         self.T = int(np.asarray(result.qpos).shape[0])
         self.time = np.arange(self.T, dtype=float) / float(fps)
         self.channels: dict[str, np.ndarray] = {}
-        for name, arr in run_all(result).items():
+        for name, arr in run_all(result, ctx).items():
             arr = np.asarray(arr)
             if arr.shape[0] < self.T:
                 raise ValueError(
