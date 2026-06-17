@@ -86,15 +86,22 @@ def main(cfg: Args) -> None:
             ctx.joint_limit_cols, ctx.joint_limit_lower = cols, lo
             ctx.joint_limit_upper, ctx.joint_limit_names = hi, names
 
-    # Reference/FK families (tracking + per-link orientation). Degrade gracefully if the
-    # reference machinery is unavailable for this run rather than failing the export.
+    # Reference/FK + contact families. Each degrades gracefully (a warning, no channels)
+    # rather than failing the whole export if its machinery is unavailable for this run.
+    extra: dict = {}
     try:
         from HoloNew.evaluation.reference_context import ReferenceContext
         from HoloNew.evaluation.export.reference_signals import tracking_channels
         ref_ctx = ReferenceContext.from_rt(rt)
-        ctx.extra_channels = tracking_channels(ref_ctx, res.qpos)
+        extra.update(tracking_channels(ref_ctx, res.qpos))
     except Exception as exc:  # noqa: BLE001 - tracking is optional, never crash the export
         print(f"WARNING: tracking channels unavailable ({exc}); skipping.", file=sys.stderr)
+    try:
+        from HoloNew.evaluation.export.contact_signals import contact_channels
+        extra.update(contact_channels(rt, res))
+    except Exception as exc:  # noqa: BLE001 - contacts are optional, never crash the export
+        print(f"WARNING: contact channels unavailable ({exc}); skipping.", file=sys.stderr)
+    ctx.extra_channels = extra
 
     sig = RunSignals(res, fps=fps, ctx=ctx)
     if not sig.channels:
