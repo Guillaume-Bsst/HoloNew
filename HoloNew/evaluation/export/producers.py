@@ -152,6 +152,33 @@ def _effort(result, ctx) -> dict[str, np.ndarray]:
     return out
 
 
+def _dynamics(result, ctx) -> dict[str, np.ndarray]:
+    """Per-frame CoM-acceleration error + angular-momentum magnitude (needs com/com_ref).
+
+    Derived from the RetargetResult diagnostics already present; complements the raw
+    com / ang_momentum xyz channels emitted by _com / _ang_momentum.
+    """
+    com = getattr(result, "com", None)
+    com_ref = getattr(result, "com_ref", None)
+    if com is None or com_ref is None:
+        return {}
+    com = np.asarray(com)
+    T = com.shape[0]
+    if T < 3:
+        return {}
+    dt = ctx.dt if ctx is not None else 1.0 / 30.0
+    L = getattr(result, "angular_momentum", None)
+    L_ref = getattr(result, "angular_momentum_ref", None)
+    L = np.asarray(L)[:T] if L is not None else None
+    L_ref = np.asarray(L_ref)[:T] if L_ref is not None else None
+    from HoloNew.evaluation.metrics.dynamics import dynamics_series
+    s = dynamics_series(com, np.asarray(com_ref)[:T], dt, L=L, L_ref=L_ref)
+    out = {"dynamics/com_accel_err": pad_to_T(s["com_accel_err"], T)}
+    if "ang_momentum_mag" in s:
+        out["dynamics/ang_momentum_mag"] = s["ang_momentum_mag"]
+    return out
+
+
 def _extra(result, ctx) -> dict[str, np.ndarray]:
     """Emit CLI-injected channels (tracking / style / contacts) verbatim."""
     ex = getattr(ctx, "extra_channels", None) if ctx is not None else None
@@ -166,6 +193,7 @@ PRODUCERS = [
     ("solver_cost", _solver_cost),
     ("smoothness", _smoothness),
     ("effort", _effort),
+    ("dynamics", _dynamics),
     ("extra", _extra),
 ]
 
