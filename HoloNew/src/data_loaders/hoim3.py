@@ -1,6 +1,8 @@
 """HOI-M3 (HODome) loader: raw SMPL-X params -> Z-up joints; object R/T -> poses."""
 from __future__ import annotations
 
+import tarfile
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,28 @@ from scipy.spatial.transform import Rotation as R
 
 from HoloNew.src.data_loaders.base import MotionLoader, register_loader
 from HoloNew.src.utils import transform_y_up_to_z_up
+
+# Disk cache for object meshes extracted from scaned_object/<token>.tar.
+_HOIM3_MESH_CACHE = Path(tempfile.gettempdir()) / "holonew_hoim3_meshes"
+
+
+def extract_hoim3_object_mesh(token: str, scaned_object_dir: Path,
+                              cache_dir: Path | None = None) -> Path:
+    """Extract <token>/<token>.obj from scaned_object/<token>.tar into a cache dir
+    and return the .obj path. Idempotent (re-uses the cache)."""
+    cache_dir = Path(cache_dir) if cache_dir is not None else _HOIM3_MESH_CACHE
+    out = cache_dir / token / f"{token}.obj"
+    if out.exists():
+        return out
+    tar_path = Path(scaned_object_dir) / f"{token}.tar"
+    if not tar_path.exists():
+        raise FileNotFoundError(f"HOI-M3 object mesh archive not found: {tar_path}")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(tar_path) as t:
+        t.extractall(cache_dir)
+    if not out.exists():
+        raise FileNotFoundError(f"{token}/{token}.obj not found inside {tar_path}")
+    return out
 
 
 def hoim3_fk(npz_path: Path, model_dir: Path) -> tuple[np.ndarray, float]:
@@ -91,13 +115,19 @@ def prep_hoim3_processed(npz_path: Path, model_dir: Path) -> dict:
 
 
 def hoim3_object_poses(npz_path: Path) -> np.ndarray:
-    """Object 6DoF (T,7) [qw,qx,qy,qz,x,y,z] from object_R (T,3,3) + object_T (T,1,3)."""
+    """Object 6DoF (T,7) [qw,qx,qy,qz,x,y,z] in Z-up from object_R (T,3,3) + object_T.
+
+    HODome stores the object in the same Y-up frame as the raw SMPL-X, so the pose is
+    expressed in Z-up to match the (Y->Z transformed) human joints: translation gets the
+    y<->z swap M, rotation the conjugation M R M (det preserved)."""
     d = np.load(str(npz_path), allow_pickle=True)
-    rot = np.asarray(d["object_R"], np.float64)
-    trans = np.asarray(d["object_T"], np.float64).reshape(-1, 3)
-    quat_xyzw = R.from_matrix(rot).as_quat()                 # (T,4) xyzw
+    rot = np.asarray(d["object_R"], np.float64)                  # (T,3,3) Y-up
+    trans = np.asarray(d["object_T"], np.float64).reshape(-1, 3)  # (T,3) Y-up
+    trans_z = trans @ _YUP_TO_ZUP.T                              # swap y<->z per row
+    rot_z = _YUP_TO_ZUP @ rot @ _YUP_TO_ZUP                      # conjugation -> Z-up
+    quat_xyzw = R.from_matrix(rot_z).as_quat()                   # (T,4) xyzw
     quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
-    return np.concatenate([quat_wxyz, trans], axis=1)
+    return np.concatenate([quat_wxyz, trans_z], axis=1)
 
 
 @register_loader("hoim3")

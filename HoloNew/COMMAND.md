@@ -207,9 +207,10 @@ elsewhere — `--model-path` / `--motion-path` (/ `--obj-path`, `--smpl-model-di
 `--motion-name` is supported for `omomo` and `hoim3`; the same flags work on
 `robot_retarget.py`.
 
-> Note: `--obj-path` is resolved by name too, but the **object overlay in the viewer
-> is currently wired only for the OMOMO smplh path** — HOI-M3 shows human + robot, not
-> the object.
+> The object overlay is wired for **both** OMOMO (mesh from the global
+> `captured_objects/`) and HOI-M3 (single object per sequence; mesh auto-extracted from
+> `scaned_object/<token>.tar`, posed from the object `.npz`). HOI-M3 is single-object
+> per sequence (verified). The TEST-SOCP SDF-band overlay remains OMOMO-only.
 
 Use `--methods` to solve only a subset instead of all three. Choices:
 `holosoma`, `gmr_socp`, `test_socp` (space-separated, order preserved).

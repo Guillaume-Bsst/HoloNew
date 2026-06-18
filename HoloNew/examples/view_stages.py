@@ -50,6 +50,7 @@ from HoloNew.src.holosoma.preprocess import (
 from HoloNew.src.robot_fk import robot_link_poses
 from HoloNew.src.stages import ROBOT_STAGE
 from HoloNew.src.utils import load_intermimic_data, load_intermimic_quats, load_object_data
+from HoloNew.src.data_loaders.hoim3 import extract_hoim3_object_mesh, hoim3_object_poses
 from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
@@ -80,8 +81,10 @@ def view(cfg: ViewStagesConfig) -> None:
     # 3-path façade: when --dataset is set, translate model/motion/obj paths into the
     # legacy data_path/task_name/data_format (+ omomo_dir) fields, then clear `dataset`
     # so every method below (holosoma via run_headless->main, GMR/TEST via from_config)
-    # loads uniformly through those normalized fields.
+    # loads uniformly through those normalized fields. `dataset` is kept locally so the
+    # object overlay below knows how to resolve the object mesh / poses.
     from HoloNew.src.data_loaders.facade import normalize_dataset_cfg
+    dataset = cfg.dataset
     normalize_dataset_cfg(cfg)
     cfg.dataset = None
 
@@ -173,7 +176,14 @@ def view(cfg: ViewStagesConfig) -> None:
         object_sdf_floor_cols = signed_distance_colors(object_sdf_floor_pts[:, 2], _L_flr_view)
 
         parts = cfg.task_name.split("_")
-        obj_file = Path("models") / parts[1] / f"{parts[1]}.obj" if len(parts) >= 2 else None
+        # Prefer the façade-resolved global mesh (captured_objects/<obj>.obj); fall back
+        # to the bundled models/<obj>/<obj>.obj for the legacy (non-façade) invocation.
+        if cfg.obj_path is not None and Path(cfg.obj_path).exists():
+            obj_file = Path(cfg.obj_path)
+        elif len(parts) >= 2:
+            obj_file = Path("models") / parts[1] / f"{parts[1]}.obj"
+        else:
+            obj_file = None
         try:
             _, obj_poses = load_intermimic_data(str(cfg.data_path / f"{cfg.task_name}.pt"))
             if obj_file is not None and obj_file.exists():
@@ -207,6 +217,25 @@ def view(cfg: ViewStagesConfig) -> None:
                 logger.warning("No object mesh at %s; object disabled.", obj_file)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Object unavailable (%s); object disabled.", exc)
+
+    elif dataset == "hoim3" and cfg.obj_path is not None:
+        # HOI-M3: single object per sequence. Mesh comes from scaned_object/<token>.tar,
+        # poses from the object .npz (object_R/T), both expressed Z-up like the human.
+        try:
+            token = cfg.task_name.split("_", 1)[1] if "_" in cfg.task_name else cfg.task_name
+            scaned = Path(cfg.obj_path).parent.parent / "scaned_object"
+            mesh_path = extract_hoim3_object_mesh(token, scaned)
+            obj_poses = hoim3_object_poses(Path(cfg.obj_path))           # (T,7) [qw..,xyz] Z-up
+            object_pose_raw = convert_object_poses_to_mujoco_order(obj_poses)
+            object_pose_scaled = convert_object_poses_to_mujoco_order(
+                scale_object_poses_to_center(obj_poses, smpl_scale))
+            mesh = trimesh.load(str(mesh_path), force="mesh", process=False)
+            object_mesh_verts = np.asarray(mesh.vertices, np.float32)
+            object_mesh_faces = np.asarray(mesh.faces, np.uint32)
+            object_points_local, _ = load_object_data(
+                str(mesh_path), smpl_scale=smpl_scale, sample_count=100)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HOI-M3 object unavailable (%s); object disabled.", exc)
 
     toe = [constants.DEMO_JOINTS.index(name) for name in cfg.motion_data_config.toe_names]
     # JOINTS_MAPPING is a dict {human_joint_name -> robot_link_name}; the mapped
