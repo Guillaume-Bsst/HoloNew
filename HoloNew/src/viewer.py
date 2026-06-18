@@ -249,7 +249,7 @@ class Viewer:
             self._stage_dd = self.server.gui.add_dropdown(
                 "Stage", options=stages_for_method(first), initial_value=ROBOT_STAGE)
             self._tog_urdf = self.server.gui.add_checkbox("Show G1 URDF", True)
-            self._tog_smplx = self.server.gui.add_checkbox("SMPL-X mesh", False)
+            self._tog_smplx = self.server.gui.add_checkbox("SMPL mesh", False)
             self._tog_object = self.server.gui.add_checkbox("Object mesh", False)
 
         with self.server.gui.add_folder("Skeleton"):
