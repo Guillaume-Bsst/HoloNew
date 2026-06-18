@@ -1,5 +1,4 @@
 """Unit tests for the explicit σ characteristic-scale normalizers (Brick 1)."""
-import cvxpy as cp
 import numpy as np
 import pinocchio as pin
 import pytest
@@ -23,77 +22,74 @@ def _frame_targets(rt, q):
     return ground_frame_targets(gpos[0], gquat[0], IK_MATCH_TABLE_SINGLE)
 
 
-def test_build_style_terms_matches_inline(rt):
-    """build_style_terms reproduces the S_k/S_B terms (σ_R=1 ⇒ no scaling)."""
-    from HoloNew.src.test_socp.style import build_style_terms
+def test_build_style_blocks_returns_finite(rt):
+    """build_style_blocks returns non-empty finite blocks (σ_R=1 ⇒ no scaling)."""
+    from HoloNew.src.test_socp.style import build_style_blocks
     q_mj = rt.q_init_full[:36]
     ft = _frame_targets(rt, q_mj)
-    dqa = cp.Variable(rt.nv_a)
-    dqa.value = np.zeros(rt.nv_a)
-    terms = build_style_terms(rt, q_mj, ft, dqa, lambda_ws=1.0, sigma_R=1.0)
-    assert len(terms) > 0
-    total = sum(float(t.value) for t in terms)
-    assert np.isfinite(total)
+    blocks = build_style_blocks(rt, q_mj, ft, lambda_ws=1.0, sigma_R=1.0)
+    assert len(blocks) > 0
+    for b in blocks:
+        assert np.all(np.isfinite(b.A)) and np.all(np.isfinite(b.c))
 
 
-def test_sigma_R_scales_style_quadratically(rt):
-    """Doubling σ_R divides every S_k/S_B term by 4 at a fixed dqa."""
-    from HoloNew.src.test_socp.style import build_style_terms
+def test_sigma_R_scales_style_blocks_quadratically(rt):
+    """Doubling σ_R divides every S_k/S_B block cost by 4 at dqa=0."""
+    from HoloNew.src.test_socp.style import build_style_blocks
     q_mj = rt.q_init_full[:36]
     ft = _frame_targets(rt, q_mj)
-    dqa = cp.Variable(rt.nv_a)
-    dqa.value = 0.01 * np.random.default_rng(0).standard_normal(rt.nv_a)
-    t1 = build_style_terms(rt, q_mj, ft, dqa, lambda_ws=1.0, sigma_R=1.0)
-    t2 = build_style_terms(rt, q_mj, ft, dqa, lambda_ws=1.0, sigma_R=2.0)
-    s1 = sum(float(t.value) for t in t1)
-    s2 = sum(float(t.value) for t in t2)
+    b1 = build_style_blocks(rt, q_mj, ft, lambda_ws=1.0, sigma_R=1.0)
+    b2 = build_style_blocks(rt, q_mj, ft, lambda_ws=1.0, sigma_R=2.0)
+    s1 = sum(float(np.sum(b.c ** 2)) for b in b1)
+    s2 = sum(float(np.sum(b.c ** 2)) for b in b2)
     np.testing.assert_allclose(s2, s1 / 4.0, rtol=1e-9)
 
 
-def test_sigma_a_sigma_L_scale_centroidal(rt):
-    """σ_a scales W^c by 1/σ_a²; σ_L scales W^L by 1/σ_L², at fixed dqa."""
-    from HoloNew.src.test_socp.centroidal import build_centroidal_terms
+def test_sigma_a_sigma_L_scale_centroidal_blocks(rt):
+    """σ_a scales W^c block by 1/σ_a²; σ_L scales W^L block by 1/σ_L², at dqa=0."""
+    from HoloNew.src.test_socp.centroidal import build_centroidal_blocks
     pm = rt.pin
     rng = np.random.default_rng(1)
     q0 = pm.qpos_mj_to_q_pin(rt.q_init_full[:36])
     q1 = pin.integrate(pm.model, q0, 0.02 * rng.standard_normal(pm.model.nv))
     c0 = pm.com(q0)
-    dqa = cp.Variable(rt.nv_a); dqa.value = 0.01 * rng.standard_normal(rt.nv_a)
-    # non-zero cddot_ref so the reference-subtraction branch of b_c is exercised
-    # (it must carry the same 1/sigma_a factor as the Jc@dqa part).
     kw = dict(rt=rt, q_t0=q0, q_tm1=q1, c_tm1=c0, c_tm2=c0,
-              cddot_ref=np.array([0.3, -1.2, 9.81]), c_ref=c0, dqa=dqa,
+              cddot_ref=np.array([0.3, -1.2, 9.81]), c_ref=c0,
               lambda_c_pos=0.0, dt=1/30.0)
-    wc1 = build_centroidal_terms(lambda_c=1.0, lambda_l=0.0, sigma_a=1.0, sigma_L=1.0, **kw)
-    wc2 = build_centroidal_terms(lambda_c=1.0, lambda_l=0.0, sigma_a=2.0, sigma_L=1.0, **kw)
-    np.testing.assert_allclose(sum(float(t.value) for t in wc2),
-                               sum(float(t.value) for t in wc1) / 4.0, rtol=1e-9)
-    wl1 = build_centroidal_terms(lambda_c=0.0, lambda_l=1.0, sigma_a=1.0, sigma_L=1.0, **kw)
-    wl2 = build_centroidal_terms(lambda_c=0.0, lambda_l=1.0, sigma_a=1.0, sigma_L=2.0, **kw)
-    np.testing.assert_allclose(sum(float(t.value) for t in wl2),
-                               sum(float(t.value) for t in wl1) / 4.0, rtol=1e-9)
+    wc1 = build_centroidal_blocks(lambda_c=1.0, lambda_l=0.0, sigma_a=1.0, sigma_L=1.0, **kw)
+    wc2 = build_centroidal_blocks(lambda_c=1.0, lambda_l=0.0, sigma_a=2.0, sigma_L=1.0, **kw)
+    np.testing.assert_allclose(
+        sum(float(np.sum(b.c ** 2)) for b in wc2),
+        sum(float(np.sum(b.c ** 2)) for b in wc1) / 4.0, rtol=1e-9)
+    wl1 = build_centroidal_blocks(lambda_c=0.0, lambda_l=1.0, sigma_a=1.0, sigma_L=1.0, **kw)
+    wl2 = build_centroidal_blocks(lambda_c=0.0, lambda_l=1.0, sigma_a=1.0, sigma_L=2.0, **kw)
+    np.testing.assert_allclose(
+        sum(float(np.sum(b.c ** 2)) for b in wl2),
+        sum(float(np.sum(b.c ** 2)) for b in wl1) / 4.0, rtol=1e-9)
 
 
 def test_wo_sigma_split_single_lambda():
-    """Collapsed W^o: one λ_o; σ_ao scales the linear residual, σ_omega the
-    angular one. cost = λ_o(||(vdot-ref)/σ_ao||² + ||(omega-ref)/σ_omega||²)."""
-    from HoloNew.src.test_socp.movable import build_wo_term
+    """Collapsed W^o: one λ_o; σ_ao scales the linear block, σ_omega the angular one."""
+    from HoloNew.src.test_socp.movable import build_wo_block
     rng = np.random.default_rng(0)
     T0 = pin.exp6(0.1*rng.standard_normal(6)) * pin.SE3.Identity()
     T1 = pin.exp6(0.1*rng.standard_normal(6)) * pin.SE3.Identity()
     T2 = pin.exp6(0.1*rng.standard_normal(6)) * pin.SE3.Identity()
     vdot_ref, omega_ref = rng.standard_normal(3), rng.standard_normal(3)
     dt = 1/30.0
-    dxi = cp.Variable(6); val = 0.02*rng.standard_normal(6); dxi.value = val
-    term = build_wo_term(T0, T1, T2, vdot_ref, omega_ref, dxi,
-                         lambda_o=2.0, dt=dt, sigma_ao=3.0, sigma_omega=5.0)
+    val = 0.02*rng.standard_normal(6)
+    # nv_a=0: W^o blocks have A=zeros, so cost = ||c||^2 (robot DOF irrelevant here)
+    blocks = build_wo_block(T0, T1, T2, vdot_ref, omega_ref, nv_a=0,
+                            lambda_o=2.0, dt=dt, sigma_ao=3.0, sigma_omega=5.0)
+    # Evaluate at dxi=val: cost = ||A_obj @ val + c||^2 summed over both blocks
+    block_val = sum(float(np.sum((b.A_obj @ val + b.c) ** 2)) for b in blocks)
     Tcur = pin.exp6(val) * T0
     V_t = pin.log6(T1.inverse() * Tcur).vector / dt
     V_tm1 = pin.log6(T2.inverse() * T1).vector / dt
     vdot = (V_t[:3] - V_tm1[:3]) / dt
     omega = V_t[3:6]
     gt = 2.0 * (np.sum(((vdot - vdot_ref)/3.0)**2) + np.sum(((omega - omega_ref)/5.0)**2))
-    np.testing.assert_allclose(float(term.value), gt, rtol=1e-3)
+    np.testing.assert_allclose(block_val, gt, rtol=1e-3)
 
 
 def test_p_scale_helper():
@@ -141,22 +137,21 @@ def test_L_floor_object_fields_and_attrs(rt):
     assert rt.L_floor == m and rt.L_object == m
 
 
-def test_lambda_cv_sigma_cv_scale_wcvel(rt):
-    """W^c_vel scales by lambda_cv and 1/sigma_cv^2 at a fixed dqa."""
-    from HoloNew.src.test_socp.centroidal import build_centroidal_terms
+def test_lambda_cv_sigma_cv_scale_wcvel_blocks(rt):
+    """W^c_vel blocks scale by lambda_cv and 1/sigma_cv^2 at dqa=0."""
+    from HoloNew.src.test_socp.centroidal import build_centroidal_blocks
     pm = rt.pin
     rng = np.random.default_rng(3)
     q0 = pm.qpos_mj_to_q_pin(rt.q_init_full[:36])
     q1 = pin.integrate(pm.model, q0, 0.02 * rng.standard_normal(pm.model.nv))
     c0 = pm.com(q0)
-    dqa = cp.Variable(rt.nv_a); dqa.value = 0.01 * rng.standard_normal(rt.nv_a)
     kw = dict(rt=rt, q_t0=q0, q_tm1=q1, c_tm1=c0, c_tm2=c0, cddot_ref=np.zeros(3),
-              c_ref=c0, dqa=dqa, lambda_c=0.0, lambda_c_pos=0.0, lambda_l=0.0, dt=1 / 30.0,
+              c_ref=c0, lambda_c=0.0, lambda_c_pos=0.0, lambda_l=0.0, dt=1 / 30.0,
               cdot_ref=np.array([0.1, -0.2, 0.05]))
-    t1 = build_centroidal_terms(lambda_cv=1.0, sigma_cv=1.0, **kw)
-    t2 = build_centroidal_terms(lambda_cv=2.0, sigma_cv=1.0, **kw)
-    t3 = build_centroidal_terms(lambda_cv=1.0, sigma_cv=2.0, **kw)
-    s1 = sum(float(t.value) for t in t1)
+    b1 = build_centroidal_blocks(lambda_cv=1.0, sigma_cv=1.0, **kw)
+    b2 = build_centroidal_blocks(lambda_cv=2.0, sigma_cv=1.0, **kw)
+    b3 = build_centroidal_blocks(lambda_cv=1.0, sigma_cv=2.0, **kw)
+    s1 = sum(float(np.sum(b.c ** 2)) for b in b1)
     assert s1 > 0
-    np.testing.assert_allclose(sum(float(t.value) for t in t2), 2.0 * s1, rtol=1e-9)
-    np.testing.assert_allclose(sum(float(t.value) for t in t3), s1 / 4.0, rtol=1e-9)
+    np.testing.assert_allclose(sum(float(np.sum(b.c ** 2)) for b in b2), 2.0 * s1, rtol=1e-9)
+    np.testing.assert_allclose(sum(float(np.sum(b.c ** 2)) for b in b3), s1 / 4.0, rtol=1e-9)

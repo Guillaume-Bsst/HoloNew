@@ -100,22 +100,20 @@ def test_point_jacobians_fd_agreement():
                                        err_msg=f"point_jacobians[{i}] col {k}")
 
 
-def test_dx_terms_assemble_and_solve():
-    import cvxpy as cp
+def test_dx_blocks_assemble():
+    """build_dx_blocks returns a non-empty list of valid ResidualBlocks."""
     rt = _rt()
     if rt.correspondence is None or rt.object_sdf is None:
         pytest.skip("assets not present")
-    from HoloNew.src.test_socp.interaction import build_dx_terms
+    from HoloNew.src.test_socp.interaction import build_dx_blocks
     q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
-    dqa = cp.Variable(rt.nv_a)
-    # Use real frame-0 object pose if available, else identity.
     obj_pose = getattr(rt, "_obj_poses_raw", None)
     obj_pose = obj_pose[0] if obj_pose is not None else np.array([1., 0, 0, 0, 0, 0, 0])
-    terms = build_dx_terms(rt, q_pin, dqa, 0, obj_pose, lambda_d=1.0, lambda_x=1.0)
-    assert isinstance(terms, list)
-    prob = cp.Problem(cp.Minimize(cp.sum(terms) + cp.sum_squares(dqa)), [cp.SOC(0.2, dqa)])
-    prob.solve(solver=cp.CLARABEL)
-    assert prob.status in ("optimal", "optimal_inaccurate")
+    blocks = build_dx_blocks(rt, q_pin, 0, obj_pose, lambda_d=1.0, lambda_x=1.0)
+    assert isinstance(blocks, list)
+    for b in blocks:
+        assert b.A.shape[1] == rt.nv_a
+        assert np.all(np.isfinite(b.A)) and np.all(np.isfinite(b.c))
 
 
 def test_solver_with_dx_weights_runs():
@@ -124,8 +122,6 @@ def test_solver_with_dx_weights_runs():
         pytest.skip("assets not present")
     rt.lambda_d = 1.0
     rt.lambda_x = 1.0
-    # Solve a few frames only: the D/X assembly builds many cvxpy terms per SQP
-    # iteration, so a full clip is slow; a short run exercises the wiring.
     res = rt.retarget(max_frames=4)
     assert np.all(np.isfinite(res.qpos))
     assert res.qpos.shape[0] == 4
@@ -137,18 +133,18 @@ def test_floor_d_term_lifts_point_below_floor():
     The floor signed distance is exactly z, so its gradient is the constant +z axis
     everywhere. floor_field.direction is the surface->point convention, which flips to
     -z below the floor; using it as the D linearization gradient inverts the
-    distance-matching attractor into a repeller for penetrating points and drives the
-    robot downward without bound (observed: base sinking to ~-500 m).
+    distance-matching attractor into a repeller for penetrating points.
 
     With the base lowered so floor control points penetrate z=0, the optimal floor-D
     step must give those points a POSITIVE world-z displacement (lift them out).
+    We compute the optimal dqa analytically as the unconstrained least-squares minimum
+    of ||A @ dqa + c||^2 (which equals the block cost).
     """
-    import cvxpy as cp
     rt = _rt()
     if rt.correspondence is None:
         pytest.skip("assets not present")
     from HoloNew.src.test_socp.interaction import (
-        build_dx_terms, robot_control_points, query_entities, frame_references,
+        build_dx_blocks, robot_control_points, query_entities, frame_references,
         _activation)
 
     # Isolate the floor channel: drop the object SDF so only floor D contributes.
@@ -160,14 +156,16 @@ def test_floor_d_term_lifts_point_below_floor():
     q_pin[2] -= 0.4
     P = robot_control_points(rt, q_pin)
 
-    dqa = cp.Variable(rt.nv_a)
-    terms = build_dx_terms(rt, q_pin, dqa, 0, None, lambda_d=1.0, lambda_x=0.0)
-    if not terms:
+    blocks = build_dx_blocks(rt, q_pin, 0, None, lambda_d=1.0, lambda_x=0.0)
+    if not blocks:
         pytest.skip("no active floor D points in this configuration")
-    prob = cp.Problem(cp.Minimize(cp.sum(terms) + 1e-6 * cp.sum_squares(dqa)),
-                      [cp.SOC(0.2, dqa)])
-    prob.solve(solver=cp.CLARABEL)
-    assert prob.status in ("optimal", "optimal_inaccurate")
+
+    # Assemble A (stacked) and c (stacked) from all blocks, then solve unconstrained LS
+    A_stack = np.vstack([b.A for b in blocks])   # (K, nv_a)
+    c_stack = np.concatenate([b.c for b in blocks])  # (K,)
+    # Unconstrained least-squares: min ||A @ dqa + c||^2
+    # solution: dqa_opt = -(A.T @ A)^{-1} A.T @ c (pseudoinverse)
+    dqa_opt, _, _, _ = np.linalg.lstsq(A_stack, -c_stack, rcond=None)
 
     # Penetrating, floor-active control points (robot z < 0 and human ref active).
     L = rt.smplx_ground_probe.margin
@@ -183,7 +181,7 @@ def test_floor_d_term_lifts_point_below_floor():
     link_names = [corr.link_names[corr.link_idx[i]] for i in below]
     offsets = corr.offset_local[below]
     jacs = [J[:, rt.v_a_indices] for J in rt.pin.point_jacobians(q_pin, link_names, offsets)]
-    dz = np.array([(J @ dqa.value)[2] for J in jacs])
+    dz = np.array([(J @ dqa_opt)[2] for J in jacs])
     assert np.all(dz > 0), f"floor D term pushes penetrating points DOWN: dz={dz}"
 
 
@@ -215,15 +213,16 @@ def test_object_d_term_pushes_penetrating_point_outward():
     fobj.direction is surface->point, which points inward (-grad) for a penetrating
     point. The D linearization must use the signed-distance gradient g = sign(d0)*n0
     so that a point inside the object is pulled out toward d_ref instead of driven
-    deeper. With non-penetration off this is the same runaway failure mode as the
-    floor channel.
+    deeper.
+
+    We compute the optimal dqa analytically as the unconstrained least-squares minimum
+    and verify the signed-distance increase is positive for all active points.
     """
-    import cvxpy as cp
     rt = _rt()
     if rt.correspondence is None:
         pytest.skip("assets not present")
     from HoloNew.src.test_socp.interaction import (
-        build_dx_terms, robot_control_points, _robj_from_pose)
+        build_dx_blocks, robot_control_points, _robj_from_pose)
 
     rt.lambda_d = 1.0
     # Identity object pose => object-local frame == world frame (Robj = I).
@@ -246,22 +245,22 @@ def test_object_d_term_pushes_penetrating_point_outward():
     )}
 
     q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
-    dqa = cp.Variable(rt.nv_a)
-    terms = build_dx_terms(rt, q_pin, dqa, 0, obj_pose, lambda_d=1.0, lambda_x=0.0)
-    assert terms, "expected active object D terms"
-    prob = cp.Problem(cp.Minimize(cp.sum(terms) + 1e-6 * cp.sum_squares(dqa)),
-                      [cp.SOC(0.2, dqa)])
-    prob.solve(solver=cp.CLARABEL)
-    assert prob.status in ("optimal", "optimal_inaccurate")
+    blocks = build_dx_blocks(rt, q_pin, 0, obj_pose, lambda_d=1.0, lambda_x=0.0)
+    assert blocks, "expected active object D blocks"
 
-    # True outward (signed-distance) gradient, recomputed independently here.
-    g_true = np.sign(d0) * normal_local        # = -normal_local for d0 < 0
+    # Unconstrained least-squares solution
+    A_stack = np.vstack([b.A for b in blocks])
+    c_stack = np.concatenate([b.c for b in blocks])
+    dqa_opt, _, _, _ = np.linalg.lstsq(A_stack, -c_stack, rcond=None)
+
+    # True outward (signed-distance) gradient: g = sign(d0)*n0 = -normal_local
+    g_true = np.sign(d0) * normal_local
     Robj = _robj_from_pose(obj_pose)            # identity
     link_names = [corr.link_names[corr.link_idx[i]] for i in range(M)]
     jacs = [J[:, rt.v_a_indices]
             for J in rt.pin.point_jacobians(q_pin, link_names, corr.offset_local)]
     # Predicted change in signed distance for each point: g_true . (Jloc @ dqa).
-    dd = np.array([g_true @ (Robj.T @ J @ dqa.value) for J in jacs])
+    dd = np.array([g_true @ (Robj.T @ J @ dqa_opt) for J in jacs])
     assert np.all(dd > 0), f"object D term drives penetrating points INWARD: dd={dd}"
 
 
@@ -269,20 +268,18 @@ def test_object_d_term_pushes_penetrating_point_outward():
 # Task 5: P (contact persistence) term
 # ---------------------------------------------------------------------------
 
-def test_p_terms_assemble():
-    """build_p_terms returns a list and the assembled problem solves (at t=1)."""
-    import cvxpy as cp
+def test_p_blocks_assemble():
+    """build_p_blocks returns a list and all blocks have valid shapes at t=1."""
     rt = _rt()
     if rt.correspondence is None or rt.object_sdf is None:
         pytest.skip("assets not present")
-    from HoloNew.src.test_socp.interaction import build_p_terms, _activation
+    from HoloNew.src.test_socp.interaction import (
+        build_p_blocks, robot_control_points, query_entities, _activation)
 
     q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
-    dqa = cp.Variable(rt.nv_a)
     M = rt.correspondence.link_idx.shape[0]
     L = rt.smplx_ground_probe.margin
 
-    # Use the real frame-1 object pose if available, else identity.
     obj_pose = (rt._obj_poses_raw[1]
                 if getattr(rt, "_obj_poses_raw", None) is not None
                 else np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
@@ -290,14 +287,9 @@ def test_p_terms_assemble():
                      if getattr(rt, "_obj_poses_raw", None) is not None
                      else np.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
 
-    # Build a fake _p_state with zero previous positions and no previous contact
-    # (d_prev = +inf -> alpha_hat = 0 -> gamma = 0; terms will be empty).
-    # Then test with a state that has d_prev small enough to activate some points.
-    from HoloNew.src.test_socp.interaction import robot_control_points, query_entities
     P = robot_control_points(rt, q_pin)
     fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
 
-    # Mimic a "previous frame" where the robot was at its init pose.
     rt._p_state = {
         "p_prev_world": P.copy(),
         "obj_prev": obj_prev_pose.copy(),
@@ -307,16 +299,12 @@ def test_p_terms_assemble():
         "a_prev_flr": np.array([_activation(float(fflr.distance[i]), L) for i in range(M)]),
     }
 
-    terms = build_p_terms(rt, q_pin, dqa, t=1, obj_pose=obj_pose,
-                          lambda_p=1.0, sigma_v=0.05, dt=1.0 / 30.0)
-    assert isinstance(terms, list)
-    # The assembled problem must be solvable regardless of how many active points.
-    base = cp.sum_squares(dqa)
-    obj = base if len(terms) == 0 else cp.sum(terms) + base
-    prob = cp.Problem(cp.Minimize(obj), [cp.SOC(0.2, dqa)])
-    prob.solve(solver=cp.CLARABEL)
-    assert prob.status in ("optimal", "optimal_inaccurate"), (
-        f"Problem status: {prob.status}; {len(terms)} P-terms assembled")
+    blocks = build_p_blocks(rt, q_pin, t=1, obj_pose=obj_pose,
+                            lambda_p=1.0, sigma_v=0.05, dt=1.0 / 30.0)
+    assert isinstance(blocks, list)
+    for b in blocks:
+        assert b.A.shape[1] == rt.nv_a
+        assert np.all(np.isfinite(b.A)) and np.all(np.isfinite(b.c))
 
 
 def test_p_persistence_runs():

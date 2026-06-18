@@ -1,12 +1,11 @@
 """Reference angular-momentum tracking (W^L L_ref) — Brick 4 extension.
 
 reference_orbital_angular_momentum builds a lumped L_ref from a body trajectory;
-build_lumped_L_term builds the matching current L (linearized in dqa). The two use
+build_lumped_L_block builds the matching current L (linearized in dqa). The two use
 the same masses so the tracked residual is consistent. Validated synthetically and,
 in test_centroidal_lref_jump, on a real aerial SFU clip.
 """
 import numpy as np
-import cvxpy as cp
 import pytest
 
 
@@ -27,11 +26,11 @@ def test_reference_orbital_L_synthetic_rotation():
     assert np.allclose(L[2:, :2], 0, atol=1e-6), "in-plane rotation -> only L_z"
 
 
-def test_lumped_L_term_matches_numpy():
+def test_lumped_L_block_matches_numpy():
     from HoloNew.examples.robot_retarget import RetargetingConfig
     from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
     from HoloNew.src.test_socp.centroidal import (
-        mapped_frame_masses_and_names, build_lumped_L_term)
+        mapped_frame_masses_and_names, build_lumped_L_block)
     from HoloNew.src.test_socp.interaction import _skew
 
     rt = TestSocpRetargeter.from_config(RetargetingConfig(
@@ -45,10 +44,12 @@ def test_lumped_L_term_matches_numpy():
     q_prev = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
     L_ref_t = rng.standard_normal(3)
     dqa_val = rng.standard_normal(rt.nv_a) * 0.01
-    dqa = cp.Variable(rt.nv_a); dqa.value = dqa_val
     lam, dt = 2.0, 1.0 / 30.0
 
-    term = build_lumped_L_term(rt, q_pin, q_prev, dqa, frames, masses, L_ref_t, lam, dt)
+    blocks = build_lumped_L_block(rt, q_pin, q_prev, frames, masses, L_ref_t, lam, dt)
+    assert len(blocks) == 1
+    b = blocks[0]
+    block_val = float(np.sum((b.A @ dqa_val + b.c) ** 2))
 
     # Independent numpy ground truth (moment arms fixed at q_pin).
     M = masses.sum()
@@ -65,7 +66,7 @@ def test_lumped_L_term_matches_numpy():
         cd = (c0 - cprev) / dt + (Jc @ dqa_val) / dt
         L += masses[k] * np.cross(arm, vk - cd)
     gt = lam * float(np.sum((L - L_ref_t) ** 2))
-    np.testing.assert_allclose(float(term.value), gt, rtol=1e-9)
+    np.testing.assert_allclose(block_val, gt, rtol=1e-9)
 
 
 def test_lref_tracking_reproduces_cartwheel_spin():

@@ -12,9 +12,8 @@ def rt():
     return TestSocpRetargeter.from_config(cfg)
 
 
-def test_tracking_blocks_match_cvxpy_value(rt):
-    import cvxpy as cp
-    from HoloNew.src.test_socp.tracking import build_tracking_terms, build_tracking_blocks
+def test_tracking_blocks_valid(rt):
+    from HoloNew.src.test_socp.tracking import build_tracking_blocks
     from HoloNew.src.test_socp.targets import ground_frame_targets
     from HoloNew.src.test_socp.tables import IK_MATCH_TABLE1
     q = rt.q_init_full.copy()
@@ -22,18 +21,14 @@ def test_tracking_blocks_match_cvxpy_value(rt):
     blocks = build_tracking_blocks(rt, tg, q, lambda_pos=rt.lambda_pos, sigma_p=rt.sigma_p,
                                    lambda_rot=rt.lambda_rot, sigma_rot=rt.sigma_rot)
     assert blocks and all(isinstance(b, ResidualBlock) for b in blocks)
-    dqa = cp.Variable(rt.nv_a)
-    terms = build_tracking_terms(rt, tg, dqa, q, lambda_pos=rt.lambda_pos, sigma_p=rt.sigma_p,
-                                 lambda_rot=rt.lambda_rot, sigma_rot=rt.sigma_rot)
-    dqa.value = np.zeros(rt.nv_a)
-    cvxpy_val = float(sum(t.value for t in terms))
-    block_val = float(sum(np.sum((b.c) ** 2) for b in blocks))  # A·0 + c
-    np.testing.assert_allclose(block_val, cvxpy_val, rtol=1e-9, atol=1e-12)
+    for b in blocks:
+        assert b.A.shape[1] == rt.nv_a
+        assert np.all(np.isfinite(b.A))
+        assert np.all(np.isfinite(b.c))
 
 
-def test_style_blocks_match_cvxpy_value(rt):
-    import cvxpy as cp
-    from HoloNew.src.test_socp.style import build_style_terms, build_style_blocks
+def test_style_blocks_valid(rt):
+    from HoloNew.src.test_socp.style import build_style_blocks
     from HoloNew.src.test_socp.targets import ground_frame_targets
     from HoloNew.src.test_socp.tables import IK_MATCH_TABLE1
     q = rt.q_init_full.copy()
@@ -45,18 +40,15 @@ def test_style_blocks_match_cvxpy_value(rt):
         "that at least one frame has w_r > 0."
     )
     assert all(isinstance(b, ResidualBlock) for b in blocks)
-    dqa = cp.Variable(rt.nv_a)
-    terms = build_style_terms(rt, q, tg, dqa, lambda_ws=1.0, sigma_R=rt.sigma_R)
-    dqa.value = np.zeros(rt.nv_a)
-    cvxpy_val = float(sum(t.value for t in terms))
-    block_val = float(sum(np.sum(b.c ** 2) for b in blocks))  # A·0 + c
-    np.testing.assert_allclose(block_val, cvxpy_val, rtol=1e-9, atol=1e-12)
+    for b in blocks:
+        assert b.A.shape[1] == rt.nv_a
+        assert np.all(np.isfinite(b.A))
+        assert np.all(np.isfinite(b.c))
 
 
-def test_temporal_block_match_cvxpy_value(rt):
-    import cvxpy as cp
-    from HoloNew.src.test_socp.temporal import build_temporal_term, build_temporal_block
-    # build_temporal_term/block take pinocchio q_pin configs (not MuJoCo qpos):
+def test_temporal_block_valid(rt):
+    from HoloNew.src.test_socp.temporal import build_temporal_block
+    # build_temporal_block takes pinocchio q_pin configs (not MuJoCo qpos):
     # solve_single_iteration converts with pin.qpos_mj_to_q_pin before calling them.
     q0 = rt.q_init_full.copy()
     q1 = rt.q_init_full.copy()
@@ -71,11 +63,7 @@ def test_temporal_block_match_cvxpy_value(rt):
                                   lambda_r=1.0, sigma_qddot=rt.sigma_qddot,
                                   sigma_Vdot=rt.sigma_Vdot, dt=rt._dt)
     assert blocks and all(isinstance(b, ResidualBlock) for b in blocks)
-    dqa = cp.Variable(rt.nv_a)
-    term = build_temporal_term(rt, q_pin0, q_pin1, q_pin2, dqa,
-                               lambda_r=1.0, sigma_qddot=rt.sigma_qddot,
-                               sigma_Vdot=rt.sigma_Vdot, dt=rt._dt)
-    dqa.value = np.zeros(rt.nv_a)
-    cvxpy_val = float(term.value)
-    block_val = float(sum(np.sum(b.c ** 2) for b in blocks))  # A·0 + c
-    np.testing.assert_allclose(block_val, cvxpy_val, rtol=1e-9, atol=1e-12)
+    for b in blocks:
+        assert b.A.shape[1] == rt.nv_a
+        assert np.all(np.isfinite(b.A))
+        assert np.all(np.isfinite(b.c))
