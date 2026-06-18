@@ -3,7 +3,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from HoloNew.src.data_loaders.hodome import global_orientations_zup, prep_hodome_processed
+from HoloNew.src.data_loaders.hodome import (
+    HodomeMeshPoser,
+    global_orientations_zup,
+    prep_hodome_processed,
+)
 
 _REPO = Path(__file__).resolve().parents[5]
 _HODOME_NPZ = _REPO / "data/00_raw_datasets/HODome/smplx/subject01_baseball.npz"
@@ -45,3 +49,23 @@ def test_prep_hodome_processed_real():
     pelvis = pos[:, 0, :]
     assert pelvis[:, 2].std() >= 0  # finite, sanity
     assert isinstance(out["gender"], str)
+
+
+@pytest.mark.skipif(not (_HODOME_NPZ.exists() and _SMPLX_DIR.exists()),
+                    reason="HODome data / SMPL-X model not present")
+def test_mesh_poser_aligns_with_joints():
+    # Regression: the mesh must be posed by a native forward + Y->Z vertex swap so it
+    # matches the skeleton. The old orientation-conjugation path collapsed the body
+    # (mesh ~0.4 m tall, wrist >0.25 m off). Here the mesh spans the full stature and a
+    # wrist vertex sits on the wrist joint.
+    out = prep_hodome_processed(_HODOME_NPZ, _SMPLX_DIR)
+    joints = out["global_joint_positions"]
+    poser = HodomeMeshPoser(_HODOME_NPZ, _SMPLX_DIR)
+    f = min(1000, joints.shape[0] - 1)
+    v = poser.vertices_zup(f)
+    assert poser.faces.ndim == 2 and poser.faces.shape[1] == 3
+    # Full standing stature, not a collapsed blob.
+    assert (v[:, 2].max() - v[:, 2].min()) > 1.3
+    # Wrist (SMPL-X body joint 21) and head (15) joints lie on the mesh surface.
+    assert np.linalg.norm(v - joints[f, 21], axis=1).min() < 0.05
+    assert np.linalg.norm(v - joints[f, 15], axis=1).min() < 0.10

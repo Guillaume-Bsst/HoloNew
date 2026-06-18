@@ -71,6 +71,44 @@ def hodome_fk(npz_path: Path, model_dir: Path) -> tuple[np.ndarray, float]:
     return joints, height
 
 
+class HodomeMeshPoser:
+    """Per-frame SMPL-X body mesh for HODome, in the Z-up world frame.
+
+    The mesh MUST be posed by a raw SMPL-X forward in the model's native (Y-up) frame,
+    then mapped to Z-up by swapping the vertices (exactly how hodome_fk builds the
+    joints). Posing instead from the Y->Z *conjugated* global orientations
+    (placed_verts_smpl) feeds reflected rotations to a non-reflected mesh template and
+    collapses the body. Caches the last frame so toggles/redraws are cheap.
+    """
+
+    _COMPONENTS = ("global_orient", "body_pose", "transl", "left_hand_pose",
+                   "right_hand_pose", "jaw_pose", "leye_pose", "reye_pose", "expression")
+
+    def __init__(self, npz_path: Path, model_dir: Path) -> None:
+        d = np.load(str(npz_path), allow_pickle=True)
+        self._params = {k: np.asarray(d[k], np.float32) for k in self._COMPONENTS}
+        self._betas = np.asarray(d["betas"][:1], np.float32)            # (1, num_betas)
+        self.model = smplx.SMPLX(
+            model_path=str(model_dir), gender=str(d["gender"]), ext="npz",
+            num_betas=self._betas.shape[-1],
+            num_expression_coeffs=int(np.asarray(d["expression"]).shape[-1]), use_pca=False)
+        self.faces = self.model.faces.astype(np.uint32)
+        self._cache_idx: int = -1
+        self._cache_verts: np.ndarray | None = None
+
+    def vertices_zup(self, frame: int) -> np.ndarray:
+        """Posed body vertices (V,3) for ``frame`` in the Z-up world frame."""
+        if frame == self._cache_idx and self._cache_verts is not None:
+            return self._cache_verts
+        kw = {k: torch.from_numpy(self._params[k][frame:frame + 1]) for k in self._COMPONENTS}
+        with torch.no_grad():
+            out = self.model(betas=torch.from_numpy(self._betas), **kw)
+        verts = out.vertices[0].detach().numpy()
+        verts = transform_y_up_to_z_up(verts)                          # native Y-up -> Z-up
+        self._cache_idx, self._cache_verts = frame, verts
+        return verts
+
+
 # Y-up -> Z-up coordinate swap, matching transform_y_up_to_z_up:
 # M = [[1,0,0],[0,0,1],[0,1,0]] (swap Y and Z). M is its own inverse.
 _YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])

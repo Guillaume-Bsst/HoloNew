@@ -152,8 +152,18 @@ def view(cfg: ViewStagesConfig) -> None:
     # OMOMO metadata loaded above.
     _mesh_betas = smplx_betas if data_format == "smplx" else betas
     _mesh_gender = smplx_gender if data_format == "smplx" else gender
+    # HODome poses the mesh from a native SMPL-X forward + Y->Z vertex swap (its raw npz
+    # at cfg.motion_path carries the full pose params); the orientation-conjugation path
+    # collapses the body. Other sources keep the HumanBody orientation/quat posing.
     human_body = None
-    if original_quats is not None:
+    human_mesh_poser = None
+    if dataset == "hodome":
+        try:
+            from HoloNew.src.data_loaders.hodome import HodomeMeshPoser
+            human_mesh_poser = HodomeMeshPoser(Path(cfg.motion_path), Path(cfg.model_path))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("HODome mesh poser unavailable (%s); mesh disabled.", exc)
+    elif original_quats is not None:
         try:
             human_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, _mesh_betas, _mesh_gender)
         except Exception as exc:  # noqa: BLE001
@@ -439,6 +449,7 @@ def view(cfg: ViewStagesConfig) -> None:
         interaction_L_object=_vL_obj,
         human_body=human_body,
         human_smpl_order=smpl_order,
+        human_mesh_poser=human_mesh_poser,
     )
     viewer.bind_methods(methods)
     input("Stage viewer at http://localhost:8080 — Enter to exit ...")

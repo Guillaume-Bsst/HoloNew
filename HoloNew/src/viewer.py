@@ -112,7 +112,8 @@ class Viewer:
                  interaction_L_floor: float = CONTACT_MARGIN_M,
                  interaction_L_object: float = CONTACT_MARGIN_M,
                  human_body: object | None = None,
-                 human_smpl_order: bool = False) -> None:
+                 human_smpl_order: bool = False,
+                 human_mesh_poser: object | None = None) -> None:
         # Contact bands used for the overlays' active masks + colour scales, per channel
         # (the run's L_floor / L_object), so the viewer matches what the solver activates.
         self._L_flr = float(interaction_L_floor)
@@ -149,6 +150,11 @@ class Viewer:
         # path) -> pose the mesh via placed_verts_smpl; False for the 52-joint
         # MuJoCo-order quats of the smplh .pt path (placed_verts).
         self._human_smpl_order = human_smpl_order
+        # Optional per-frame mesh provider (HodomeMeshPoser): exposes .faces and
+        # .vertices_zup(frame). When set it overrides the human_body posing, because the
+        # HODome mesh must be posed by a native SMPL-X forward + Y->Z vertex swap (the
+        # conjugated-orientation path collapses the body).
+        self._human_mesh_poser = human_mesh_poser
         self._smplx_handle = None
         # Persistent object handles, updated in place each frame (never removed/recreated)
         # so the object does not flicker during playback, like the SMPL-X mesh.
@@ -450,25 +456,32 @@ class Viewer:
         only on the human-scale stages (Original, Grounded), where it follows the skeleton
         by snapping its pelvis onto the active stage's root (see _active_human_pelvis);
         hidden elsewhere, where a full-size human mesh would not match the stage."""
-        show = (self._tog_smplx.value and self.human_body is not None
-                and self.original_quats is not None and self.original_joints is not None
+        poser = self._human_mesh_poser
+        have_mesh = poser is not None or (self.human_body is not None
+                                          and self.original_quats is not None)
+        show = (self._tog_smplx.value and have_mesh and self.original_joints is not None
                 and self._stage_dd.value in self.SMPLX_STAGES)
         if not show:
             if self._smplx_handle is not None:
                 self._smplx_handle.visible = False
             return
         raw_pelvis = self.original_joints[frame, 0]
-        # placed_verts caches by frame; a stage only shifts the mesh rigidly, so pose once
-        # at the raw pelvis (cache hit on toggles) then translate onto the stage's root.
-        # smplx sources carry 22 SMPL-order orientations (placed_verts_smpl); the smplh
-        # .pt path carries 52 MuJoCo-order quats (placed_verts).
-        pose_fn = (self.human_body.placed_verts_smpl if self._human_smpl_order
-                   else self.human_body.placed_verts)
-        base = pose_fn(self.original_quats[frame], raw_pelvis, frame_idx=frame)
+        # The mesh is posed once at the raw pelvis (cache hit on toggles) then translated
+        # rigidly onto the active stage's root. Posing sources, by priority:
+        #  - poser: native SMPL-X forward + Y->Z swap (HODome; aligns with the joints);
+        #  - placed_verts_smpl: 22 SMPL-order orientations (amass smplx);
+        #  - placed_verts: 52 MuJoCo-order quats (smplh .pt).
+        if poser is not None:
+            base, faces = poser.vertices_zup(frame), poser.faces
+        else:
+            pose_fn = (self.human_body.placed_verts_smpl if self._human_smpl_order
+                       else self.human_body.placed_verts)
+            base, faces = pose_fn(self.original_quats[frame], raw_pelvis, frame_idx=frame), \
+                self.human_body.faces
         verts = (base + (self._active_human_pelvis(frame) - raw_pelvis)).astype(np.float32)
         if self._smplx_handle is None:
             self._smplx_handle = self.server.scene.add_mesh_simple(
-                "/human/mesh", vertices=verts, faces=self.human_body.faces,
+                "/human/mesh", vertices=verts, faces=faces,
                 color=(150, 150, 150), opacity=0.7)
         else:
             self._smplx_handle.vertices = verts
