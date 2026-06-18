@@ -269,12 +269,23 @@ def load_motion_data(
         object_poses = np.tile(np.array([[1, 0, 0, 0, 0, 0, 0]]), (num_frames, 1))
 
     elif task_type == "object_interaction":
-        pt_path = data_path / f"{task_name}.pt"
-        if not pt_path.exists():
-            raise FileNotFoundError(f"InterMimic data file not found: {pt_path}")
+        if data_format == "smplx":
+            # smplx object datasets (HODome) keep the human joints in the processed npz,
+            # not an InterMimic .pt; the object mesh/poses are resolved separately (by the
+            # dataset loader / the viewer's dataset branch), so use dummy poses here.
+            npz_file = data_path / f"{task_name}.npz"
+            human_data = np.load(str(npz_file))
+            human_joints = human_data["global_joint_positions"]
+            smpl_scale = constants.ROBOT_HEIGHT / human_data["height"]
+            object_poses = np.tile(np.array([[1, 0, 0, 0, 0, 0, 0]]),
+                                   (human_joints.shape[0], 1))
+        else:
+            pt_path = data_path / f"{task_name}.pt"
+            if not pt_path.exists():
+                raise FileNotFoundError(f"InterMimic data file not found: {pt_path}")
 
-        human_joints, object_poses = load_intermimic_data(str(pt_path))
-        smpl_scale = calculate_scale_factor(task_name, constants.ROBOT_HEIGHT)
+            human_joints, object_poses = load_intermimic_data(str(pt_path))
+            smpl_scale = calculate_scale_factor(task_name, constants.ROBOT_HEIGHT)
 
     elif task_type == "climbing":
         task_dir = data_path / task_name

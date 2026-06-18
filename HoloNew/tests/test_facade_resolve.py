@@ -84,3 +84,28 @@ def test_normalize_dataset_is_case_insensitive(tmp_path, monkeypatch):
     assert cfg.data_format == "smplh"
     assert cfg.task_name == "sub3_largebox_003"
     assert cfg.data_path == omomo_new
+
+
+def test_smplx_dataset_forces_robot_only(tmp_path):
+    # smplx datasets have no .pt-based object channel in the solve, so object_interaction
+    # (the default task_type) is downgraded to robot_only (object stays a viewer overlay).
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    motion = tmp_path / "clip.npz"; motion.write_bytes(b"")
+    model = tmp_path / "model"; model.mkdir()
+    cfg = RetargetingConfig(dataset="sfu", task_type="object_interaction",
+                            model_path=model, motion_path=motion)
+    facade.normalize_dataset_cfg(cfg)
+    assert cfg.data_format == "smplx"
+    assert cfg.task_type == "robot_only"
+
+
+def test_smplh_dataset_keeps_object_interaction(tmp_path):
+    # smplh (OMOMO) carries the object in the .pt, so object_interaction is kept.
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    motion = tmp_path / "seq.pt"; motion.write_bytes(b"")
+    model = tmp_path / "data" / "x.p"; model.parent.mkdir(parents=True); model.write_bytes(b"")
+    cfg = RetargetingConfig(dataset="omomo", task_type="object_interaction",
+                            model_path=model, motion_path=motion)
+    facade.normalize_dataset_cfg(cfg)
+    assert cfg.data_format == "smplh"
+    assert cfg.task_type == "object_interaction"

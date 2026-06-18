@@ -87,6 +87,17 @@ def normalize_dataset_cfg(cfg) -> None:
     dataset = cfg.dataset
     cfg.data_format = DATASET_TO_FORMAT[dataset]
 
+    # The smplx solve path is robot-only: objects are a viewer overlay (resolved from the
+    # dataset's own files), not wired into the solver's InterMimic .pt object channel. So
+    # object_interaction has no .pt to load and would build a wrong object SDF — force
+    # robot_only for smplx datasets (the object overlay still shows, gated on the dataset).
+    if cfg.data_format == "smplx" and cfg.task_type == "object_interaction":
+        import logging
+        logging.getLogger(__name__).info(
+            "Dataset %s is smplx (object is a viewer overlay); using task_type=robot_only "
+            "for the solve instead of object_interaction.", dataset)
+        cfg.task_type = "robot_only"
+
     if dataset == "omomo":
         motion = Path(cfg.motion_path)
         cfg.data_path = motion.parent
