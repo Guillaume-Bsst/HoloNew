@@ -44,10 +44,15 @@ class CvxpyBackend:
         prob = cp.Problem(cp.Minimize(cp.sum(obj)) if obj else cp.Minimize(0), cons)
         try:
             prob.solve(solver=cp.CLARABEL)
-        except Exception:  # noqa: BLE001 - match the legacy CLARABEL->SCS fallback
+            ok = prob.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE)
+        except cp.error.SolverError:
+            ok = False
+        if not ok:
+            # CLARABEL occasionally fails on ill-conditioned iterations; SCS (first-order)
+            # is more robust to conditioning. Matches the legacy TEST-SOCP fallback.
             prob.solve(solver=cp.SCS)
-        if dqa.value is None:
-            prob.solve(solver=cp.SCS)
+            if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
+                raise RuntimeError(f"CvxpyBackend solve failed: {prob.status}")
 
         dqa_val = np.asarray(dqa.value, dtype=np.float64).ravel()
         dxi_val = np.asarray(dxi.value, dtype=np.float64).ravel() if dxi is not None else None
