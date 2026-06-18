@@ -24,8 +24,12 @@ DATASET_TO_FORMAT: dict[str, str] = {
 }
 
 # Shared body-model directories (env-overridable; default to the wbt_rl shared models).
+# Default is anchored to the wbt_rl repo root relative to this file
+# (base.py is at modules/01_retargeting/HoloNew/HoloNew/src/data_loaders/base.py),
+# so it is independent of the current working directory.
+_WBT_REPO_ROOT = Path(__file__).resolve().parents[6]
 SMPLH_MODEL_DIR_DEFAULT = Path(
-    os.environ.get("WBT_SMPLH_DIR", "../../../data/00_raw_datasets/models/smplh")
+    os.environ.get("WBT_SMPLH_DIR", str(_WBT_REPO_ROOT / "data/00_raw_datasets/models/smplh"))
 )
 
 
