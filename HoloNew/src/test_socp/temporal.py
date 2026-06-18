@@ -46,4 +46,4 @@ def build_temporal_block(rt, q_t0, q_tm1, q_tm2, lambda_r, sigma_qddot, sigma_Vd
     s = np.sqrt(lambda_r) * w / dt ** 2               # (nv,)
     A = s[:, None] * Jc                                # (nv, nv_a)
     b = s * (v0 - v_tm1)                               # (nv,)
-    return [ResidualBlock(A=A, c=b, name="temporal")]
+    return [ResidualBlock(A=A, c=b, name="temporal")]  # c == the +b constant of the original sum_squares(A@dqa + b)
