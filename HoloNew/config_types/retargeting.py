@@ -38,6 +38,20 @@ class RetargetingConfig:
     data_path: Path = Path("demo_data/OMOMO_new")
     """Path to data directory."""
 
+    # --- New 3-path façade (optional; when `dataset` is set these drive loading) ---
+    dataset: str | None = None
+    """Dataset key for the 3-path loader façade (omomo, hoim3, lafan, sfu, climbing).
+    When set, model_path/motion_path/obj_path are used instead of data_path/task_name."""
+
+    model_path: Path | None = None
+    """Façade slot 1 — meaning is dataset-specific (see data_loaders)."""
+
+    motion_path: Path | None = None
+    """Façade slot 2 — the motion source file."""
+
+    obj_path: Path | None = None
+    """Façade slot 3 — object source (required for object_interaction)."""
+
     save_dir: Path | None = None
     """Directory to save results. Auto-determined if None."""
 

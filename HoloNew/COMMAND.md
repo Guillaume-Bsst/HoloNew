@@ -45,6 +45,25 @@ python examples/robot_retarget.py \
 
 (Full task-type / dataset matrix is in [README.md](README.md).)
 
+#### 3-path façade (OMOMO mixed / HOI-M3)
+
+The same script also accepts a `--dataset` key plus three explicit, no-default paths
+(`--model-path` / `--motion-path` / `--obj-path`). When `--dataset` is set it replaces
+`--data_path`/`--task-name`/`--data_format`; the legacy flags above keep working when it
+is omitted.
+
+```bash
+# OMOMO robot_only: motion from the new .pt, betas from the non-new pickle
+python examples/robot_retarget.py --dataset omomo --task-type robot_only \
+  --model-path /path/OMOMO/data/train_diffusion_manip_seq_joints24.p \
+  --motion-path demo_data/OMOMO_new/sub3_largebox_003.pt
+
+# HOI-M3 robot_only: raw SMPL-X .npz + SMPL-X body model dir
+python examples/robot_retarget.py --dataset hoim3 --task-type robot_only \
+  --model-path /path/models/models_smplx_v1_1/models/smplx \
+  --motion-path /path/HOI-M3/smplx/subject01_baseball.npz
+```
+
 ### GMR-SOCP / TEST-SOCP
 
 The GMR solvers are driven through the **stage viewer**, which runs all three

@@ -134,6 +134,18 @@ def create_task_constants(
     return task_constants
 
 
+def _validate_dataset_paths(cfg) -> None:
+    """When cfg.dataset is set, enforce the required (no-default) façade paths."""
+    if cfg.dataset is None:
+        return
+    if cfg.model_path is None or cfg.motion_path is None:
+        raise ValueError(
+            f"--dataset {cfg.dataset} requires --model-path and --motion-path.")
+    if cfg.task_type in ("object_interaction", "climbing") and cfg.obj_path is None:
+        raise ValueError(
+            f"--dataset {cfg.dataset} with --task-type {cfg.task_type} requires --obj-path.")
+
+
 def validate_config(cfg: RetargetingConfig) -> None:
     """Validate configuration consistency.
 
@@ -613,8 +625,14 @@ def main(cfg: RetargetingConfig) -> RetargetResult | None:
     task_name = cfg.task_name
     task_type = cfg.task_type
 
-    # Set defaults based on task type
-    data_format: str = cfg.data_format or DEFAULT_DATA_FORMATS[task_type]
+    # Set defaults based on task type. When the 3-path façade is used (cfg.dataset set),
+    # the dataset key maps to the internal data_format; otherwise use the legacy field.
+    if cfg.dataset is not None:
+        from HoloNew.src.data_loaders import DATASET_TO_FORMAT, resolve_loader
+        _validate_dataset_paths(cfg)
+        data_format = DATASET_TO_FORMAT[cfg.dataset]
+    else:
+        data_format = cfg.data_format or DEFAULT_DATA_FORMATS[task_type]
     save_dir = cfg.save_dir if cfg.save_dir is not None else Path(DEFAULT_SAVE_DIRS[task_type].format(robot=robot))
     data_path = cfg.data_path
 
@@ -642,10 +660,21 @@ def main(cfg: RetargetingConfig) -> RetargetResult | None:
         task_type=task_type,
     )
 
-    # Load motion data
-    human_joints, object_poses, smpl_scale = load_motion_data(
-        task_type, data_format, data_path, task_name, constants, cfg.motion_data_config
-    )
+    # Façade object_interaction: take the object mesh/URDF straight from --obj-path.
+    if cfg.dataset is not None and task_type == "object_interaction" and cfg.obj_path is not None:
+        constants.OBJECT_MESH_FILE = str(cfg.obj_path)
+        constants.OBJECT_URDF_FILE = str(Path(cfg.obj_path).with_suffix(".urdf"))
+
+    # Load motion data — new façade dispatches to a dataset loader; else legacy path.
+    if cfg.dataset is not None:
+        human_joints, object_poses, smpl_scale = resolve_loader(cfg.dataset).load(
+            model_path=cfg.model_path, motion_path=cfg.motion_path, obj_path=cfg.obj_path,
+            task_type=task_type, constants=constants, motion_data_config=cfg.motion_data_config,
+        )
+    else:
+        human_joints, object_poses, smpl_scale = load_motion_data(
+            task_type, data_format, data_path, task_name, constants, cfg.motion_data_config
+        )
 
     # Optional frame cap (the stage viewer sets it via ViewStagesConfig.max_frames to
     # bound long scenes); getattr keeps base RetargetingConfig unaffected when unset.
