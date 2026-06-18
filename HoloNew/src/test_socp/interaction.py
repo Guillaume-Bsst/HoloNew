@@ -11,6 +11,7 @@ import numpy as np
 
 from HoloNew.src.holosoma.interaction_mesh import transform_points_world_to_local
 from HoloNew.src.test_socp.contact.backends.floor import floor_field
+from HoloNew.src.test_socp.solve.spec import ResidualBlock
 
 
 def _world_to_object_local(pts_world: np.ndarray, obj_pose: np.ndarray) -> np.ndarray:
@@ -838,3 +839,347 @@ def build_p_constraints(rt, q_pin: np.ndarray, dqa, t: int,
         constraints.append(Aproj_k @ dqa >= bproj_k - tol_vec)
 
     return constraints
+
+
+# ---------------------------------------------------------------------------
+# ResidualBlock versions of D/X/P builders (numpy, no cvxpy Variables)
+# ---------------------------------------------------------------------------
+
+def build_dx_blocks(rt, q_pin: np.ndarray, t: int,
+                    obj_pose: np.ndarray,
+                    lambda_d: float, lambda_x: float,
+                    has_dxi: bool = False) -> list:
+    """Build ResidualBlock D (normal proximity) and X (tangential placement) terms.
+
+    Numpy/solver-agnostic counterpart of :func:`build_dx_terms`.  Accepts the same
+    linearisation inputs but emits :class:`~HoloNew.src.test_socp.solve.spec.ResidualBlock`
+    instances instead of cvxpy expressions.
+
+    The mapping from each cvxpy expression to the ResidualBlock fields follows the
+    cost contract ``‖A·dqa + A_obj·dxi + c‖²``:
+
+    * Robot-only channel (no ``dxi``):
+      ``cp.sum_squares(A_d @ dqa - c_d)``
+      → ``ResidualBlock(A=A_d, c=-c_d)``
+
+    * Object-coupled channel (``has_dxi=True``):
+      ``cp.sum_squares(A_d_obj @ dqa - Adxi_d @ dxi - c_d_obj)``
+      → ``ResidualBlock(A=A_d_obj, A_obj=-Adxi_d, c=-c_d_obj)``
+
+      The sign of ``A_obj`` is NEGATED relative to the row accumulator
+      ``Adxi_d`` because the cvxpy expression subtracts the dxi term while
+      the ResidualBlock cost evaluates ``A·dqa + A_obj·dxi + c``.
+
+    Args:
+        rt: TestSocpRetargeter instance.
+        q_pin: Pinocchio configuration vector.
+        t: Frame index (for frame_references).
+        obj_pose: (7,) [qw, qx, qy, qz, x, y, z] object pose.
+        lambda_d: Weight for the normal-proximity (D) term.
+        lambda_x: Weight for the tangential-placement (X) term.
+        has_dxi: When True, the object channel emits bilateral ResidualBlocks
+            with ``A_obj`` set (A_obj = −Adxi).  When False (default), the
+            object channel emits robot-only blocks (``A_obj=None``), mirroring
+            the cvxpy behaviour when ``dxi`` is None.
+
+    Returns:
+        List of ResidualBlock instances.  May be empty if no points are active.
+        Order: [obj-D, obj-X, floor-D, floor-X] (omitting empty channels).
+    """
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
+    L_flr = getattr(rt, "L_floor", rt.smplx_ground_probe.margin)
+
+    # Per-link point counts for 1/N_k normalisation.
+    n_links = len(corr.link_names)
+    link_counts = np.zeros(n_links, dtype=float)
+    for li in range(n_links):
+        link_counts[li] = float(np.sum(corr.link_idx == li))
+    Nk = link_counts[corr.link_idx]  # (M,)
+
+    # World positions of all robot control points.
+    P = robot_control_points(rt, q_pin)
+
+    # Robot-side field queries (per-entity margins).
+    fobj, fflr = query_entities(rt, P, obj_pose, margin_obj=L_obj, margin_flr=L_flr)
+
+    # Source-side references.
+    d_obj_ref, x_obj_ref, d_flr_ref, x_flr_ref, _p_ref = frame_references(rt, t)
+
+    # Object-to-world rotation.
+    Robj = _robj_from_pose(obj_pose) if obj_pose is not None else None
+
+    # Active-set selection.
+    alpha_obj = np.array([_activation(d_obj_ref[i], L_obj) for i in range(M)])
+    active_obj = (alpha_obj > 0) & np.asarray(fobj.active, dtype=bool)
+
+    alpha_flr = np.array([_activation(d_flr_ref[i], L_flr) for i in range(M)])
+    active_flr = (alpha_flr > 0) & np.asarray(fflr.active, dtype=bool)
+
+    active_union = np.where(active_obj | active_flr)[0]
+
+    if active_union.size == 0:
+        return []
+
+    # Batched Jacobian computation.
+    link_names_active = [corr.link_names[corr.link_idx[i]] for i in active_union]
+    offsets_active = corr.offset_local[active_union]
+    jacs_full = rt.pin.point_jacobians(q_pin, link_names_active, offsets_active)
+    jacs = [J[:, rt.v_a_indices] for J in jacs_full]
+    idx_to_pos = {int(active_union[k]): k for k in range(len(active_union))}
+
+    I3 = np.eye(3)
+
+    # Row accumulators — mirrors build_dx_terms exactly.
+    A_d_obj_rows, c_d_obj_rows = [], []
+    Adxi_d_rows = []
+    B_x_obj_rows, r_x_obj_rows = [], []
+    Bdxi_x_rows = []
+
+    A_d_flr_rows, c_d_flr_rows = [], []
+    B_x_flr_rows, r_x_flr_rows = [], []
+
+    # --- Object channel (object-local frame) ---
+    for i in np.where(active_obj)[0]:
+        alpha = alpha_obj[i]
+        w = alpha / (L_obj ** 2 * Nk[i])
+        Ji = jacs[idx_to_pos[i]]
+        Jloc = Robj.T @ Ji                    # (3, nv_a)
+        n0 = np.asarray(fobj.direction[i], dtype=float)
+        d0 = float(fobj.distance[i])
+        x0 = np.asarray(fobj.witness[i], dtype=float)
+
+        if has_dxi:
+            Bobj_i = Robj.T @ np.hstack([I3, -_skew(P[i])])   # (3, 6)
+
+        if lambda_d > 0:
+            g = float(np.sign(d0)) * n0
+            sw = float(np.sqrt(lambda_d * w))
+            A_d_obj_rows.append(sw * (g @ Jloc))               # (nv_a,)
+            c_d_obj_rows.append(sw * float(d_obj_ref[i] - d0))
+            if has_dxi:
+                Adxi_d_rows.append(sw * (g @ Bobj_i))          # (6,)
+
+        if lambda_x > 0:
+            sw = float(np.sqrt(lambda_x * w))
+            Pi0 = I3 - np.outer(n0, n0)
+            B_x_obj_rows.append(sw * (Pi0 @ Jloc))             # (3, nv_a)
+            r_x_obj_rows.append(sw * Pi0 @ (np.asarray(x_obj_ref[i], dtype=float) - x0))
+            if has_dxi:
+                Bdxi_x_rows.append(sw * (Pi0 @ Bobj_i))        # (3, 6)
+
+    # --- Floor channel (world frame) ---
+    for i in np.where(active_flr)[0]:
+        alpha = alpha_flr[i]
+        w = alpha / (L_flr ** 2 * Nk[i])
+        Ji = jacs[idx_to_pos[i]]
+        n0 = np.asarray(fflr.direction[i], dtype=float)
+        d0 = float(fflr.distance[i])
+        x0 = np.asarray(fflr.witness[i], dtype=float)
+
+        if lambda_d > 0:
+            g_flr = np.array([0.0, 0.0, 1.0])
+            sw = float(np.sqrt(lambda_d * w))
+            A_d_flr_rows.append(sw * (g_flr @ Ji))             # (nv_a,)
+            c_d_flr_rows.append(sw * float(d_flr_ref[i] - d0))
+
+        if lambda_x > 0:
+            sw = float(np.sqrt(lambda_x * w))
+            Pi0 = I3 - np.outer(n0, n0)
+            B_x_flr_rows.append(sw * (Pi0 @ Ji))               # (3, nv_a)
+            r_x_flr_rows.append(sw * Pi0 @ (np.asarray(x_flr_ref[i], dtype=float) - x0))
+
+    # --- Assemble ResidualBlocks ---
+    blocks = []
+
+    # Object D.
+    if A_d_obj_rows:
+        A_d_obj = np.array(A_d_obj_rows)    # (K_d_obj, nv_a)
+        c_d_obj = np.array(c_d_obj_rows)    # (K_d_obj,)
+        if has_dxi and Adxi_d_rows:
+            Adxi_d = np.array(Adxi_d_rows)  # (K_d_obj, 6)
+            # cost ‖A·dqa + A_obj·dxi + c‖²
+            # = ‖A_d_obj·dqa + (−Adxi_d)·dxi + (−c_d_obj)‖²
+            blocks.append(ResidualBlock(
+                A=A_d_obj, A_obj=-Adxi_d, c=-c_d_obj, name="W_d_obj"))
+        else:
+            blocks.append(ResidualBlock(
+                A=A_d_obj, c=-c_d_obj, name="W_d"))
+
+    # Object X.
+    if B_x_obj_rows:
+        B_x_obj = np.vstack(B_x_obj_rows)  # (3*K_x_obj, nv_a)
+        r_x_obj = np.concatenate(r_x_obj_rows)
+        if has_dxi and Bdxi_x_rows:
+            Bdxi_x = np.vstack(Bdxi_x_rows)  # (3*K_x_obj, 6)
+            blocks.append(ResidualBlock(
+                A=B_x_obj, A_obj=-Bdxi_x, c=-r_x_obj, name="W_x_obj"))
+        else:
+            blocks.append(ResidualBlock(
+                A=B_x_obj, c=-r_x_obj, name="W_x"))
+
+    # Floor D (robot-only; floor not movable).
+    if A_d_flr_rows:
+        A_d_flr = np.array(A_d_flr_rows)   # (K_d_flr, nv_a)
+        c_d_flr = np.array(c_d_flr_rows)
+        blocks.append(ResidualBlock(
+            A=A_d_flr, c=-c_d_flr, name="W_d"))
+
+    # Floor X.
+    if B_x_flr_rows:
+        B_x_flr = np.vstack(B_x_flr_rows)  # (3*K_x_flr, nv_a)
+        r_x_flr = np.concatenate(r_x_flr_rows)
+        blocks.append(ResidualBlock(
+            A=B_x_flr, c=-r_x_flr, name="W_x"))
+
+    return blocks
+
+
+def build_p_blocks(rt, q_pin: np.ndarray, t: int,
+                   obj_pose: np.ndarray,
+                   lambda_p: float, sigma_v: float, dt: float) -> list:
+    """Build ResidualBlock contact persistence (P) terms.
+
+    Numpy/solver-agnostic counterpart of :func:`build_p_terms`.  Emits
+    :class:`~HoloNew.src.test_socp.solve.spec.ResidualBlock` instances.
+
+    The mapping:
+      ``cp.sum_squares(B_p @ dqa - r_p)``
+      → ``ResidualBlock(A=B_p, c=-r_p, name="W_p")``
+
+    The P term has no object-DOF coupling (``A_obj=None`` always); the object
+    position enters only through the constant offset ``const_i`` and the
+    source reference ``dp_ref_loc``, both of which are absorbed into ``c``.
+
+    Args:
+        rt: TestSocpRetargeter instance.
+        q_pin: Pinocchio configuration vector.
+        t: Current frame index (must be >= 1).
+        obj_pose: (7,) [qw, qx, qy, qz, x, y, z] current object pose.
+        lambda_p: Weight for the persistence term.
+        sigma_v: Characteristic per-frame velocity (m/s).
+        dt: Time step (s).
+
+    Returns:
+        List containing at most one ResidualBlock.  Empty if no points have
+        gamma > 0.
+    """
+    state = rt._p_state
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
+    L_flr = getattr(rt, "L_floor", rt.smplx_ground_probe.margin)
+    scale_sq = _p_scale_sq(lambda_p, sigma_v, dt)
+
+    # Per-link point counts for 1/N_k normalisation.
+    n_links = len(corr.link_names)
+    link_counts = np.zeros(n_links, dtype=float)
+    for li in range(n_links):
+        link_counts[li] = float(np.sum(corr.link_idx == li))
+    Nk = link_counts[corr.link_idx]  # (M,)
+
+    # Current and previous object rotation/translation.
+    Robj_t = _robj_from_pose(obj_pose)
+    obj_t = np.asarray(obj_pose[4:7], dtype=float)
+    obj_prev_pose = state["obj_prev"]
+    Robj_tm1 = _robj_from_pose(obj_prev_pose)
+    obj_tm1 = np.asarray(obj_prev_pose[4:7], dtype=float)
+
+    # Current world positions of robot control points.
+    P = robot_control_points(rt, q_pin)
+
+    # Robot-side field.
+    fobj, fflr = query_entities(rt, P, obj_pose, margin_obj=L_obj, margin_flr=L_flr)
+
+    # Source references at t and t-1.
+    d_obj_ref_t,  _,  d_flr_ref_t,  _, p_ref_t   = frame_references(rt, t)
+    d_obj_ref_tm1, _, d_flr_ref_tm1, _, p_ref_tm1 = frame_references(rt, t - 1)
+
+    # Previous state.
+    d_prev_obj   = state["d_prev_obj"]
+    d_prev_flr   = state["d_prev_flr"]
+    a_prev_obj   = state["a_prev_obj"]
+    a_prev_flr   = state["a_prev_flr"]
+    p_prev_world = state["p_prev_world"]
+
+    dp_ref_world = p_ref_t - p_ref_tm1
+
+    # Activation masks.
+    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L_obj) for i in range(M)])
+    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L_flr) for i in range(M)])
+
+    def _hat_obj(d_prev_i):
+        return _activation(float(d_prev_i), L_obj)
+
+    def _hat_flr(d_prev_i):
+        return _activation(float(d_prev_i), L_flr)
+
+    gamma_obj = np.minimum(np.minimum(alpha_obj_t, a_prev_obj),
+                           np.array([_hat_obj(d_prev_obj[i]) for i in range(M)]))
+    active_obj = (gamma_obj > 0) & np.asarray(fobj.active, dtype=bool)
+
+    gamma_flr = np.minimum(np.minimum(alpha_flr_t, a_prev_flr),
+                           np.array([_hat_flr(d_prev_flr[i]) for i in range(M)]))
+    active_flr = (gamma_flr > 0) & np.asarray(fflr.active, dtype=bool)
+
+    active_union = np.where(active_obj | active_flr)[0]
+    if active_union.size == 0:
+        return []
+
+    # Batched Jacobian computation.
+    link_names_active = [corr.link_names[corr.link_idx[i]] for i in active_union]
+    offsets_active = corr.offset_local[active_union]
+    jacs_full = rt.pin.point_jacobians(q_pin, link_names_active, offsets_active)
+    jacs = [J[:, rt.v_a_indices] for J in jacs_full]
+    idx_to_pos = {int(active_union[k]): k for k in range(len(active_union))}
+
+    I3 = np.eye(3)
+
+    B_p_rows = []
+    r_p_rows = []
+
+    # --- Object channel (object-local frame) ---
+    for i in np.where(active_obj)[0]:
+        gamma = gamma_obj[i]
+        w = gamma / Nk[i]
+        Ji = jacs[idx_to_pos[i]]
+        Jloc = Robj_t.T @ Ji
+
+        n0 = np.asarray(fobj.direction[i], dtype=float)
+        Pi0 = I3 - np.outer(n0, n0)
+
+        p_prev_local_i = Robj_tm1.T @ (p_prev_world[i] - obj_tm1)
+        const_i = Robj_t.T @ (P[i] - obj_t) - p_prev_local_i
+
+        p_ref_t_loc   = Robj_t.T @ (p_ref_t[i] - obj_t)
+        p_ref_tm1_loc = Robj_tm1.T @ (p_ref_tm1[i] - obj_tm1)
+        dp_ref_loc    = p_ref_t_loc - p_ref_tm1_loc
+
+        rhs_const = Pi0 @ (dp_ref_loc - const_i)
+        sw = float(np.sqrt(scale_sq * w))
+        B_p_rows.append(sw * (Pi0 @ Jloc))   # (3, nv_a)
+        r_p_rows.append(sw * rhs_const)       # (3,)
+
+    # --- Floor channel (world frame) ---
+    for i in np.where(active_flr)[0]:
+        gamma = gamma_flr[i]
+        w = gamma / Nk[i]
+        Ji = jacs[idx_to_pos[i]]
+        n0 = np.asarray(fflr.direction[i], dtype=float)
+        Pi0 = I3 - np.outer(n0, n0)
+
+        const_i   = P[i] - p_prev_world[i]
+        dp_ref_i  = dp_ref_world[i]
+        rhs_const = Pi0 @ (dp_ref_i - const_i)
+
+        sw = float(np.sqrt(scale_sq * w))
+        B_p_rows.append(sw * (Pi0 @ Ji))      # (3, nv_a)
+        r_p_rows.append(sw * rhs_const)        # (3,)
+
+    if not B_p_rows:
+        return []
+
+    B_p = np.vstack(B_p_rows)      # (3*K, nv_a)
+    r_p = np.concatenate(r_p_rows) # (3*K,)
+    return [ResidualBlock(A=B_p, c=-r_p, name="W_p")]
