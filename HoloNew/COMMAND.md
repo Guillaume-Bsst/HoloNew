@@ -183,6 +183,29 @@ python examples/view_stages.py
 # Viewer at http://localhost:8080 — Enter in the terminal to exit.
 ```
 
+#### 3-path façade on the stage viewer (OMOMO mixed / HOI-M3)
+
+`view_stages.py` accepts the same `--dataset` + `--model-path` / `--motion-path`
+(/ `--obj-path`) façade as `robot_retarget.py`. When `--dataset` is set, the three
+paths are normalized into the internal load fields, so all selected methods
+(holosoma / GMR-SOCP / TEST-SOCP) run on the chosen sequence. HOI-M3's raw SMPL-X is
+prepped once (cached) into the processed format the smplx path consumes. Paths below
+are our current local config.
+
+```bash
+# OMOMO (motion from the new .pt, betas from the non-new pickle), all three methods
+python examples/view_stages.py --dataset omomo --task-type robot_only \
+  --model-path  /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO/data/train_diffusion_manip_seq_joints24.p \
+  --motion-path demo_data/OMOMO_new/sub3_largebox_003.pt \
+  --methods gmr_socp test_socp
+
+# HOI-M3 (raw SMPL-X; --model-path is the SMPL-X body-model dir)
+python examples/view_stages.py --dataset hoim3 --task-type robot_only \
+  --model-path  /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx \
+  --motion-path /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/smplx/subject01_baseball.npz \
+  --methods test_socp --max-frames 200
+```
+
 Use `--methods` to solve only a subset instead of all three. Choices:
 `holosoma`, `gmr_socp`, `test_socp` (space-separated, order preserved).
 

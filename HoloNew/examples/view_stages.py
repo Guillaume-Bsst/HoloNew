@@ -77,6 +77,14 @@ def view(cfg: ViewStagesConfig) -> None:
     if not cfg.methods:
         raise ValueError("--methods must select at least one optimizer")
 
+    # 3-path façade: when --dataset is set, translate model/motion/obj paths into the
+    # legacy data_path/task_name/data_format (+ omomo_dir) fields, then clear `dataset`
+    # so every method below (holosoma via run_headless->main, GMR/TEST via from_config)
+    # loads uniformly through those normalized fields.
+    from HoloNew.src.data_loaders.facade import normalize_dataset_cfg
+    normalize_dataset_cfg(cfg)
+    cfg.dataset = None
+
     data_format = cfg.data_format or DEFAULT_DATA_FORMATS[cfg.task_type]
 
     # Keep the nested configs consistent with the top-level selections, the same
