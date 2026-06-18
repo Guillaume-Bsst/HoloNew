@@ -111,7 +111,8 @@ class Viewer:
                  object_sdf_floor_cols: np.ndarray | None = None,
                  interaction_L_floor: float = CONTACT_MARGIN_M,
                  interaction_L_object: float = CONTACT_MARGIN_M,
-                 human_body: object | None = None) -> None:
+                 human_body: object | None = None,
+                 human_smpl_order: bool = False) -> None:
         # Contact bands used for the overlays' active masks + colour scales, per channel
         # (the run's L_floor / L_object), so the viewer matches what the solver activates.
         self._L_flr = float(interaction_L_floor)
@@ -144,6 +145,10 @@ class Viewer:
         self.object_sdf_floor_pts = object_sdf_floor_pts
         self.object_sdf_floor_cols = object_sdf_floor_cols
         self.human_body = human_body
+        # True when original_quats are the 22 SMPL-order global orientations (smplx
+        # path) -> pose the mesh via placed_verts_smpl; False for the 52-joint
+        # MuJoCo-order quats of the smplh .pt path (placed_verts).
+        self._human_smpl_order = human_smpl_order
         self._smplx_handle = None
         # Persistent object handles, updated in place each frame (never removed/recreated)
         # so the object does not flicker during playback, like the SMPL-X mesh.
@@ -455,7 +460,11 @@ class Viewer:
         raw_pelvis = self.original_joints[frame, 0]
         # placed_verts caches by frame; a stage only shifts the mesh rigidly, so pose once
         # at the raw pelvis (cache hit on toggles) then translate onto the stage's root.
-        base = self.human_body.placed_verts(self.original_quats[frame], raw_pelvis, frame_idx=frame)
+        # smplx sources carry 22 SMPL-order orientations (placed_verts_smpl); the smplh
+        # .pt path carries 52 MuJoCo-order quats (placed_verts).
+        pose_fn = (self.human_body.placed_verts_smpl if self._human_smpl_order
+                   else self.human_body.placed_verts)
+        base = pose_fn(self.original_quats[frame], raw_pelvis, frame_idx=frame)
         verts = (base + (self._active_human_pelvis(frame) - raw_pelvis)).astype(np.float32)
         if self._smplx_handle is None:
             self._smplx_handle = self.server.scene.add_mesh_simple(

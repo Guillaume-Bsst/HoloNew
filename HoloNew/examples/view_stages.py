@@ -108,20 +108,35 @@ def view(cfg: ViewStagesConfig) -> None:
         cfg.task_type, data_format, cfg.data_path, cfg.task_name, constants, cfg.motion_data_config
     )
 
-    # Per-joint quaternions only exist for the smplh .pt format; the SMPL-X mesh
-    # needs them. Everything else degrades gracefully to skeleton-only.
+    # Per-joint orientations drive the SMPL-X mesh. The smplh .pt path carries the 52
+    # MuJoCo-order quats; the smplx path carries the 22 SMPL-order global orientations
+    # (from the processed npz), posed via placed_verts_smpl. Without them the viewer
+    # degrades to skeleton-only.
     original_quats = None
+    smpl_order = data_format == "smplx"
+    smplx_betas, smplx_gender = None, "neutral"
     if data_format == "smplh":
         try:
             original_quats = load_intermimic_quats(str(cfg.data_path / f"{cfg.task_name}.pt"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("No per-joint quats (%s); SMPL-X mesh disabled.", exc)
+    elif data_format == "smplx":
+        try:
+            _npz = np.load(str(cfg.data_path / f"{cfg.task_name}.npz"))
+            original_quats = np.asarray(_npz["global_joint_orientations"], dtype=np.float32)
+            if "betas" in _npz.files:
+                smplx_betas = np.asarray(_npz["betas"], dtype=np.float32)
+            if "gender" in _npz.files:
+                smplx_gender = str(_npz["gender"])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("No SMPL-X orientations (%s); SMPL-X mesh disabled.", exc)
 
     # SMPL-X shape (betas) + gender for this subject, read from the original OMOMO
     # .p files keyed by sequence name. Without them the mesh uses the neutral mean
     # shape. The .pt motion (OMOMO_new) does not carry betas, hence the separate dir.
+    # smplx clips carry their own betas in the npz, so this OMOMO lookup is smplh-only.
     betas, gender = None, "neutral"
-    if cfg.omomo_dir is not None:
+    if cfg.omomo_dir is not None and data_format == "smplh":
         betas, gender = load_human_metadata(cfg.omomo_dir, cfg.task_name)
         if betas is not None:
             logger.info("Loaded SMPL-X shape for %s: gender=%s, %d betas",
@@ -130,10 +145,14 @@ def view(cfg: ViewStagesConfig) -> None:
             logger.warning("No SMPL-X shape found for %s in %s; using neutral shape.",
                            cfg.task_name, cfg.omomo_dir)
 
+    # smplx subjects carry their own betas/gender in the npz; smplh reads them from the
+    # OMOMO metadata loaded above.
+    _mesh_betas = smplx_betas if data_format == "smplx" else betas
+    _mesh_gender = smplx_gender if data_format == "smplx" else gender
     human_body = None
     if original_quats is not None:
         try:
-            human_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, betas, gender)
+            human_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, _mesh_betas, _mesh_gender)
         except Exception as exc:  # noqa: BLE001
             logger.warning("SMPL-X unavailable (%s); mesh disabled.", exc)
 
@@ -392,6 +411,7 @@ def view(cfg: ViewStagesConfig) -> None:
         interaction_L_floor=_vL_flr,
         interaction_L_object=_vL_obj,
         human_body=human_body,
+        human_smpl_order=smpl_order,
     )
     viewer.bind_methods(methods)
     input("Stage viewer at http://localhost:8080 — Enter to exit ...")

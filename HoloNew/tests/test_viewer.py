@@ -104,6 +104,41 @@ def test_smplx_toggle_noop_without_body(robot_urdf):
     assert v._smplx_handle is None
     v.close()
 
+def test_smplx_mesh_smpl_order_poses_via_placed_verts_smpl(robot_urdf):
+    # smplx sources (22 SMPL-order orientations) must pose the mesh through
+    # placed_verts_smpl, not the 52-joint placed_verts.
+    import numpy as np
+    from HoloNew.src import skeleton
+    from HoloNew.src.viewer import Viewer, MethodViz
+
+    class FakeBody:
+        faces = np.zeros((1, 3), dtype=np.uint32)
+        def __init__(self):
+            self.smpl_calls = 0
+            self.verts_calls = 0
+        def placed_verts_smpl(self, quats, pelvis, frame_idx=None):
+            self.smpl_calls += 1
+            return np.zeros((3, 3), dtype=np.float32) + pelvis
+        def placed_verts(self, quats, pelvis, frame_idx=None):
+            self.verts_calls += 1
+            return np.zeros((3, 3), dtype=np.float32) + pelvis
+
+    oj = np.zeros((3, 22, 3), dtype=np.float32)
+    oq = np.zeros((3, 22, 4), dtype=np.float32); oq[..., 0] = 1.0
+    body = FakeBody()
+    m = MethodViz(label="TEST-SOCP", robot_key="test_socp",
+                  qpos=np.zeros((3, 36)), stages={"Original": oj})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("test_socp",), original_joints=oj, original_quats=oq,
+               original_bones=skeleton.SMPLX_BODY_BONES,
+               human_body=body, human_smpl_order=True)
+    v.bind_methods([m])
+    v._stage_dd.value = "Original"; v._tog_smplx.value = True
+    v._redraw(0)
+    assert body.smpl_calls >= 1 and body.verts_calls == 0
+    assert v._smplx_handle is not None
+    v.close()
+
 def test_ghost_overlays_skeleton_stage(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
