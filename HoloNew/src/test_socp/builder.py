@@ -135,6 +135,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     kwargs["n_iter_first"] = sc.n_iter_first
     kwargs["n_iter_per_frame"] = sc.n_iter_per_frame
     kwargs["iterate_step_tol"] = sc.iterate_step_tol
+    kwargs["solve_backend"] = sc.solve_backend
     # Floor-as-entity and object-scene loading pass straight through, like every other
     # field: the builder applies NO hidden rewrites or presets.
     kwargs["load_object_scene"] = sc.load_object_scene

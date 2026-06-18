@@ -26,25 +26,28 @@ def test_difference_and_jacobian_consistent():
 
 
 def test_wr_term_matches_numpy():
-    import cvxpy as cp
     rt, pm = _pm()
-    from HoloNew.src.test_socp.temporal import build_temporal_term
+    from HoloNew.src.test_socp.temporal import build_temporal_block
     q_tm2 = pm.qpos_mj_to_q_pin(rt.q_init_full[:36])
     rng = np.random.default_rng(1)
     q_tm1 = pin.integrate(pm.model, q_tm2, 0.03 * rng.standard_normal(pm.model.nv))
     q_t0  = pin.integrate(pm.model, q_tm1, 0.03 * rng.standard_normal(pm.model.nv))
-    dqa = cp.Variable(rt.nv_a); val = 0.01 * rng.standard_normal(rt.nv_a); dqa.value = val
+    val = 0.01 * rng.standard_normal(rt.nv_a)
     lam, s_q, s_V, dt = 2.0, 0.5, 0.5, 1.0 / 30.0
-    term = build_temporal_term(rt, q_t0, q_tm1, q_tm2, dqa, lam, s_q, s_V, dt)
+    blocks = build_temporal_block(rt, q_t0, q_tm1, q_tm2, lam, s_q, s_V, dt)
+    assert len(blocks) == 1
+    # block cost at dqa=val: ||A @ val + c||^2
+    b = blocks[0]
+    block_val = float(np.sum((b.A @ val + b.c) ** 2))
     # ground truth: v_t(dqa) = difference(q_tm1, integrate(q_t0, v_full)); accel = (v_t - v_tm1)/dt^2
     v_full = np.zeros(pm.model.nv); v_full[rt.v_a_indices] = val
     v_t = pin.difference(pm.model, q_tm1, pin.integrate(pm.model, q_t0, v_full))
     v_tm1 = pin.difference(pm.model, q_tm2, q_tm1)
     w = np.ones(pm.model.nv) / s_q**2; w[:6] = 1.0 / s_V**2     # base rows use sigma_V
     gt = lam * float(np.sum(w * ((v_t - v_tm1) / dt**2) ** 2))
-    # rtol=5e-6: the term uses the first-order linearisation of pin.difference while the
+    # rtol=5e-6: the block uses the first-order linearisation while the
     # ground truth evaluates it exactly; the O(||dqa||^2) residual sets the floor.
-    np.testing.assert_allclose(float(term.value), gt, rtol=5e-6)
+    np.testing.assert_allclose(block_val, gt, rtol=5e-6)
 
 
 def test_wr_when_enabled_uses_tuned_weight_and_solve_stays_finite():

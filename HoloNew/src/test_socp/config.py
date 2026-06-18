@@ -43,10 +43,10 @@ class TestSocpRetargeterConfig(RetargeterConfig):
 
     # [GMR] per-point position / orientation tracking (values in IK_MATCH_TABLE1/2). Core objective.
     activate_pos_tracking: bool = True
-    lambda_pos: float = 1.0
+    lambda_pos: float = 0.2
     sigma_p: float = 1.0
     activate_rot_tracking: bool = True
-    lambda_rot: float = 1.0
+    lambda_rot: float = 0.2
     sigma_rot: float = 1.0
 
     # [HOLO] General joint-space regularizers (flat ports of Holosoma's regularization
@@ -88,9 +88,9 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # points query each target's signed field (floor always + object). D = normal
     # proximity, X = tangential placement, P = soft persistence. sigma_v scales P.
     activate_wd: bool = True
-    lambda_d: float = 10.0
+    lambda_d: float = 5.0
     activate_wx: bool = True
-    lambda_x: float = 10.0
+    lambda_x: float = 5.0
     activate_wp: bool = False
     lambda_p: float = 1.0       # seed; P now (σ_v·dt)²-normalized
     sigma_v: float = 0.05
@@ -98,10 +98,10 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # robot block above; needs activate_tm). Object surface points query the floor field
     # (object↔floor); object↔object pairs are a TODO (no multi-object data yet). Set all
     # three activate_*_obj to False to disable the object-interaction channel.
-    activate_wd_obj: bool = False
-    lambda_d_obj: float = 10.0
-    activate_wx_obj: bool = False
-    lambda_x_obj: float = 10.0
+    activate_wd_obj: bool = True
+    lambda_d_obj: float = 50.0
+    activate_wx_obj: bool = True
+    lambda_x_obj: float = 50.0
     activate_wp_obj: bool = False
     lambda_p_obj: float = 1.0
     sigma_v_obj: float = 0.05
@@ -109,7 +109,7 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # object-SDF bake band, the field QUERY margin (so distances are not clamped before L),
     # and the per-channel activation range. Raising it lets contacts engage farther; the
     # object SDF is rebaked + disk-cached on demand, keyed by (L, sdf_resolution).
-    L_interaction: float = 0.10
+    L_interaction: float = 0.20
     # [TEST] per-entity field range Lⱼ (activation distance AND positional scale) — optional
     # overrides of L_interaction. None = inherit L_interaction (then the probe margin).
     L_floor: float | None = None
@@ -203,3 +203,5 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     # step_size: SOC trust-region radius ||dqa|| <= step_size per SQP iteration. Re-surfaced
     # from the inherited RetargeterConfig.
     step_size: float = 0.2
+    # [TEST] which solve backend turns the assembled ProblemSpec into a step.
+    solve_backend: str = "cvxpy"

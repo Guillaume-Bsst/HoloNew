@@ -19,7 +19,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import ModuleType
 
-import cvxpy as cp
 import mujoco
 import numpy as np
 import pinocchio as pin
@@ -123,6 +122,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         L_floor: float | None = None,
         L_object: float | None = None,
         sdf_resolution: float = 0.01,
+        solve_backend: str = "cvxpy",
         **_ignored,
     ):
         """Initialise the retargeter from task constants.
@@ -142,6 +142,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         self.task_constants = task_constants
         self.activate_joint_limits = activate_joint_limits
         self.step_size = step_size
+        # Backend that turns each assembled ProblemSpec into a solved step.
+        from HoloNew.src.test_socp.solve.backend import make_backend
+        self.solve_backend = solve_backend
+        self._backend = make_backend(self.solve_backend)
         # SQP inner iterations per pass: more on the first frame (cold start), fewer after.
         self.n_iter_first = n_iter_first
         self.n_iter_per_frame = n_iter_per_frame
@@ -515,15 +519,25 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # builders (D/X, persistence, centroidal, L_ref, ...) instead of ~9x.
         _q_pin = self.pin.qpos_mj_to_q_pin(q[:36])
 
-        dqa = cp.Variable(self.nv_a, name="dqa")
+        from HoloNew.src.test_socp.solve.spec import (
+            LinearConstraint, ProblemSpec, ResidualBlock)
+        from HoloNew.src.test_socp.solve.constraints import (
+            box_freeze_limits, trust_regions as _build_trust_regions)
 
-        obj_terms = []
+        # Object tangent DOFs: 6 whenever movable is on and an object pose is present,
+        # so the W^o term and the bilateral D/X term share the same dxi variable.
+        n_obj = 6 if (self.activate_tm and obj_pose is not None) else 0
+        has_dxi = n_obj > 0
+
+        residuals: list = []
+        constraints: list = []
+
         # World-frame tracking (GMR): always runs; gated per body by activate_pos/rot.
         # Global priority λ + characteristic scale σ folded per channel (defaults 1.0
-        # => effective weight == legacy w_p/w_r). See tracking.build_tracking_terms.
-        from HoloNew.src.test_socp.tracking import build_tracking_terms
-        obj_terms.extend(build_tracking_terms(
-            self, frame_targets, dqa, q,
+        # => effective weight == legacy w_p/w_r). See tracking.build_tracking_blocks.
+        from HoloNew.src.test_socp.tracking import build_tracking_blocks
+        residuals.extend(build_tracking_blocks(
+            self, frame_targets, q,
             lambda_pos=self.lambda_pos, sigma_p=self.sigma_p,
             lambda_rot=self.lambda_rot, sigma_rot=self.sigma_rot,
             activate_pos=self.activate_pos_tracking,
@@ -531,40 +545,14 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
 
         # W^s Style: pelvis-relative joint-orientation matching (S_k) + pelvis
         # tilt against gravity (S_B), each residual divided by σ_R. See style.py.
-        from HoloNew.src.test_socp.style import build_style_terms
-        obj_terms.extend(build_style_terms(
-            self, q, frame_targets, dqa,
+        from HoloNew.src.test_socp.style import build_style_blocks
+        residuals.extend(build_style_blocks(
+            self, q, frame_targets,
             lambda_ws=self.lambda_ws, sigma_R=self.sigma_R,
             style_weights=getattr(self, "style_weights", None)))
 
-        constraints = [cp.SOC(self.step_size, dqa)]
-        # §1 Variables: freeze q_a (joints) or T_B (base) by pinning their tangent block
-        # to zero. dqa is indexed by self.v_a_indices; tangent index < 6 is the floating
-        # base, >= 6 are the actuated joints.
-        if not self.activate_tb:
-            _base = np.where(self.v_a_indices < 6)[0]
-            if _base.size:
-                constraints.append(dqa[_base] == 0)
-        if not self.activate_qa:
-            _joints = np.where(self.v_a_indices >= 6)[0]
-            if _joints.size:
-                constraints.append(dqa[_joints] == 0)
-        if self.activate_joint_limits:
-            # Tangent-space joint limit box: precomputed absolute bounds minus
-            # current joint values.  For hinge/slide joints, the pinocchio tangent
-            # increment equals (target - current) directly (same as subtraction).
-            # Base DOFs (tangent 0:6) use large bounds and are effectively unconstrained.
-            # Tangent index vi >= 6 maps to pinocchio q index vi + 1 (offset by 1
-            # because the root FREE joint occupies 7 qpos DOFs but only 6 velocity DOFs).
-            q_pin_cur = _q_pin
-            lo = np.copy(self._v_a_lb)
-            hi = np.copy(self._v_a_ub)
-            joint_mask = self.v_a_indices >= 6
-            vi_joints = self.v_a_indices[joint_mask]       # tangent indices for joints
-            q_pin_vals = q_pin_cur[vi_joints + 1]          # q_pin at corresponding qpos idx
-            lo[joint_mask] -= q_pin_vals
-            hi[joint_mask] -= q_pin_vals
-            constraints += [dqa >= lo, dqa <= hi]
+        # §1 Variables freeze (q_a / T_B) + actuated joint-limit box, as LinearConstraints.
+        constraints += box_freeze_limits(self, _q_pin)
 
         # Foot constraints (sticking + foot lock window Z pinning) — holosoma-style, default off
         apply_foot_sticking = (self.q_a_init_idx < 12) and self.activate_foot_sticking and foot_sticking is not None
@@ -595,10 +583,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
 
                         # J_WF is already (3, nv_a) from _calc_manipulator_jacobians.
                         Jxy = J_WF[:2, :]  # (2, nv_a)
-                        constraints += [
-                            Jxy @ dqa >= p_lb[:2],
-                            Jxy @ dqa <= p_ub[:2],
-                        ]
+                        constraints.append(LinearConstraint(
+                            A=Jxy, lb=p_lb[:2], ub=p_ub[:2], name="foot_stick"))
 
             # Foot lock windows: pin Z to floor within configured frame ranges
             if apply_foot_lock:
@@ -610,10 +596,11 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                     z_delta = z_anchor - p_WF_dict[key][2]
                     # J_WF is already (3, nv_a) from _calc_manipulator_jacobians.
                     Jz = J_WF[2, :]  # (nv_a,)
-                    constraints += [
-                        Jz @ dqa >= z_delta - self.foot_lock.tolerance,
-                        Jz @ dqa <= z_delta + self.foot_lock.tolerance,
-                    ]
+                    constraints.append(LinearConstraint(
+                        A=Jz[None, :],
+                        lb=np.array([z_delta - self.foot_lock.tolerance]),
+                        ub=np.array([z_delta + self.foot_lock.tolerance]),
+                        name="foot_lock"))
 
         # Self-collision constraints (holosoma-style, default off)
         if self.activate_self_collision and self._self_collision_enabled:
@@ -625,7 +612,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 Ja_n = Ja_n_full[self.v_a_indices]  # (nv_a,)
                 # Enforce: new_distance >= tolerance  =>  phi + J @ dqa >= tol
                 rhs = self._self_collision_tolerance - phi
-                constraints += [Ja_n @ dqa >= rhs]
+                constraints.append(LinearConstraint(
+                    A=Ja_n[None, :], lb=np.array([rhs]), name="self_collision"))
 
         # Non-penetration constraints (holosoma-style, default off)
         if self.activate_obj_non_penetration:
@@ -635,30 +623,22 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 Ja_n = Ja_n_full[self.v_a_indices]  # (nv_a,)
                 # Enforce: phi + J @ dqa >= -tol  (keep signed distance above -tolerance).
                 rhs = -phi - self.penetration_tolerance
-                constraints += [Ja_n @ dqa >= rhs]
-
-        # Brick 5 — Object tangent variable: created whenever movable is on and an
-        # object pose is present, so both the W^o term and the bilateral D/X term
-        # share the SAME dxi_obj variable.  The trust-region SOC is added here so
-        # the step size is bounded regardless of which downstream terms use dxi_obj.
-        dxi_obj = None
-        if self.activate_tm and obj_pose is not None:
-            dxi_obj = cp.Variable(6, name="dxi_obj")
-            constraints.append(cp.SOC(self.step_size, dxi_obj))
+                constraints.append(LinearConstraint(
+                    A=Ja_n[None, :], lb=np.array([rhs]), name="nonpen_mj"))
 
         # D + X interaction terms (default off; only active when weights > 0). The floor
         # is always a target, so the only asset needed is the ground field + correspondence;
-        # the object channel inside build_dx_terms is self-gated on obj_pose.
+        # the object channel inside build_dx_blocks is self-gated on obj_pose.
         if (self.lambda_d > 0 or self.lambda_x > 0) \
                 and getattr(self, "correspondence", None) is not None \
                 and getattr(self, "smplx_ground_probe", None) is not None:
-            from HoloNew.src.test_socp.interaction import build_dx_terms
+            from HoloNew.src.test_socp.interaction import build_dx_blocks
             q_pin = _q_pin
-            # Pass dxi_obj for bilateral coupling when the object is a variable.
-            # When dxi_obj is None (movable off), behaviour is unchanged.
-            obj_terms += build_dx_terms(self, q_pin, dqa, frame_idx, obj_pose,
-                                        self.lambda_d, self.lambda_x,
-                                        dxi=dxi_obj)
+            # has_dxi gives the object channel its bilateral A_obj coupling when the
+            # object is a variable; otherwise it emits robot-only blocks (A_obj=None).
+            residuals += build_dx_blocks(self, q_pin, frame_idx, obj_pose,
+                                         self.lambda_d, self.lambda_x,
+                                         has_dxi=has_dxi)
 
         # P (contact persistence) terms (default off; requires cross-frame state
         # from the previous solved frame, so only active at frame >= 1).
@@ -667,10 +647,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and getattr(self, "smplx_ground_probe", None) is not None \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
-            from HoloNew.src.test_socp.interaction import build_p_terms
+            from HoloNew.src.test_socp.interaction import build_p_blocks
             q_pin = _q_pin
-            obj_terms += build_p_terms(self, q_pin, dqa, frame_idx, obj_pose,
-                                       self.lambda_p, self.sigma_v, self._dt)
+            residuals += build_p_blocks(self, q_pin, frame_idx, obj_pose,
+                                        self.lambda_p, self.sigma_v, self._dt)
 
         # Contact persistence hard tangential band constraint (default off).
         # Enforces no-slip per carrier instead of the soft P cost. Requires the
@@ -680,10 +660,10 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and getattr(self, "smplx_ground_probe", None) is not None \
                 and frame_idx >= 1 \
                 and getattr(self, "_p_state", None) is not None:
-            from HoloNew.src.test_socp.interaction import build_p_constraints
+            from HoloNew.src.test_socp.interaction import build_p_constraint_blocks
             q_pin = _q_pin
-            constraints += build_p_constraints(self, q_pin, dqa, frame_idx, obj_pose,
-                                               self.persistence_tol)
+            constraints += build_p_constraint_blocks(self, q_pin, frame_idx, obj_pose,
+                                                     self.persistence_tol)
 
         # Object-surface non-penetration (paper's d_{i,j} >= 0 for the object).
         # Hard inequality so robot points cannot pass through the object surface;
@@ -693,22 +673,23 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 and getattr(self, "object_sdf", None) is not None \
                 and obj_pose is not None \
                 and getattr(self, "correspondence", None) is not None:
-            from HoloNew.src.test_socp.interaction import build_obj_surface_nonpen_constraints
+            from HoloNew.src.test_socp.interaction import build_obj_surface_nonpen_blocks
             q_pin = _q_pin
-            constraints += build_obj_surface_nonpen_constraints(
-                self, q_pin, dqa, frame_idx, obj_pose, dxi=dxi_obj,
-                tol=self.obj_surface_nonpen_tol)
+            _surf_cons = build_obj_surface_nonpen_blocks(
+                self, q_pin, frame_idx, obj_pose, tol=self.obj_surface_nonpen_tol,
+                has_dxi=has_dxi)
+            constraints += _surf_cons
 
         # Temporal regularization W^r (default off; only active when lambda_r > 0
         # and two previous frames are available).
         if self.lambda_r > 0 and q_t_last is not None and q_t_last2 is not None:
-            from HoloNew.src.test_socp.temporal import build_temporal_term
+            from HoloNew.src.test_socp.temporal import build_temporal_block
             q_pin0 = _q_pin
             q_pin1 = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
             q_pin2 = self.pin.qpos_mj_to_q_pin(q_t_last2[:36])
-            obj_terms += [build_temporal_term(self, q_pin0, q_pin1, q_pin2, dqa,
+            residuals += build_temporal_block(self, q_pin0, q_pin1, q_pin2,
                                               self.lambda_r, self.sigma_qddot,
-                                              self.sigma_Vdot, self._dt)]
+                                              self.sigma_Vdot, self._dt)
 
         # Centroidal W^c / W^c_pos / W^L terms (Brick 4, default off).
         # W^c and W^L require two prior solved CoMs (frame_idx >= 2).
@@ -735,16 +716,16 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
                 frame_idx >= 1 and q_t_last is not None and cdot_ref is not None
             ) else 0.0
             if self.lambda_c_pos > 0 or _lam_c_eff > 0 or _lam_L_eff > 0 or _lam_cv_eff > 0:
-                from HoloNew.src.test_socp.centroidal import build_centroidal_terms
+                from HoloNew.src.test_socp.centroidal import build_centroidal_blocks
                 q_t0 = _q_pin
                 q_tm1 = (self.pin.qpos_mj_to_q_pin(q_t_last[:36])
                          if q_t_last is not None else q_t0)
                 _cddot_ref_eff = cddot_ref if cddot_ref is not None else np.zeros(3)
                 _c_tm1_eff = c_tm1 if c_tm1 is not None else self.pin.com(q_t0)
                 _c_tm2_eff = c_tm2 if c_tm2 is not None else self.pin.com(q_t0)
-                obj_terms += build_centroidal_terms(
+                residuals += build_centroidal_blocks(
                     self, q_t0, q_tm1, _c_tm1_eff, _c_tm2_eff,
-                    _cddot_ref_eff, c_ref, dqa,
+                    _cddot_ref_eff, c_ref,
                     _lam_c_eff, self.lambda_c_pos, _lam_L_eff,
                     self._dt,
                     sigma_a=self.sigma_a, sigma_L=self.sigma_L,
@@ -757,35 +738,35 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         if (self.activate_wl_track
                 and getattr(self, "_L_ref_all", None) is not None
                 and frame_idx >= 1 and q_t_last is not None):
-            from HoloNew.src.test_socp.centroidal import build_lumped_L_term
+            from HoloNew.src.test_socp.centroidal import build_lumped_L_block
             q_pin_cur = _q_pin
             q_pin_prev = self.pin.qpos_mj_to_q_pin(q_t_last[:36])
-            obj_terms.append(build_lumped_L_term(
-                self, q_pin_cur, q_pin_prev, dqa, self._lumped_frames,
+            residuals += build_lumped_L_block(
+                self, q_pin_cur, q_pin_prev, self._lumped_frames,
                 self._lumped_masses, self._L_ref_all[frame_idx],
                 self.lambda_l_track, self._dt,
-                sigma_L=self.sigma_L))
+                sigma_L=self.sigma_L)
 
         # W^o object motion regularization (Brick 5, default off).
-        # dxi_obj was already created above; the W^o cost is added when the two
-        # prior object poses and at least one lambda are available (frame_idx >= 2).
-        if (dxi_obj is not None
+        # The W^o cost is added when the object is a variable, the two prior object
+        # poses and at least one lambda are available (frame_idx >= 2).
+        if (has_dxi
                 and obj_pose_tm1 is not None
                 and obj_pose_tm2 is not None
                 and self.lambda_o > 0
                 and frame_idx >= 2):
-            from HoloNew.src.test_socp.movable import build_wo_term, pose_to_se3
+            from HoloNew.src.test_socp.movable import build_wo_block, pose_to_se3
             T_obj0 = pose_to_se3(obj_pose)
             T_obj_tm1 = pose_to_se3(obj_pose_tm1)
             T_obj_tm2 = pose_to_se3(obj_pose_tm2)
             _vdot_ref = vdot_ref_obj if vdot_ref_obj is not None else np.zeros(3)
             _omega_ref = omega_ref_obj if omega_ref_obj is not None else np.zeros(3)
-            obj_terms.append(build_wo_term(
+            residuals += build_wo_block(
                 T_obj0, T_obj_tm1, T_obj_tm2,
                 _vdot_ref, _omega_ref,
-                dxi_obj, self.lambda_o, self._dt,
+                self.nv_a, self.lambda_o, self._dt,
                 sigma_ao=self.sigma_ao, sigma_omega=self.sigma_omega,
-            ))
+            )
 
         # W^o position anchor: pins the absolute object position to the reference
         # path. W^o regularizes only object acceleration/velocity (position-blind),
@@ -793,109 +774,112 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         # while still matching the reference acceleration. This anchor cures that
         # drift. Needs no object history, so it fires whenever the object is a
         # variable (all frames), unlike the frame_idx>=2 W^o term above.
-        if (dxi_obj is not None
+        if (has_dxi
                 and obj_pose is not None
                 and self.lambda_o_pos > 0):
             from HoloNew.src.test_socp.movable import (
-                build_wo_position_anchor, pose_to_se3)
+                build_wo_position_anchor_block, pose_to_se3)
             # Anchor target is the REFERENCE position (obj_pose_ref), NOT the warm-start
             # obj_pose — otherwise the anchor would chase the drift instead of pinning it.
             _anchor_ref = obj_pose_ref if obj_pose_ref is not None else obj_pose
-            obj_terms.append(build_wo_position_anchor(
+            residuals += build_wo_position_anchor_block(
                 pose_to_se3(obj_pose), np.asarray(_anchor_ref[4:7], dtype=float),
-                dxi_obj, self.lambda_o_pos,
-            ))
+                self.nv_a, self.lambda_o_pos,
+            )
 
         # Object<->floor contact (paper's object-environment pair; inertia mode).
         # Places the object by its floor contact instead of a positional anchor:
         # near-floor object surface points resist breaking contact, vanishing when
         # the object is lifted (then placed by object<->robot + ballistic W^o).
-        if (dxi_obj is not None
+        if (has_dxi
                 and obj_pose is not None
                 and getattr(self, "object_surface_local", None) is not None
                 and (self.lambda_d_obj > 0 or self.lambda_x_obj > 0 or self.lambda_p_obj > 0)):
             from HoloNew.src.test_socp.movable import (
-                build_object_floor_terms, build_object_floor_persistence)
+                build_object_floor_blocks, build_object_floor_persistence_blocks)
             _L_floor = (self.L_floor
                         if self.smplx_ground_probe is not None else 0.1)
             # D/X: object surface points vs the floor field.
             if self.lambda_d_obj > 0 or self.lambda_x_obj > 0:
-                obj_terms += build_object_floor_terms(
-                    self, dxi_obj, obj_pose, self.lambda_d_obj, self.lambda_x_obj, _L_floor,
+                residuals += build_object_floor_blocks(
+                    self, obj_pose, self.lambda_d_obj, self.lambda_x_obj, _L_floor,
                     obj_pose_ref=obj_pose_ref)
             # P: tangential no-slip of the object on the floor, tracking the reference
             # object's slide. Needs the previous SOLVED pose + reference[t] & [t-1] (frame>=1).
             if (self.lambda_p_obj > 0 and obj_pose_tm1 is not None
                     and obj_pose_ref is not None and obj_pose_ref_tm1 is not None):
-                obj_terms += build_object_floor_persistence(
-                    self, dxi_obj, obj_pose, obj_pose_tm1, obj_pose_ref, obj_pose_ref_tm1,
+                residuals += build_object_floor_persistence_blocks(
+                    self, obj_pose, obj_pose_tm1, obj_pose_ref, obj_pose_ref_tm1,
                     self.lambda_p_obj, self.sigma_v_obj, _L_floor, self._dt)
 
         # W^smooth (native Holosoma): penalize the actuated-joint step deviating from
         # the step toward the previous frame's pose. Matches Holosoma's
         #   smooth_weight * ||dqa - (q_t_last_a - q_a_n_last)||^2
         # restricted to the actuated-joint columns of dqa (v_a tangent index >= 6).
+        # ResidualBlock ‖A·dqa + c‖²: A = √λ · selector(joint_cols), c = -√λ · dqa_smooth.
         if self.lambda_smooth > 0 and q_t_last is not None:
             joint_cols = np.where(self.v_a_indices >= 6)[0]      # joint tangent columns
             joint_qpos = self.v_a_indices[joint_cols] + 1        # tangent 6+j -> qpos 7+j
             dqa_smooth = q_t_last[joint_qpos] - q_a_n_last[joint_qpos]   # (n_joint,)
-            obj_terms.append(
-                self.lambda_smooth * cp.sum_squares(dqa[joint_cols] - dqa_smooth))
+            s = np.sqrt(self.lambda_smooth)
+            A = np.zeros((joint_cols.size, self.nv_a))
+            A[np.arange(joint_cols.size), joint_cols] = s
+            residuals.append(ResidualBlock(A=A, c=-s * dqa_smooth, name="W_smooth"))
 
         # W^qdiag (native Holosoma): per-joint regularizer on the absolute new joint
         # config. Matches Holosoma's ||sqrt(Q_diag) (dqa + q_a_n_last)||^2 on the
         # actuated joints (Q_diag from MANUAL_COST, 0 elsewhere).
+        # ResidualBlock: A = diag(sw) over joint_cols, c = sw · q_a_n_last[joint_qpos].
         if self.lambda_qdiag > 0:
             joint_cols = np.where(self.v_a_indices >= 6)[0]
             joint_qpos = self.v_a_indices[joint_cols] + 1
             sw = np.sqrt(self.lambda_qdiag * self._q_diag_joints[:joint_cols.size])
-            new_joints = dqa[joint_cols] + q_a_n_last[joint_qpos]
-            obj_terms.append(cp.sum_squares(cp.multiply(sw, new_joints)))
+            A = np.zeros((joint_cols.size, self.nv_a))
+            A[np.arange(joint_cols.size), joint_cols] = sw
+            residuals.append(ResidualBlock(
+                A=A, c=sw * q_a_n_last[joint_qpos], name="W_qdiag"))
 
         # W^nominal (native Holosoma): pull selected joints toward a nominal pose with
         # an exp-decaying weight over SQP iterations. Matches Holosoma's
         #   w_init*exp(-i/tau) * ||dqa[idx] - (q_nominal[idx] - q_a_n_last[idx])||^2.
         # Nominal defaults to q_init's joints (the per-frame nominal is wired at parity).
+        # ResidualBlock: A = √w_nom · selector(cols_sel), c = -√w_nom · target.
         if self.lambda_nominal > 0 and self._nominal_idx.size > 0:
             joint_cols = np.where(self.v_a_indices >= 6)[0]
             joint_qpos = self.v_a_indices[joint_cols] + 1
             cols_sel = joint_cols[self._nominal_idx]
             qpos_sel = joint_qpos[self._nominal_idx]
             w_nom = self.lambda_nominal * float(np.exp(-sqp_iter / self.nominal_tau))
-            z = dqa[cols_sel] - (self.q_init_full[qpos_sel] - q_a_n_last[qpos_sel])
-            obj_terms.append(w_nom * cp.sum_squares(z))
+            s = np.sqrt(w_nom)
+            target = self.q_init_full[qpos_sel] - q_a_n_last[qpos_sel]
+            A = np.zeros((cols_sel.size, self.nv_a))
+            A[np.arange(cols_sel.size), cols_sel] = s
+            residuals.append(ResidualBlock(A=A, c=-s * target, name="W_nominal"))
 
-        prob = cp.Problem(cp.Minimize(cp.sum(obj_terms)), constraints)
-        try:
-            prob.solve(solver=cp.CLARABEL)
-            _ok = prob.status in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE)
-        except cp.error.SolverError:
-            _ok = False
-        if not _ok:
-            # CLARABEL occasionally fails on ill-conditioned iterations (e.g. when
-            # the interaction terms engage large relative motions). Fall back to
-            # SCS, a first-order solver that is more robust to conditioning.
-            prob.solve(solver=cp.SCS)
-            if prob.status not in (cp.OPTIMAL, cp.OPTIMAL_INACCURATE):
-                raise RuntimeError(f"TEST-SOCP solve failed: {prob.status}")
+        # Per-variable L2 trust regions (dqa always; dxi when the object is a variable).
+        trs = _build_trust_regions(self, n_obj)
+
+        spec = ProblemSpec(nv_a=self.nv_a, n_obj=n_obj, residuals=residuals,
+                           constraints=constraints, trust_regions=trs)
+        result = self._backend.solve(spec)
 
         v_full = np.zeros(self.pin.model.nv)
-        v_full[self.v_a_indices] = dqa.value
+        v_full[self.v_a_indices] = result.dqa
         q_pin_new = self.pin.integrate(_q_pin, v_full)
         q_star = np.copy(q)
         q_star[:36] = self.pin.q_pin_to_qpos_mj(q_pin_new)
         # pin.integrate keeps the quaternion unit; no manual renormalisation needed.
 
         # Integrate the solved object tangent step if movable was active this frame.
-        # T_obj_new = exp6(dxi) * T_obj0  (left-compose, world-frame, matches build_wo_term).
+        # T_obj_new = exp6(dxi) * T_obj0  (left-compose, world-frame, matches build_wo_block).
         solved_obj_pose = None
-        if dxi_obj is not None and dxi_obj.value is not None:
+        if n_obj and result.dxi is not None:
             from HoloNew.src.test_socp.movable import pose_to_se3, se3_to_pose
             T_obj0 = pose_to_se3(obj_pose)
-            T_obj_new = pin.exp6(dxi_obj.value) * T_obj0
+            T_obj_new = pin.exp6(result.dxi) * T_obj0
             solved_obj_pose = se3_to_pose(T_obj_new)
 
-        return q_star, float(prob.value), solved_obj_pose
+        return q_star, float(result.value), solved_obj_pose
 
     def iterate(
         self,

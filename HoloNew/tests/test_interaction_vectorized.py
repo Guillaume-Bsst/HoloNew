@@ -1,18 +1,14 @@
-"""Equivalence tests for the vectorized D/X/P cvxpy assembly.
+"""Equivalence tests for the D/X/P block assembly.
 
-These tests prove that the vectorized build_dx_terms / build_p_terms produce
-objectives numerically identical (rtol=1e-8) to an independent per-point numpy
-ground truth.  The ground truth is computed entirely in numpy (plain loops) and
-does NOT reuse any matrices from the vectorized path — so any drift will be caught.
-
-Step 1: run against the current (loop) implementation to validate the ground truth.
-Step 2: run again after vectorization — must still pass.
+These tests prove that build_dx_blocks / build_p_blocks produce objectives
+numerically identical (rtol=1e-8) to an independent per-point numpy ground truth.
+The ground truth is computed entirely in numpy (plain loops) and does NOT reuse
+any matrices from the block path — so any drift will be caught.
 """
 from __future__ import annotations
 
 import numpy as np
 import pytest
-import cvxpy as cp
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +35,7 @@ def _skip_if_missing(rt):
 def _pointwise_dx_objective(rt, q_pin: np.ndarray, val: np.ndarray,
                              t: int, obj_pose: np.ndarray,
                              lambda_d: float, lambda_x: float) -> float:
-    """Per-point numpy ground truth for build_dx_terms evaluated at dqa=val.
+    """Per-point numpy ground truth for build_dx_blocks evaluated at dqa=val.
 
     Replicates every coefficient from the spec:
       - active-set selection (alpha > 0 AND fobj/fflr.active)
@@ -134,7 +130,7 @@ def _pointwise_dx_objective(rt, q_pin: np.ndarray, val: np.ndarray,
 def _pointwise_p_objective(rt, q_pin: np.ndarray, val: np.ndarray,
                             t: int, obj_pose: np.ndarray,
                             lambda_p: float, sigma_v: float, dt: float) -> float:
-    """Per-point numpy ground truth for build_p_terms evaluated at dqa=val."""
+    """Per-point numpy ground truth for build_p_blocks evaluated at dqa=val."""
     from HoloNew.src.test_socp.interaction import (
         robot_control_points, query_entities, frame_references,
         _activation, _robj_from_pose,
@@ -241,12 +237,12 @@ def _pointwise_p_objective(rt, q_pin: np.ndarray, val: np.ndarray,
 # Tests
 # ---------------------------------------------------------------------------
 
-def test_dx_vectorized_matches_pointwise_numpy():
-    """Vectorized D/X objective equals independent per-point numpy sum."""
+def test_dx_blocks_match_pointwise_numpy():
+    """D/X block objective equals independent per-point numpy sum at dqa=val."""
     rt = _rt()
     _skip_if_missing(rt)
 
-    from HoloNew.src.test_socp.interaction import build_dx_terms
+    from HoloNew.src.test_socp.interaction import build_dx_blocks
 
     q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
     obj_pose = (rt._obj_poses_raw[0]
@@ -256,33 +252,30 @@ def test_dx_vectorized_matches_pointwise_numpy():
     rng = np.random.default_rng(0)
     val = 0.01 * rng.standard_normal(rt.nv_a)
 
-    dqa = cp.Variable(rt.nv_a)
-    dqa.value = val
-
     lambda_d, lambda_x = 2.0, 3.0
-    terms = build_dx_terms(rt, q_pin, dqa, 0, obj_pose,
-                           lambda_d=lambda_d, lambda_x=lambda_x)
+    blocks = build_dx_blocks(rt, q_pin, 0, obj_pose,
+                             lambda_d=lambda_d, lambda_x=lambda_x)
 
-    if len(terms) == 0:
+    if len(blocks) == 0:
         pytest.skip("no active D/X points at frame 0 — cannot test equivalence")
 
-    # Evaluate each cvxpy term at dqa.value and sum.
-    vec_obj = float(sum(float(tm.value) for tm in terms))
+    # Evaluate each block at dqa=val: cost = sum ||A @ val + c||^2
+    block_obj = float(sum(np.sum((b.A @ val + b.c) ** 2) for b in blocks))
 
     # Independent ground truth.
     gt = _pointwise_dx_objective(rt, q_pin, val, 0, obj_pose, lambda_d, lambda_x)
 
-    np.testing.assert_allclose(vec_obj, gt, rtol=1e-8, atol=1e-10,
-                               err_msg="vectorized D/X objective mismatch vs numpy ground truth")
+    np.testing.assert_allclose(block_obj, gt, rtol=1e-8, atol=1e-10,
+                               err_msg="D/X block objective mismatch vs numpy ground truth")
 
 
-def test_p_vectorized_matches_pointwise_numpy():
-    """Vectorized P objective equals independent per-point numpy sum at t=1."""
+def test_p_blocks_match_pointwise_numpy():
+    """P block objective equals independent per-point numpy sum at dqa=val (t=1)."""
     rt = _rt()
     _skip_if_missing(rt)
 
     from HoloNew.src.test_socp.interaction import (
-        build_p_terms, robot_control_points, query_entities, _activation,
+        build_p_blocks, robot_control_points, query_entities, _activation,
     )
 
     q_pin = rt.pin.qpos_mj_to_q_pin(rt.q_init_full[:36])
@@ -299,7 +292,6 @@ def test_p_vectorized_matches_pointwise_numpy():
     P = robot_control_points(rt, q_pin)
     fobj, fflr = query_entities(rt, P, obj_pose, margin=L)
 
-    # Build a plausible _p_state (same as existing test_p_terms_assemble).
     rt._p_state = {
         "p_prev_world": P.copy(),
         "obj_prev": obj_prev_pose.copy(),
@@ -312,20 +304,17 @@ def test_p_vectorized_matches_pointwise_numpy():
     rng = np.random.default_rng(42)
     val = 0.01 * rng.standard_normal(rt.nv_a)
 
-    dqa = cp.Variable(rt.nv_a)
-    dqa.value = val
-
     lambda_p, sigma_v, dt = 2.0, 0.05, 1.0 / 30.0
-    terms = build_p_terms(rt, q_pin, dqa, t=1, obj_pose=obj_pose,
-                          lambda_p=lambda_p, sigma_v=sigma_v, dt=dt)
+    blocks = build_p_blocks(rt, q_pin, t=1, obj_pose=obj_pose,
+                            lambda_p=lambda_p, sigma_v=sigma_v, dt=dt)
 
-    if len(terms) == 0:
+    if len(blocks) == 0:
         pytest.skip("no active P points — cannot test equivalence")
 
-    vec_obj = float(sum(float(tm.value) for tm in terms))
+    block_obj = float(sum(np.sum((b.A @ val + b.c) ** 2) for b in blocks))
 
     gt = _pointwise_p_objective(rt, q_pin, val, 1, obj_pose,
                                 lambda_p, sigma_v, dt)
 
-    np.testing.assert_allclose(vec_obj, gt, rtol=1e-8, atol=1e-10,
-                               err_msg="vectorized P objective mismatch vs numpy ground truth")
+    np.testing.assert_allclose(block_obj, gt, rtol=1e-8, atol=1e-10,
+                               err_msg="P block objective mismatch vs numpy ground truth")

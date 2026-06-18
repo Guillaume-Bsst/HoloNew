@@ -17,19 +17,20 @@ from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
 
 _G1_QDIM = 36  # G1 base (7) + 29 joints
 
-# Re-baselined after the robot-Z scale fix: the builder no longer resolves
-# scale_z_robot=None -> smpl_scale; it passes None through to scale() so the robot Z
-# uses GMR's native morphological base (HUMAN_SCALE_TABLE[pelvis]*ratio), like gmr_socp.
-# The pelvis Z dropped ~4 cm and the orientation/XY rebalanced. Recorded with
-# rt.retarget().qpos[:3, :7] on sub3_largebox_003 (solve is deterministic to 0.0).
-# See test_scale_z_gmr_parity for the underlying z-placement assertion.
+# Re-baselined 2026-06-18 on the current default weights (lambda_pos/rot=0.2,
+# lambda_d/x=5, activate_wd/wx_obj=True, lambda_d/x_obj=50, L_interaction=0.20) after
+# the modular solve-backend refactor (ProblemSpec + CvxpyBackend). The refactor is
+# exact-parity with the prior inline-cvxpy solve (head-to-head agreement ~4e-9); this
+# snapshot moved only because the active tracking/interaction weights changed, not the
+# solver. Recorded with rt.retarget(max_frames=3).qpos[:3, :7] on sub3_largebox_003
+# (the solve is causal, so frames 0-2 are identical to the full-clip solve).
 BASELINE = np.array([
-    [ 0.93314958,  1.24469752,  0.76197750, -0.70748595, -0.07170524,
-     -0.07309210,  0.69927072],
-    [ 0.92763404,  1.25388192,  0.74687360, -0.70932002, -0.09050483,
-     -0.09135339,  0.69305738],
-    [ 0.92314360,  1.26238896,  0.73055882, -0.71104174, -0.10792174,
-     -0.10957625,  0.68612360],
+    [ 0.93038755,  1.23216773,  0.73741994, -0.71427204, -0.07053026,
+     -0.05635916,  0.69402059],
+    [ 0.92578760,  1.24062264,  0.72503019, -0.71573577, -0.08781662,
+     -0.07600913,  0.68864588],
+    [ 0.92206065,  1.24852131,  0.71121712, -0.71692265, -0.10405287,
+     -0.09557189,  0.68268655],
 ])
 
 
