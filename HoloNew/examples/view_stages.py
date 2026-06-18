@@ -84,8 +84,8 @@ def view(cfg: ViewStagesConfig) -> None:
     # loads uniformly through those normalized fields. `dataset` is kept locally so the
     # object overlay below knows how to resolve the object mesh / poses.
     from HoloNew.src.data_loaders.facade import normalize_dataset_cfg
+    normalize_dataset_cfg(cfg)        # also lower-cases cfg.dataset to the canonical key
     dataset = cfg.dataset
-    normalize_dataset_cfg(cfg)
     cfg.dataset = None
 
     data_format = cfg.data_format or DEFAULT_DATA_FORMATS[cfg.task_type]

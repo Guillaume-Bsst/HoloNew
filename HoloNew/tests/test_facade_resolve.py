@@ -67,3 +67,20 @@ def test_normalize_uses_motion_name(tmp_path, monkeypatch):
     assert cfg.data_format == "smplh"
     assert cfg.task_name == "sub3_largebox_003"
     assert cfg.data_path == omomo_new
+
+
+def test_normalize_dataset_is_case_insensitive(tmp_path, monkeypatch):
+    # --dataset OMOMO must resolve like --dataset omomo (registry keys are lowercase).
+    from HoloNew.examples.robot_retarget import RetargetingConfig
+    omomo = tmp_path / "OMOMO"; omomo_new = tmp_path / "OMOMO_new"; smplh = tmp_path / "smplh"
+    _touch(omomo_new / "sub3_largebox_003.pt")
+    _touch(omomo / "data" / "train_diffusion_manip_seq_joints24.p")
+    smplh.mkdir()
+    _write_paths(tmp_path, monkeypatch, omomo=omomo, omomo_new=omomo_new, smplh_models=smplh)
+
+    cfg = RetargetingConfig(dataset="OMOMO", task_type="robot_only", motion_name="sub3_largebox_003")
+    facade.normalize_dataset_cfg(cfg)
+    assert cfg.dataset == "omomo"
+    assert cfg.data_format == "smplh"
+    assert cfg.task_name == "sub3_largebox_003"
+    assert cfg.data_path == omomo_new

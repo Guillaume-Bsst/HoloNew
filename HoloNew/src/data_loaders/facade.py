@@ -59,6 +59,10 @@ def resolve_motion_name_into_cfg(cfg) -> None:
     """Fill cfg.model_path/motion_path/obj_path/smpl_model_dir from cfg.motion_name via
     the global dataset roots. Explicit paths already set are kept (explicit wins).
     No-op if motion_name is None or both core paths are already provided."""
+    # Dataset keys (registry, DATASET_TO_FORMAT) are lowercase; accept any input case
+    # so --dataset OMOMO resolves like --dataset omomo.
+    if cfg.dataset is not None:
+        cfg.dataset = cfg.dataset.lower()
     if cfg.motion_name is None or (cfg.model_path is not None and cfg.motion_path is not None):
         return
     model, motion, obj, smpl_model_dir = resolve_paths_by_name(cfg.dataset, cfg.motion_name)
