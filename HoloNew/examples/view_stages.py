@@ -39,7 +39,10 @@ from HoloNew.src.test_socp.contact.constants import OMOMO_DIR_DEFAULT
 from HoloNew.src.test_socp.contact.viz import signed_distance_colors
 from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.test_socp.correspondence.human_body import HumanBody
-from HoloNew.src.test_socp.correspondence.human_metadata import load_human_metadata
+from HoloNew.src.test_socp.correspondence.human_metadata import (
+    load_human_metadata,
+    load_object_scale,
+)
 from HoloNew.src.gmr_socp.gmr_socp import _BODY_NAME_REMAP, GmrSocpRetargeter
 from HoloNew.src.gmr_socp.tables import HUMAN_BODY_TO_IDX, IK_MATCH_TABLE1
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
@@ -197,8 +200,19 @@ def view(cfg: ViewStagesConfig) -> None:
         parts = cfg.task_name.split("_")
         # Prefer the façade-resolved global mesh (captured_objects/<obj>.obj); fall back
         # to the bundled models/<obj>/<obj>.obj for the legacy (non-façade) invocation.
+        # The captured_objects mesh is the canonical unit object: its per-sequence size is
+        # the OMOMO obj_scale (same .p as the betas), so it must be scaled in object-local
+        # space to match the human. The bundled models/ mesh is already pre-scaled (it is
+        # the captured one × obj_scale), so it keeps obj_geom_scale = 1.
+        obj_geom_scale = 1.0
         if cfg.obj_path is not None and Path(cfg.obj_path).exists():
             obj_file = Path(cfg.obj_path)
+            _os = load_object_scale(cfg.omomo_dir, cfg.task_name) if cfg.omomo_dir else None
+            if _os is not None:
+                obj_geom_scale = _os
+            else:
+                logger.warning("No obj_scale for %s; object shown at native (unit) size.",
+                               cfg.task_name)
         elif len(parts) >= 2:
             obj_file = Path("models") / parts[1] / f"{parts[1]}.obj"
         else:
@@ -210,12 +224,15 @@ def view(cfg: ViewStagesConfig) -> None:
                 object_pose_scaled = convert_object_poses_to_mujoco_order(
                     scale_object_poses_to_center(obj_poses, smpl_scale))
                 mesh = trimesh.load(str(obj_file), force="mesh", process=False)
-                object_mesh_verts = np.asarray(mesh.vertices, np.float32)
+                # Resize the canonical mesh to the sequence's real object size (obj_scale)
+                # in object-local space; the pose origin is unchanged so placement holds.
+                object_mesh_verts = np.asarray(mesh.vertices, np.float32) * obj_geom_scale
                 object_mesh_faces = np.asarray(mesh.faces, np.uint32)
                 # Native-size local samples (same sampling as the solve: sample_count=100,
                 # seed=42); placed at the active stage's pose, native size on every stage.
                 object_points_local, _ = load_object_data(
                     str(obj_file), smpl_scale=smpl_scale, sample_count=100)
+                object_points_local = np.asarray(object_points_local, np.float32) * obj_geom_scale
 
                 # Object SDF for the "SDF Object" band-shell viz. Uses the SAME keyed,
                 # disk-cached field as the solve (load_or_build_object_sdf), resolved at the
@@ -229,9 +246,12 @@ def view(cfg: ViewStagesConfig) -> None:
                 logger.info("Object SDF %s: %s  (L=%.3f m, res=%.3f m, %d nodes)",
                             "loaded" if _existed else "built+cached", _cache.name,
                             _L_view, _sc.sdf_resolution, int(np.prod(sdf.dims)))
+                # Band points + distances live in the canonical mesh frame; scale both by
+                # obj_geom_scale so the shell wraps the resized mesh and the colour scale
+                # (vs _L_view) still reflects true metric distances.
                 band_pts, band_dist = band_points(sdf, _L_view)
-                object_sdf_pts = band_pts
-                object_sdf_cols = signed_distance_colors(band_dist, _L_view)
+                object_sdf_pts = band_pts * obj_geom_scale
+                object_sdf_cols = signed_distance_colors(band_dist * obj_geom_scale, _L_view)
             else:
                 logger.warning("No object mesh at %s; object disabled.", obj_file)
         except Exception as exc:  # noqa: BLE001

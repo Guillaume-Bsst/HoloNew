@@ -36,3 +36,27 @@ def load_human_metadata(omomo_dir: Path, seq: str) -> tuple[np.ndarray | None, s
                 gender = str(data[idx].get("gender", "neutral"))
                 return betas, gender
     return None, "neutral"
+
+
+def load_object_scale(omomo_dir: Path, seq: str) -> float | None:
+    """Per-sequence object scale for ``seq`` from the original OMOMO .p files.
+
+    OMOMO stores a canonical (unit) object mesh in ``captured_objects`` and a per-frame
+    ``obj_scale`` that resizes it for each sequence (near-constant within a sequence, so
+    the mean is returned). Returns ``None`` when the sequence (or the files) are absent,
+    so callers keep the mesh at native size.
+    """
+    import joblib
+
+    p_files = [
+        omomo_dir / "data" / "train_diffusion_manip_seq_joints24.p",
+        omomo_dir / "data" / "test_diffusion_manip_seq_joints24.p",
+    ]
+    for p_file in p_files:
+        if not p_file.exists():
+            continue
+        data = joblib.load(str(p_file))
+        for idx in data:
+            if data[idx].get("seq_name", "") == seq and "obj_scale" in data[idx]:
+                return float(np.asarray(data[idx]["obj_scale"]).mean())
+    return None

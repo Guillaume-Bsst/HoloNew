@@ -1,7 +1,11 @@
 import joblib
 import numpy as np
+import pytest
 
-from HoloNew.src.test_socp.correspondence.human_metadata import load_human_metadata
+from HoloNew.src.test_socp.correspondence.human_metadata import (
+    load_human_metadata,
+    load_object_scale,
+)
 
 
 def _write_p(path, entries):
@@ -9,6 +13,30 @@ def _write_p(path, entries):
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {i: {"seq_name": s, "betas": b, "gender": g} for i, (s, b, g) in enumerate(entries)}
     joblib.dump(data, str(path))
+
+
+def _write_p_scale(path, entries):
+    """entries: list of (seq_name, obj_scale_array) -> OMOMO-style .p file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {i: {"seq_name": s, "obj_scale": sc} for i, (s, sc) in enumerate(entries)}
+    joblib.dump(data, str(path))
+
+
+def test_loads_object_scale_mean_over_frames(tmp_path):
+    sc = np.array([0.34, 0.36], dtype=np.float32)   # near-constant per-frame scale
+    _write_p_scale(tmp_path / "data" / "train_diffusion_manip_seq_joints24.p",
+                   [("sub3_largebox_003", sc)])
+    out = load_object_scale(tmp_path, "sub3_largebox_003")
+    assert isinstance(out, float)
+    assert out == pytest.approx(0.35, abs=1e-6)
+
+
+def test_object_scale_missing_returns_none(tmp_path):
+    # sequence present for betas but without an obj_scale key -> None (native size)
+    _write_p(tmp_path / "data" / "train_diffusion_manip_seq_joints24.p",
+             [("seq", np.zeros(16, np.float32), "male")])
+    assert load_object_scale(tmp_path, "seq") is None
+    assert load_object_scale(tmp_path, "absent") is None
 
 
 def test_loads_betas_and_gender_from_train(tmp_path):
