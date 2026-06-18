@@ -1233,7 +1233,6 @@ def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
     if active.size == 0:
         return []
 
-    Robj = _robj_from_pose(obj_pose)
     link_names = [corr.link_names[corr.link_idx[i]] for i in active]
     offsets = corr.offset_local[active]
     jacs = [J[:, rt.v_a_indices] for J in rt.pin.point_jacobians(q_pin, link_names, offsets)]
@@ -1246,13 +1245,10 @@ def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
         A = (n0[np.newaxis] @ jacs[k])                    # (1, nv_a)
         lb = np.array([-tol - d0])                        # (1,)
         # A_obj·dxi contributes -n0 @ Bobj_i @ dxi, so A_obj = -(n0 @ Bobj_i)
+        # Bobj_i uses world-frame rigid motion (no Robj.T) — matches the original scalar
+        # constraint in build_obj_surface_nonpen_constraints where n0 is a world-frame normal.
         Bobj_i = np.hstack([I3, -_skew(P[i])])            # world rigid motion (3, 6)
-        A_obj_i = Robj.T  # rotate to object-local frame for the Bobj contribution
-        # Constraint in world frame: n0 @ J_i @ dqa - n0 @ Bobj_i @ dxi >= -tol - d0
-        # Note: n0 from fobj is already in object-local frame (fobj is queried in local frame)
-        # and Bobj_i = R_obj.T @ [I, -skew(p_i)] maps world dxi to object-local displacement.
-        # See build_obj_surface_nonpen_constraints lines 247-249.
-        A_obj = -(n0[np.newaxis] @ (Robj.T @ np.hstack([I3, -_skew(P[i])])))  # (1, 6)
+        A_obj = -(n0[np.newaxis] @ Bobj_i)                # (1, 6)
         cons.append(LinearConstraint(A=A, lb=lb, A_obj=A_obj, name=f"nonpen_obj_{i}"))
     return cons
 
