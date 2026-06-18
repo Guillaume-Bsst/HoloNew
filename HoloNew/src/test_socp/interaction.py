@@ -1209,8 +1209,6 @@ def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
         lb    = np.array([-tol - d0_i])           # (1,)
 
     When the object SDF is absent or ``obj_pose`` is None, returns an empty list.
-    ``A_obj`` is set only when the object is a variable (``has_dxi=True``); callers
-    that want the robot-only version should pass ``has_dxi=False`` (default).
 
     Args:
         rt: TestSocpRetargeter instance.
@@ -1225,7 +1223,6 @@ def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
     if obj_pose is None or getattr(rt, "object_sdf", None) is None:
         return []
     corr = rt.correspondence
-    M = corr.link_idx.shape[0]
     L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
     P = robot_control_points(rt, q_pin)
     fobj, _ = query_entities(rt, P, obj_pose, margin_obj=L_obj)
