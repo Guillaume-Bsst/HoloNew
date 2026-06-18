@@ -376,6 +376,9 @@ def view(cfg: ViewStagesConfig) -> None:
         stage_keys=keys,
         original_joints=raw_joints[:T, :, :],
         original_quats=None if original_quats is None else original_quats[:T],
+        # smplx sources carry only the 22 SMPL-X body joints (no fingers), so the
+        # Original skeleton uses the SMPL-X topology instead of the 52-joint SMPLH one.
+        original_bones=skeleton.SMPLX_BODY_BONES if data_format == "smplx" else None,
         object_mesh_verts=object_mesh_verts,
         object_mesh_faces=object_mesh_faces,
         object_points_local=object_points_local,

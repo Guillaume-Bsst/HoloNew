@@ -17,6 +17,17 @@ BODY_BONES: list[tuple[int, int]] = [
     (11, 33), (33, 34), (34, 35), (35, 36),
 ]
 
+# SMPL-X 22-joint body topology (pelvis-rooted kinematic tree, in
+# SMPLX_BODY_JOINT_NAMES order). The smplx data path's source skeleton carries
+# only these 22 body joints (no fingers), so its "Original" stage is drawn with
+# this bone list instead of the 52-joint SMPLH BODY_BONES above. Each pair is
+# (parent, child); the root pelvis (0) contributes no bone.
+SMPLX_BODY_BONES: list[tuple[int, int]] = [
+    (0, 1), (0, 2), (0, 3), (1, 4), (2, 5), (3, 6), (4, 7), (5, 8),
+    (6, 9), (7, 10), (8, 11), (9, 12), (9, 13), (9, 14), (12, 15),
+    (13, 16), (14, 17), (16, 18), (17, 19), (18, 20), (19, 21),
+]
+
 # Finger bones: wrist -> 5 finger roots, then each finger's two distal links,
 # for both hands (left wrist = 17, right wrist = 36).
 FINGER_BONES: list[tuple[int, int]] = (

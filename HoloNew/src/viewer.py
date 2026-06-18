@@ -98,6 +98,7 @@ class Viewer:
                  has_dynamic_object: bool = False,
                  original_joints: np.ndarray | None = None,
                  original_quats: np.ndarray | None = None,
+                 original_bones: list[tuple[int, int]] | None = None,
                  object_mesh_verts: np.ndarray | None = None,
                  object_mesh_faces: np.ndarray | None = None,
                  object_points_local: np.ndarray | None = None,
@@ -121,6 +122,10 @@ class Viewer:
         # Original source motion, shared by every method's "Original" stage.
         self.original_joints = original_joints
         self.original_quats = original_quats
+        # Bone topology for the Original source skeleton. None -> the full 52-joint
+        # SMPLH layout (BODY_BONES + finger bones); set (e.g. SMPLX_BODY_BONES) when
+        # the source carries a different, finger-less joint set (the smplx path).
+        self.original_bones = original_bones
         # Stage-dependent object: the mesh + surface samples are kept in the object's
         # local frame and lifted to world per frame by the active stage's pose. On a
         # scaled stage (object_scaled_stages) the centred pose is used, otherwise the raw
@@ -379,17 +384,22 @@ class Viewer:
     def _original_frame(self, frame: int) -> np.ndarray:
         return self.original_joints[frame].astype(np.float32)
 
-    def _draw_skeleton(self, prefix: str, pos: np.ndarray, *, ghost: bool) -> None:
-        """52-joint source skeleton: body/finger bones + joints, toggle-gated."""
+    def _draw_skeleton(self, prefix: str, pos: np.ndarray, *, ghost: bool,
+                       bones: list[tuple[int, int]] | None = None) -> None:
+        """Source skeleton: body/finger bones + joints, toggle-gated. ``bones`` None
+        is the full 52-joint SMPLH layout (with fingers); pass an explicit bone list
+        (e.g. SMPLX_BODY_BONES) for a finger-less source, drawn over all its joints."""
         body_col = skeleton.COLOR_GHOST_BODY if ghost else skeleton.COLOR_BODY
         finger_col = skeleton.COLOR_GHOST_FINGER if ghost else skeleton.COLOR_FINGER
         lw = 1.5 if ghost else 3.5
+        body_bones = skeleton.BODY_BONES if bones is None else bones
+        has_fingers = bones is None
 
         segs, seg_cols = [], []
         if self._tog_body_bones.value:
-            segs += [[pos[a], pos[b]] for a, b in skeleton.BODY_BONES]
-            seg_cols += [body_col] * len(skeleton.BODY_BONES)
-        if self._tog_finger_bones.value:
+            segs += [[pos[a], pos[b]] for a, b in body_bones]
+            seg_cols += [body_col] * len(body_bones)
+        if has_fingers and self._tog_finger_bones.value:
             segs += [[pos[a], pos[b]] for a, b in skeleton.FINGER_BONES]
             seg_cols += [finger_col] * len(skeleton.FINGER_BONES)
         if segs:
@@ -401,9 +411,11 @@ class Viewer:
 
         j_idx, j_cols = [], []
         if self._tog_body_joints.value:
-            j_idx += skeleton.BODY_JOINT_INDICES
-            j_cols += [body_col] * len(skeleton.BODY_JOINT_INDICES)
-        if self._tog_finger_joints.value:
+            body_joints = (skeleton.BODY_JOINT_INDICES if has_fingers
+                           else list(range(pos.shape[0])))
+            j_idx += body_joints
+            j_cols += [body_col] * len(body_joints)
+        if has_fingers and self._tog_finger_joints.value:
             j_idx += skeleton.FINGER_JOINT_INDICES
             j_cols += [finger_col] * len(skeleton.FINGER_JOINT_INDICES)
         if j_idx:
@@ -928,7 +940,8 @@ class Viewer:
                     self._draw_axes("/active", method.robot_skeleton[frame],
                                     method.robot_quats[frame], ghost=False)
         elif stage == "Original" and self.original_joints is not None:
-            self._draw_skeleton("/active", self._original_frame(frame), ghost=False)
+            self._draw_skeleton("/active", self._original_frame(frame), ghost=False,
+                                bones=self.original_bones)
         else:
             self._draw_stage(method, stage, "/active", frame, ghost=False)
         self._draw_smplx_mesh(frame)
@@ -945,7 +958,8 @@ class Viewer:
         if g_stage != "Off":
             g_method = self._methods[self._ghost_method_dd.value]
             if g_stage == "Original" and self.original_joints is not None:
-                self._draw_skeleton("/ghost", self._original_frame(frame), ghost=True)
+                self._draw_skeleton("/ghost", self._original_frame(frame), ghost=True,
+                                    bones=self.original_bones)
             elif g_stage in g_method.stages:
                 self._draw_stage(g_method, g_stage, "/ghost", frame, ghost=True)
 

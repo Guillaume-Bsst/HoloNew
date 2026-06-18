@@ -65,6 +65,30 @@ def test_original_stage_renders_with_toggles(robot_urdf):
     v._stage_dd.value = "Mapped"; v._redraw(0)
     v.close()
 
+def test_smplx_original_stage_renders_with_22_joint_bones(robot_urdf):
+    # smplx sources carry only the 22 SMPL-X body joints; the Original skeleton must
+    # use SMPLX_BODY_BONES, not the 52-joint SMPLH BODY_BONES (which indexes joint 33
+    # and crashed _draw_skeleton with IndexError on a 22-joint frame).
+    import numpy as np
+    from HoloNew.src import skeleton
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 22, 3), dtype=np.float32)
+    m = MethodViz(label="TEST-SOCP", robot_key="test_socp",
+                  qpos=np.zeros((3, 36)), stages={"Original": oj})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("test_socp",), original_joints=oj,
+               original_bones=skeleton.SMPLX_BODY_BONES)
+    v.bind_methods([m])
+    v._stage_dd.value = "Original"
+    v._tog_body_bones.value = True
+    v._tog_finger_bones.value = True   # must be ignored (no fingers in the smplx source)
+    v._tog_body_joints.value = True
+    v._redraw(0)                       # no IndexError
+    # ghost overlay of the same Original stage must also stay finger-less and safe
+    v._ghost_method_dd.value = "TEST-SOCP"; v._ghost_stage_dd.value = "Original"
+    v._redraw(0)
+    v.close()
+
 def test_smplx_toggle_noop_without_body(robot_urdf):
     import numpy as np
     from HoloNew.src.viewer import Viewer, MethodViz
