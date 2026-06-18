@@ -1005,7 +1005,7 @@ def build_dx_blocks(rt, q_pin: np.ndarray, t: int,
                 A=A_d_obj, A_obj=-Adxi_d, c=-c_d_obj, name="W_d_obj"))
         else:
             blocks.append(ResidualBlock(
-                A=A_d_obj, c=-c_d_obj, name="W_d"))
+                A=A_d_obj, c=-c_d_obj, name="W_d_obj"))
 
     # Object X.
     if B_x_obj_rows:
@@ -1017,21 +1017,21 @@ def build_dx_blocks(rt, q_pin: np.ndarray, t: int,
                 A=B_x_obj, A_obj=-Bdxi_x, c=-r_x_obj, name="W_x_obj"))
         else:
             blocks.append(ResidualBlock(
-                A=B_x_obj, c=-r_x_obj, name="W_x"))
+                A=B_x_obj, c=-r_x_obj, name="W_x_obj"))
 
     # Floor D (robot-only; floor not movable).
     if A_d_flr_rows:
         A_d_flr = np.array(A_d_flr_rows)   # (K_d_flr, nv_a)
         c_d_flr = np.array(c_d_flr_rows)
         blocks.append(ResidualBlock(
-            A=A_d_flr, c=-c_d_flr, name="W_d"))
+            A=A_d_flr, c=-c_d_flr, name="W_d_flr"))
 
     # Floor X.
     if B_x_flr_rows:
         B_x_flr = np.vstack(B_x_flr_rows)  # (3*K_x_flr, nv_a)
         r_x_flr = np.concatenate(r_x_flr_rows)
         blocks.append(ResidualBlock(
-            A=B_x_flr, c=-r_x_flr, name="W_x"))
+            A=B_x_flr, c=-r_x_flr, name="W_x_flr"))
 
     return blocks
 
