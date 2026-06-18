@@ -11,7 +11,6 @@ unchanged.
 """
 from __future__ import annotations
 
-import os
 import tempfile
 from pathlib import Path
 
@@ -19,33 +18,21 @@ import numpy as np
 
 from HoloNew.src.data_loaders.base import DATASET_TO_FORMAT
 from HoloNew.src.data_loaders.hodome import prep_hodome_processed
+from HoloNew.src.paths import get_path
 
 # Disk cache for prepped HODome processed npz (one per sequence stem).
 _HODOME_CACHE_DIR = Path(tempfile.gettempdir()) / "holonew_hodome_processed"
 
 
-def _root(env: str, label: str) -> Path:
-    """Read a global dataset root from an env var; raise a clear error if unset.
-
-    Roots are exported (repo-relative, overridable) by scripts/source_retargeting_setup.sh.
-    """
-    val = os.environ.get(env, "")
-    if not val:
-        raise ValueError(
-            f"--motion-name needs ${env} set ({label}); source "
-            f"scripts/source_retargeting_setup.sh or export it.")
-    return Path(val)
-
-
 def resolve_paths_by_name(dataset: str, name: str):
-    """Resolve (model_path, motion_path, obj_path, smpl_model_dir) from the global
-    dataset roots given only the sequence name. obj_path is None when absent/not
+    """Resolve (model_path, motion_path, obj_path, smpl_model_dir) from the dataset
+    roots in path.yaml given only the sequence name. obj_path is None when absent/not
     applicable. Supported for omomo and hodome (the multi-file datasets)."""
     if dataset == "omomo":
-        motion = _root("WBT_OMOMO_NEW_DIR", "OMOMO_new .pt dir") / f"{name}.pt"
-        omomo = _root("WBT_OMOMO_DIR", "OMOMO release root")
+        motion = get_path("omomo_new") / f"{name}.pt"
+        omomo = get_path("omomo")
         model = omomo / "data" / "train_diffusion_manip_seq_joints24.p"
-        smpl_model_dir = _root("WBT_SMPLH_DIR", "SMPL-H model dir")
+        smpl_model_dir = get_path("smplh_models")
         # Object name is the 2nd token (sub3_largebox_003 -> largebox); meshes are
         # named <obj>_cleaned_simplified.obj.
         obj = None
@@ -57,10 +44,10 @@ def resolve_paths_by_name(dataset: str, name: str):
         return model, motion, obj, smpl_model_dir
 
     if dataset == "hodome":
-        root = _root("WBT_HODOME_DIR", "HODome release root")
+        root = get_path("hodome")
         motion = root / "smplx" / f"{name}.npz"
         obj = root / "object" / f"{name}.npz"
-        model = _root("WBT_SMPLX_DIR", "SMPL-X models root") / "smplx"
+        model = get_path("smplx_models") / "smplx"
         return model, motion, (obj if obj.exists() else None), None
 
     raise ValueError(

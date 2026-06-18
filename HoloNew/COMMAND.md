@@ -187,11 +187,11 @@ python examples/view_stages.py
 
 `view_stages.py` accepts the same `--dataset` façade as `robot_retarget.py`. The
 **simplest form is `--motion-name <seq>`**: with `--dataset`, the model / motion /
-object files are resolved automatically from the global dataset roots (the
-`WBT_OMOMO_DIR` / `WBT_OMOMO_NEW_DIR` / `WBT_HODOME_DIR` / `WBT_SMPLX_DIR` /
-`WBT_SMPLH_DIR` env vars, exported by `source_retargeting_setup.sh`). All selected
-methods (holosoma / GMR-SOCP / TEST-SOCP) then run on that sequence. HODome's raw
-SMPL-X is prepped once (cached) into the processed format the smplx path consumes.
+object files are resolved automatically from the dataset roots configured in
+[`path.yaml`](path.yaml) (`omomo` / `omomo_new` / `hodome` / `smplx_models` /
+`smplh_models` — edit it for your own layout). All selected methods (holosoma /
+GMR-SOCP / TEST-SOCP) then run on that sequence. HODome's raw SMPL-X is prepped once
+(cached) into the processed format the smplx path consumes.
 
 ```bash
 # By name — files resolved from the global roots, nothing else to type:
@@ -281,16 +281,15 @@ solvers receive (no extra re-grounding — the `Original` stage is the literal
 preprocess input, so the mesh stays aligned with it). Two data sources, both used
 automatically:
 
-- **SMPL-X model dir** — `SMPLX_MODEL_DIR_DEFAULT` reads `$WBT_SMPLX_DIR`
-  (`src/test_socp/correspondence/constants.py`), set by `source_retargeting_setup.sh`.
-  Our current config: `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models`
-- **Subject shape (betas + gender)** — loaded by default from `OMOMO_DIR_DEFAULT`, which
-  reads `$WBT_OMOMO_DIR` (`src/test_socp/contact/constants.py` — the original OMOMO
-  release holding `data/{train,test}_diffusion_manip_seq_joints24.p`, NOT `OMOMO_new`),
-  so the mesh gets the subject's real body, not the neutral mean. Our current config:
-  `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO`
+- **SMPL-X model dir** — `SMPLX_MODEL_DIR_DEFAULT`
+  (`src/test_socp/correspondence/constants.py`) reads the `smplx_models` entry of
+  [`path.yaml`](path.yaml).
+- **Subject shape (betas + gender)** — loaded by default from `OMOMO_DIR_DEFAULT`
+  (`src/test_socp/contact/constants.py`) which reads the `omomo` entry of `path.yaml`
+  (the original OMOMO release holding `data/{train,test}_diffusion_manip_seq_joints24.p`,
+  NOT `OMOMO_new`), so the mesh gets the subject's real body, not the neutral mean.
 
-Override the OMOMO root with `--omomo_dir <path>` (or export `WBT_OMOMO_DIR`) if needed;
+Override the OMOMO root with `--omomo_dir <path>` (or edit `path.yaml`) if needed;
 a missing file degrades to the neutral shape.
 
 ```bash

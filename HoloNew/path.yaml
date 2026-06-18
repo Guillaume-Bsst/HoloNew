@@ -1,0 +1,9 @@
+# Dataset & model paths used by the --motion-name resolver and the TEST-SOCP SMPL-X
+# tooling. Relative paths are resolved against the wbt_rl repo root; absolute paths are
+# used as-is. Edit these for your own layout.
+
+omomo:        data/00_raw_datasets/OMOMO                            # OMOMO release root (betas pickle under data/)
+omomo_new:    data/00_raw_datasets/OMOMO_new/OMOMO_new              # InterMimic .pt sequences
+hodome:       data/00_raw_datasets/HODome                           # HODome release (smplx/, object/, scaned_object/)
+smplx_models: data/00_raw_datasets/models/models_smplx_v1_1/models  # contains smplx/SMPLX_*.npz
+smplh_models: data/00_raw_datasets/models/smplh                     # SMPL-H neutral / male / female
