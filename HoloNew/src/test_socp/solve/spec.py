@@ -37,6 +37,10 @@ class TrustRegion:
     var: str
     radius: float
 
+    def __post_init__(self):
+        if self.radius <= 0:
+            raise ValueError(f"TrustRegion.radius must be positive, got {self.radius}")
+
 
 @dataclass
 class ProblemSpec:
@@ -57,6 +61,10 @@ class ProblemSpec:
                 if blk.A_obj.shape[1] != self.n_obj:
                     raise ValueError(f"{type(blk).__name__} {blk.name!r}: A_obj has "
                                      f"{blk.A_obj.shape[1]} cols, expected n_obj={self.n_obj}")
+                if blk.A_obj.shape[0] != blk.A.shape[0]:
+                    raise ValueError(f"{type(blk).__name__} {blk.name!r}: A has "
+                                     f"{blk.A.shape[0]} rows but A_obj has "
+                                     f"{blk.A_obj.shape[0]} rows")
         for tr in self.trust_regions:
             if tr.var not in ("dqa", "dxi"):
                 raise ValueError(f"TrustRegion.var must be 'dqa'|'dxi', got {tr.var!r}")

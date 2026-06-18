@@ -22,6 +22,19 @@ def test_obj_block_requires_n_obj():
                     constraints=[], trust_regions=[])
 
 
+def test_obj_block_row_mismatch_raises():
+    with pytest.raises(ValueError):
+        ProblemSpec(nv_a=3, n_obj=6,
+                    residuals=[ResidualBlock(A=np.zeros((2, 3)), c=np.zeros(2),
+                                             A_obj=np.zeros((5, 6)))],
+                    constraints=[], trust_regions=[])
+
+
+def test_trust_region_nonpositive_radius_raises():
+    with pytest.raises(ValueError):
+        TrustRegion("dqa", -1.0)
+
+
 def test_solve_result_fields():
     r = SolveResult(dqa=np.zeros(3), dxi=None, value=1.0, status="optimal")
     assert r.dqa.shape == (3,) and r.dxi is None and r.status == "optimal"
