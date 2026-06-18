@@ -20,7 +20,7 @@ def test_normalize_omomo_maps_to_legacy_fields():
     assert cfg.omomo_dir == Path("/data/OMOMO")
 
 
-def test_normalize_hoim3_runs_prep_and_maps(tmp_path, monkeypatch):
+def test_normalize_hodome_runs_prep_and_maps(tmp_path, monkeypatch):
     raw = tmp_path / "subject01_baseball.npz"
     raw.write_bytes(b"")  # content irrelevant — prep is monkeypatched
     model = tmp_path / "smplx"
@@ -36,10 +36,10 @@ def test_normalize_hoim3_runs_prep_and_maps(tmp_path, monkeypatch):
             "gender": "neutral",
         }
 
-    monkeypatch.setattr(facade, "prep_hoim3_processed", fake_prep)
-    monkeypatch.setattr(facade, "_HOIM3_CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(facade, "prep_hodome_processed", fake_prep)
+    monkeypatch.setattr(facade, "_HODOME_CACHE_DIR", tmp_path / "cache")
 
-    cfg = RetargetingConfig(dataset="hoim3", task_type="robot_only",
+    cfg = RetargetingConfig(dataset="hodome", task_type="robot_only",
                             model_path=model, motion_path=raw)
     facade.normalize_dataset_cfg(cfg)
 

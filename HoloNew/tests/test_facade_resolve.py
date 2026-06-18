@@ -29,25 +29,25 @@ def test_resolve_omomo_by_name(tmp_path, monkeypatch):
     assert smpl_model_dir == smplh
 
 
-def test_resolve_hoim3_by_name(tmp_path, monkeypatch):
-    root = tmp_path / "HOI-M3"
+def test_resolve_hodome_by_name(tmp_path, monkeypatch):
+    root = tmp_path / "HODome"
     models = tmp_path / "models"
     _touch(root / "smplx" / "subject01_baseball.npz")
     _touch(root / "object" / "subject01_baseball.npz")
     (models / "smplx").mkdir(parents=True)
-    monkeypatch.setenv("WBT_HOIM3_DIR", str(root))
+    monkeypatch.setenv("WBT_HODOME_DIR", str(root))
     monkeypatch.setenv("WBT_SMPLX_DIR", str(models))
 
-    model, motion, obj, smpl_model_dir = facade.resolve_paths_by_name("hoim3", "subject01_baseball")
+    model, motion, obj, smpl_model_dir = facade.resolve_paths_by_name("hodome", "subject01_baseball")
     assert motion == root / "smplx" / "subject01_baseball.npz"
     assert obj == root / "object" / "subject01_baseball.npz"
     assert model == models / "smplx"
 
 
 def test_resolve_missing_root_raises(monkeypatch):
-    monkeypatch.delenv("WBT_HOIM3_DIR", raising=False)
-    with pytest.raises(ValueError, match="WBT_HOIM3_DIR"):
-        facade.resolve_paths_by_name("hoim3", "subject01_baseball")
+    monkeypatch.delenv("WBT_HODOME_DIR", raising=False)
+    with pytest.raises(ValueError, match="WBT_HODOME_DIR"):
+        facade.resolve_paths_by_name("hodome", "subject01_baseball")
 
 
 def test_normalize_uses_motion_name(tmp_path, monkeypatch):

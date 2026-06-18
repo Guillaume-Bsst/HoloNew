@@ -11,7 +11,7 @@ from HoloNew.src.data_loaders.facade import normalize_dataset_cfg
 _REPO = Path(__file__).resolve().parents[5]
 _OMOMO_PICKLE = _REPO / "data/00_raw_datasets/OMOMO/data/train_diffusion_manip_seq_joints24.p"
 _OMOMO_PT = Path("demo_data/OMOMO_new/sub3_largebox_003.pt")  # shipped, relative to pkg dir
-_HOIM3_NPZ = _REPO / "data/00_raw_datasets/HOI-M3/smplx/subject01_baseball.npz"
+_HODOME_NPZ = _REPO / "data/00_raw_datasets/HODome/smplx/subject01_baseball.npz"
 _SMPLX_DIR = _REPO / "data/00_raw_datasets/models/models_smplx_v1_1/models/smplx"
 
 
@@ -32,11 +32,11 @@ def test_facade_omomo_feeds_load(monkeypatch, tmp_path):
     assert scale > 0
 
 
-@pytest.mark.skipif(not (_HOIM3_NPZ.exists() and _SMPLX_DIR.exists()),
-                    reason="HOI-M3 data / SMPL-X model not present")
-def test_facade_hoim3_feeds_load():
-    cfg = RetargetingConfig(dataset="hoim3", task_type="robot_only",
-                            model_path=_SMPLX_DIR, motion_path=_HOIM3_NPZ)
+@pytest.mark.skipif(not (_HODOME_NPZ.exists() and _SMPLX_DIR.exists()),
+                    reason="HODome data / SMPL-X model not present")
+def test_facade_hodome_feeds_load():
+    cfg = RetargetingConfig(dataset="hodome", task_type="robot_only",
+                            model_path=_SMPLX_DIR, motion_path=_HODOME_NPZ)
     hj, op, scale = _load_like_view(cfg)
     assert cfg.data_format == "smplx"
     assert hj.shape[1:] == (22, 3)
@@ -46,7 +46,7 @@ def test_facade_hoim3_feeds_load():
 _OMOMO_ROOT = _REPO / "data/00_raw_datasets/OMOMO"
 _OMOMO_NEW_ROOT = _REPO / "data/00_raw_datasets/OMOMO_new/OMOMO_new"
 _SMPLH_DIR = _REPO / "data/00_raw_datasets/models/smplh"
-_HOIM3_ROOT = _REPO / "data/00_raw_datasets/HOI-M3"
+_HODOME_ROOT = _REPO / "data/00_raw_datasets/HODome"
 _SMPLX_ROOT = _REPO / "data/00_raw_datasets/models/models_smplx_v1_1/models"
 
 
@@ -61,14 +61,14 @@ def test_facade_by_name_omomo(monkeypatch):
     assert cfg.task_name == "sub3_largebox_003" and hj.shape[1:] == (52, 3) and scale > 0
 
 
-@pytest.mark.skipif(not ((_HOIM3_ROOT / "smplx/subject01_baseball.npz").exists() and _SMPLX_DIR.exists()),
-                    reason="HOI-M3 global roots not present")
-def test_facade_by_name_hoim3(monkeypatch):
-    monkeypatch.setenv("WBT_HOIM3_DIR", str(_HOIM3_ROOT))
+@pytest.mark.skipif(not ((_HODOME_ROOT / "smplx/subject01_baseball.npz").exists() and _SMPLX_DIR.exists()),
+                    reason="HODome global roots not present")
+def test_facade_by_name_hodome(monkeypatch):
+    monkeypatch.setenv("WBT_HODOME_DIR", str(_HODOME_ROOT))
     monkeypatch.setenv("WBT_SMPLX_DIR", str(_SMPLX_ROOT))
     # robot_only here: the resolver still fills obj_path by name (object_interaction
     # loading for smplx is a separate, not-yet-wired path).
-    cfg = RetargetingConfig(dataset="hoim3", task_type="robot_only", motion_name="subject01_baseball")
+    cfg = RetargetingConfig(dataset="hodome", task_type="robot_only", motion_name="subject01_baseball")
     hj, op, scale = _load_like_view(cfg)
     assert cfg.data_format == "smplx" and hj.shape[1:] == (22, 3)
     assert cfg.obj_path is not None and cfg.obj_path.name == "subject01_baseball.npz"

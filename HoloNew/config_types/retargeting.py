@@ -40,7 +40,7 @@ class RetargetingConfig:
 
     # --- New 3-path façade (optional; when `dataset` is set these drive loading) ---
     dataset: str | None = None
-    """Dataset key for the 3-path loader façade (omomo, hoim3, lafan, sfu, climbing).
+    """Dataset key for the 3-path loader façade (omomo, hodome, lafan, sfu, climbing).
     When set, model_path/motion_path/obj_path are used instead of data_path/task_name."""
 
     model_path: Path | None = None

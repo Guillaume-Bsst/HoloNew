@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from HoloNew.src.data_loaders.hoim3 import extract_hoim3_object_mesh
+from HoloNew.src.data_loaders.hodome import extract_hodome_object_mesh
 
 
 def _make_tar(scaned_dir: Path, token: str):
@@ -15,39 +15,39 @@ def _make_tar(scaned_dir: Path, token: str):
         t.add(objdir / f"{token}.obj", arcname=f"{token}/{token}.obj")
 
 
-def test_extract_hoim3_object_mesh(tmp_path):
+def test_extract_hodome_object_mesh(tmp_path):
     scaned = tmp_path / "scaned_object"
     _make_tar(scaned, "baseball")
     cache = tmp_path / "cache"
 
-    out = extract_hoim3_object_mesh("baseball", scaned, cache_dir=cache)
+    out = extract_hodome_object_mesh("baseball", scaned, cache_dir=cache)
     assert out.name == "baseball.obj"
     assert out.exists()
     # second call uses the cache (idempotent), same path
-    out2 = extract_hoim3_object_mesh("baseball", scaned, cache_dir=cache)
+    out2 = extract_hodome_object_mesh("baseball", scaned, cache_dir=cache)
     assert out2 == out
 
 
 def test_extract_missing_tar_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
-        extract_hoim3_object_mesh("nope", tmp_path / "scaned_object", cache_dir=tmp_path / "c")
+        extract_hodome_object_mesh("nope", tmp_path / "scaned_object", cache_dir=tmp_path / "c")
 
 
 _REPO = Path(__file__).resolve().parents[5]
-_SCANED = _REPO / "data/00_raw_datasets/HOI-M3/scaned_object"
-_OBJ_NPZ = _REPO / "data/00_raw_datasets/HOI-M3/object/subject01_baseball.npz"
+_SCANED = _REPO / "data/00_raw_datasets/HODome/scaned_object"
+_OBJ_NPZ = _REPO / "data/00_raw_datasets/HODome/object/subject01_baseball.npz"
 
 
 @pytest.mark.skipif(not ((_SCANED / "baseball.tar").exists() and _OBJ_NPZ.exists()),
-                    reason="HOI-M3 object data not present")
-def test_hoim3_object_pipeline_real(tmp_path):
+                    reason="HODome object data not present")
+def test_hodome_object_pipeline_real(tmp_path):
     import numpy as np
     import trimesh
-    from HoloNew.src.data_loaders.hoim3 import hoim3_object_poses
+    from HoloNew.src.data_loaders.hodome import hodome_object_poses
 
-    mesh_path = extract_hoim3_object_mesh("baseball", _SCANED, cache_dir=tmp_path)
+    mesh_path = extract_hodome_object_mesh("baseball", _SCANED, cache_dir=tmp_path)
     mesh = trimesh.load(str(mesh_path), force="mesh", process=False)
     assert np.asarray(mesh.vertices).ndim == 2 and mesh.vertices.shape[1] == 3
-    poses = hoim3_object_poses(_OBJ_NPZ)
+    poses = hodome_object_poses(_OBJ_NPZ)
     assert poses.shape[1] == 7
     assert np.allclose(np.linalg.norm(poses[:, :4], axis=1), 1.0, atol=1e-4)  # unit quats

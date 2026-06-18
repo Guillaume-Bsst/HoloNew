@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from HoloNew.src.data_loaders.hoim3 import HoiM3Loader, hoim3_object_poses
+from HoloNew.src.data_loaders.hodome import HoDomeLoader, hodome_object_poses
 
 
 def _make_object_npz(path, T=3):
@@ -11,9 +11,9 @@ def _make_object_npz(path, T=3):
     np.savez(path, object_R=R, object_T=Tt, mocap_frame_rate=60)
 
 
-def test_hoim3_object_poses_identity(tmp_path):
+def test_hodome_object_poses_identity(tmp_path):
     p = tmp_path / "seq_object.npz"; _make_object_npz(p, T=3)
-    op = hoim3_object_poses(p)
+    op = hodome_object_poses(p)
     assert op.shape == (3, 7)
     assert np.allclose(op[:, :4], [1, 0, 0, 0])      # identity R -> wxyz unit quat
     assert np.allclose(op[:, 4], [0, 1, 2])          # translation X

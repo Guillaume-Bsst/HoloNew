@@ -50,7 +50,7 @@ from HoloNew.src.holosoma.preprocess import (
 from HoloNew.src.robot_fk import robot_link_poses
 from HoloNew.src.stages import ROBOT_STAGE
 from HoloNew.src.utils import load_intermimic_data, load_intermimic_quats, load_object_data
-from HoloNew.src.data_loaders.hoim3 import extract_hoim3_object_mesh, hoim3_object_poses
+from HoloNew.src.data_loaders.hodome import extract_hodome_object_mesh, hodome_object_poses
 from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
@@ -218,14 +218,14 @@ def view(cfg: ViewStagesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("Object unavailable (%s); object disabled.", exc)
 
-    elif dataset == "hoim3" and cfg.obj_path is not None:
-        # HOI-M3: single object per sequence. Mesh comes from scaned_object/<token>.tar,
+    elif dataset == "hodome" and cfg.obj_path is not None:
+        # HODome: single object per sequence. Mesh comes from scaned_object/<token>.tar,
         # poses from the object .npz (object_R/T), both expressed Z-up like the human.
         try:
             token = cfg.task_name.split("_", 1)[1] if "_" in cfg.task_name else cfg.task_name
             scaned = Path(cfg.obj_path).parent.parent / "scaned_object"
-            mesh_path = extract_hoim3_object_mesh(token, scaned)
-            obj_poses = hoim3_object_poses(Path(cfg.obj_path))           # (T,7) [qw..,xyz] Z-up
+            mesh_path = extract_hodome_object_mesh(token, scaned)
+            obj_poses = hodome_object_poses(Path(cfg.obj_path))           # (T,7) [qw..,xyz] Z-up
             object_pose_raw = convert_object_poses_to_mujoco_order(obj_poses)
             object_pose_scaled = convert_object_poses_to_mujoco_order(
                 scale_object_poses_to_center(obj_poses, smpl_scale))
@@ -235,7 +235,7 @@ def view(cfg: ViewStagesConfig) -> None:
             object_points_local, _ = load_object_data(
                 str(mesh_path), smpl_scale=smpl_scale, sample_count=100)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("HOI-M3 object unavailable (%s); object disabled.", exc)
+            logger.warning("HODome object unavailable (%s); object disabled.", exc)
 
     toe = [constants.DEMO_JOINTS.index(name) for name in cfg.motion_data_config.toe_names]
     # JOINTS_MAPPING is a dict {human_joint_name -> robot_link_name}; the mapped

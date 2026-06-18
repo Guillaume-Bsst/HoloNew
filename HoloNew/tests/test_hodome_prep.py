@@ -3,10 +3,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from HoloNew.src.data_loaders.hoim3 import global_orientations_zup, prep_hoim3_processed
+from HoloNew.src.data_loaders.hodome import global_orientations_zup, prep_hodome_processed
 
 _REPO = Path(__file__).resolve().parents[5]
-_HOIM3_NPZ = _REPO / "data/00_raw_datasets/HOI-M3/smplx/subject01_baseball.npz"
+_HODOME_NPZ = _REPO / "data/00_raw_datasets/HODome/smplx/subject01_baseball.npz"
 _SMPLX_DIR = _REPO / "data/00_raw_datasets/models/models_smplx_v1_1/models/smplx"
 
 
@@ -31,10 +31,10 @@ def test_orientations_are_unit_quaternions():
     assert np.allclose(norms, 1.0, atol=1e-5)
 
 
-@pytest.mark.skipif(not (_HOIM3_NPZ.exists() and _SMPLX_DIR.exists()),
-                    reason="HOI-M3 data / SMPL-X model not present")
-def test_prep_hoim3_processed_real():
-    out = prep_hoim3_processed(_HOIM3_NPZ, _SMPLX_DIR)
+@pytest.mark.skipif(not (_HODOME_NPZ.exists() and _SMPLX_DIR.exists()),
+                    reason="HODome data / SMPL-X model not present")
+def test_prep_hodome_processed_real():
+    out = prep_hodome_processed(_HODOME_NPZ, _SMPLX_DIR)
     pos = out["global_joint_positions"]
     ori = out["global_joint_orientations"]
     assert pos.ndim == 3 and pos.shape[1:] == (22, 3)

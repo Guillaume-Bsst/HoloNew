@@ -45,7 +45,7 @@ python examples/robot_retarget.py \
 
 (Full task-type / dataset matrix is in [README.md](README.md).)
 
-#### 3-path façade (OMOMO mixed / HOI-M3)
+#### 3-path façade (OMOMO mixed / HODome)
 
 The same script also accepts a `--dataset` key plus three explicit, no-default paths
 (`--model-path` / `--motion-path` / `--obj-path`). When `--dataset` is set it replaces
@@ -70,16 +70,16 @@ python examples/robot_retarget.py --dataset omomo --task-type object_interaction
   --obj-path       /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO/data/captured_objects/largebox_cleaned_simplified.obj \
   --smpl-model-dir /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/smplh
 
-# HOI-M3 robot_only — raw SMPL-X .npz; --model-path is the SMPL-X body-model dir.
-python examples/robot_retarget.py --dataset hoim3 --task-type robot_only \
+# HODome robot_only — raw SMPL-X .npz; --model-path is the SMPL-X body-model dir.
+python examples/robot_retarget.py --dataset hodome --task-type robot_only \
   --model-path  /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx \
-  --motion-path /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/smplx/subject01_baseball.npz
+  --motion-path /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HODome/smplx/subject01_baseball.npz
 
-# HOI-M3 object_interaction — plus the object 6DoF .npz via --obj-path.
-python examples/robot_retarget.py --dataset hoim3 --task-type object_interaction \
+# HODome object_interaction — plus the object 6DoF .npz via --obj-path.
+python examples/robot_retarget.py --dataset hodome --task-type object_interaction \
   --model-path  /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx \
-  --motion-path /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/smplx/subject01_baseball.npz \
-  --obj-path    /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/object/subject01_baseball.npz
+  --motion-path /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HODome/smplx/subject01_baseball.npz \
+  --obj-path    /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HODome/object/subject01_baseball.npz
 ```
 
 ### GMR-SOCP / TEST-SOCP
@@ -183,14 +183,14 @@ python examples/view_stages.py
 # Viewer at http://localhost:8080 — Enter in the terminal to exit.
 ```
 
-#### 3-path façade on the stage viewer (OMOMO mixed / HOI-M3)
+#### 3-path façade on the stage viewer (OMOMO mixed / HODome)
 
 `view_stages.py` accepts the same `--dataset` façade as `robot_retarget.py`. The
 **simplest form is `--motion-name <seq>`**: with `--dataset`, the model / motion /
 object files are resolved automatically from the global dataset roots (the
-`WBT_OMOMO_DIR` / `WBT_OMOMO_NEW_DIR` / `WBT_HOIM3_DIR` / `WBT_SMPLX_DIR` /
+`WBT_OMOMO_DIR` / `WBT_OMOMO_NEW_DIR` / `WBT_HODOME_DIR` / `WBT_SMPLX_DIR` /
 `WBT_SMPLH_DIR` env vars, exported by `source_retargeting_setup.sh`). All selected
-methods (holosoma / GMR-SOCP / TEST-SOCP) then run on that sequence. HOI-M3's raw
+methods (holosoma / GMR-SOCP / TEST-SOCP) then run on that sequence. HODome's raw
 SMPL-X is prepped once (cached) into the processed format the smplx path consumes.
 
 ```bash
@@ -198,18 +198,18 @@ SMPL-X is prepped once (cached) into the processed format the smplx path consume
 python examples/view_stages.py --dataset omomo --task-type robot_only \
   --motion-name sub3_largebox_003 --methods gmr_socp test_socp
 
-python examples/view_stages.py --dataset hoim3 --task-type robot_only \
+python examples/view_stages.py --dataset hodome --task-type robot_only \
   --motion-name subject01_baseball --methods test_socp --max-frames 200
 ```
 
 The explicit-path form still works (and overrides name resolution) when files live
 elsewhere — `--model-path` / `--motion-path` (/ `--obj-path`, `--smpl-model-dir`).
-`--motion-name` is supported for `omomo` and `hoim3`; the same flags work on
+`--motion-name` is supported for `omomo` and `hodome`; the same flags work on
 `robot_retarget.py`.
 
 > The object overlay is wired for **both** OMOMO (mesh from the global
-> `captured_objects/`) and HOI-M3 (single object per sequence; mesh auto-extracted from
-> `scaned_object/<token>.tar`, posed from the object `.npz`). HOI-M3 is single-object
+> `captured_objects/`) and HODome (single object per sequence; mesh auto-extracted from
+> `scaned_object/<token>.tar`, posed from the object `.npz`). HODome is single-object
 > per sequence (verified). The TEST-SOCP SDF-band overlay remains OMOMO-only.
 
 Use `--methods` to solve only a subset instead of all three. Choices:

@@ -16,7 +16,7 @@ import numpy as np
 # Dataset key -> internal data_format (drives joint registry / mapping / toe names).
 DATASET_TO_FORMAT: dict[str, str] = {
     "omomo": "smplh",
-    "hoim3": "smplx",
+    "hodome": "smplx",
     "sfu": "smplx",
     "lafan": "lafan",
     "climbing": "mocap",

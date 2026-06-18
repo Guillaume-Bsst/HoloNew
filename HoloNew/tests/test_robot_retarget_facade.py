@@ -13,7 +13,7 @@ def test_new_fields_default_none():
 
 
 def test_validation_requires_paths_when_dataset_set():
-    cfg = RetargetingConfig(dataset="hoim3", task_type="robot_only")
+    cfg = RetargetingConfig(dataset="hodome", task_type="robot_only")
     with pytest.raises(ValueError, match="requires --model-path"):
         _validate_dataset_paths(cfg)
 

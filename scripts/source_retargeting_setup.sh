@@ -17,7 +17,7 @@ export WBT_SMPLH_DIR="${WBT_SMPLH_DIR:-${WBT_RL_ROOT}/data/00_raw_datasets/model
 export WBT_OMOMO_DIR="${WBT_OMOMO_DIR:-${WBT_RL_ROOT}/data/00_raw_datasets/OMOMO}"
 # Global dataset roots for the --motion-name resolver (resolve files by sequence name).
 export WBT_OMOMO_NEW_DIR="${WBT_OMOMO_NEW_DIR:-${WBT_RL_ROOT}/data/00_raw_datasets/OMOMO_new/OMOMO_new}"
-export WBT_HOIM3_DIR="${WBT_HOIM3_DIR:-${WBT_RL_ROOT}/data/00_raw_datasets/HOI-M3}"
+export WBT_HODOME_DIR="${WBT_HODOME_DIR:-${WBT_RL_ROOT}/data/00_raw_datasets/HODome}"
 
 source ${SCRIPT_DIR}/source_common.sh
 source ${CONDA_ROOT}/bin/activate $CONDA_ENV_NAME

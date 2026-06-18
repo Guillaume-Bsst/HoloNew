@@ -6,7 +6,7 @@ unchanged.
 - omomo: motion is the InterMimic .pt (data_format smplh); betas live in the non-new
   OMOMO pickle (model_path) whose root (two levels up) is the omomo_dir the SMPL-X
   mesh / probe read.
-- hoim3: the raw HODome SMPL-X .npz is prepped once into the processed smplx npz the
+- hodome: the raw HODome SMPL-X .npz is prepped once into the processed smplx npz the
   smplx retargeting path consumes, cached on disk; data_format becomes smplx.
 """
 from __future__ import annotations
@@ -18,10 +18,10 @@ from pathlib import Path
 import numpy as np
 
 from HoloNew.src.data_loaders.base import DATASET_TO_FORMAT
-from HoloNew.src.data_loaders.hoim3 import prep_hoim3_processed
+from HoloNew.src.data_loaders.hodome import prep_hodome_processed
 
-# Disk cache for prepped HOI-M3 processed npz (one per sequence stem).
-_HOIM3_CACHE_DIR = Path(tempfile.gettempdir()) / "holonew_hoim3_processed"
+# Disk cache for prepped HODome processed npz (one per sequence stem).
+_HODOME_CACHE_DIR = Path(tempfile.gettempdir()) / "holonew_hodome_processed"
 
 
 def _root(env: str, label: str) -> Path:
@@ -40,7 +40,7 @@ def _root(env: str, label: str) -> Path:
 def resolve_paths_by_name(dataset: str, name: str):
     """Resolve (model_path, motion_path, obj_path, smpl_model_dir) from the global
     dataset roots given only the sequence name. obj_path is None when absent/not
-    applicable. Supported for omomo and hoim3 (the multi-file datasets)."""
+    applicable. Supported for omomo and hodome (the multi-file datasets)."""
     if dataset == "omomo":
         motion = _root("WBT_OMOMO_NEW_DIR", "OMOMO_new .pt dir") / f"{name}.pt"
         omomo = _root("WBT_OMOMO_DIR", "OMOMO release root")
@@ -56,8 +56,8 @@ def resolve_paths_by_name(dataset: str, name: str):
             obj = matches[0] if matches else None
         return model, motion, obj, smpl_model_dir
 
-    if dataset == "hoim3":
-        root = _root("WBT_HOIM3_DIR", "HOI-M3 release root")
+    if dataset == "hodome":
+        root = _root("WBT_HODOME_DIR", "HODome release root")
         motion = root / "smplx" / f"{name}.npz"
         obj = root / "object" / f"{name}.npz"
         model = _root("WBT_SMPLX_DIR", "SMPL-X models root") / "smplx"
@@ -104,14 +104,14 @@ def normalize_dataset_cfg(cfg) -> None:
         # pickle file passed as model_path (…/OMOMO/data/<file>.p -> …/OMOMO).
         cfg.omomo_dir = Path(cfg.model_path).parent.parent
 
-    elif dataset == "hoim3":
+    elif dataset == "hodome":
         stem = Path(cfg.motion_path).stem
-        _HOIM3_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        processed = _HOIM3_CACHE_DIR / f"{stem}.npz"
+        _HODOME_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        processed = _HODOME_CACHE_DIR / f"{stem}.npz"
         if not processed.exists():
-            data = prep_hoim3_processed(Path(cfg.motion_path), Path(cfg.model_path))
+            data = prep_hodome_processed(Path(cfg.motion_path), Path(cfg.model_path))
             np.savez(processed, **data)
-        cfg.data_path = _HOIM3_CACHE_DIR
+        cfg.data_path = _HODOME_CACHE_DIR
         cfg.task_name = stem
 
     else:

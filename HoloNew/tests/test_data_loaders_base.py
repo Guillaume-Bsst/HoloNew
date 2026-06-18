@@ -7,7 +7,7 @@ from HoloNew.src.data_loaders.base import (
 
 def test_dataset_to_format_map():
     assert DATASET_TO_FORMAT == {
-        "omomo": "smplh", "hoim3": "smplx", "sfu": "smplx",
+        "omomo": "smplh", "hodome": "smplx", "sfu": "smplx",
         "lafan": "lafan", "climbing": "mocap",
     }
 
