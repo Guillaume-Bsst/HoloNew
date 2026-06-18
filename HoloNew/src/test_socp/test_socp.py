@@ -19,7 +19,6 @@ from __future__ import annotations
 from pathlib import Path
 from types import ModuleType
 
-import cvxpy as cp
 import mujoco
 import numpy as np
 import pinocchio as pin
@@ -677,13 +676,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
             from HoloNew.src.test_socp.interaction import build_obj_surface_nonpen_blocks
             q_pin = _q_pin
             _surf_cons = build_obj_surface_nonpen_blocks(
-                self, q_pin, frame_idx, obj_pose, tol=self.obj_surface_nonpen_tol)
-            # The block always carries the object coupling A_obj; when the object is
-            # not a variable (n_obj==0, dxi None) the original constraint had no object
-            # term, so drop A_obj to match (and keep the spec's n_obj==0 contract).
-            if not has_dxi:
-                for c in _surf_cons:
-                    c.A_obj = None
+                self, q_pin, frame_idx, obj_pose, tol=self.obj_surface_nonpen_tol,
+                has_dxi=has_dxi)
             constraints += _surf_cons
 
         # Temporal regularization W^r (default off; only active when lambda_r > 0

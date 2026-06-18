@@ -1191,7 +1191,8 @@ def build_p_blocks(rt, q_pin: np.ndarray, t: int,
 
 def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
                                     obj_pose: np.ndarray,
-                                    tol: float = 0.0) -> list:
+                                    tol: float = 0.0,
+                                    has_dxi: bool = False) -> list:
     """Hard non-penetration of robot control points against the object surface.
 
     Numpy/solver-agnostic counterpart of :func:`build_obj_surface_nonpen_constraints`.
@@ -1216,6 +1217,11 @@ def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
         t: Frame index (unused — kept for signature parity with other builders).
         obj_pose: (7,) [qw, qx, qy, qz, x, y, z] object pose.
         tol: Non-penetration tolerance (metres). Defaults to 0.
+        has_dxi: When True (object is a variable), each returned LinearConstraint
+            carries ``A_obj = -(n0 @ Bobj_i)`` for the bilateral coupling.  When
+            False (object not a variable, default), ``A_obj`` is set to None so
+            the constraint is robot-DOF-only.  Mirrors the ``dxi is not None``
+            gating in :func:`build_obj_surface_nonpen_constraints`.
 
     Returns:
         List of LinearConstraint, one per active point.
@@ -1241,11 +1247,15 @@ def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
         # A·dqa >= lb  with A = n0 @ J_i, lb = -tol - d0
         A = (n0[np.newaxis] @ jacs[k])                    # (1, nv_a)
         lb = np.array([-tol - d0])                        # (1,)
-        # A_obj·dxi contributes -n0 @ Bobj_i @ dxi, so A_obj = -(n0 @ Bobj_i)
-        # Bobj_i uses world-frame rigid motion (no Robj.T) — matches the original scalar
-        # constraint in build_obj_surface_nonpen_constraints where n0 is a world-frame normal.
-        Bobj_i = np.hstack([I3, -_skew(P[i])])            # world rigid motion (3, 6)
-        A_obj = -(n0[np.newaxis] @ Bobj_i)                # (1, 6)
+        if has_dxi:
+            # A_obj·dxi contributes -n0 @ Bobj_i @ dxi, so A_obj = -(n0 @ Bobj_i)
+            # Bobj_i uses world-frame rigid motion (no Robj.T) — matches the original
+            # scalar constraint in build_obj_surface_nonpen_constraints where n0 is
+            # a world-frame normal.
+            Bobj_i = np.hstack([I3, -_skew(P[i])])        # world rigid motion (3, 6)
+            A_obj = -(n0[np.newaxis] @ Bobj_i)             # (1, 6)
+        else:
+            A_obj = None
         cons.append(LinearConstraint(A=A, lb=lb, A_obj=A_obj, name=f"nonpen_obj_{i}"))
     return cons
 
