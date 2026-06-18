@@ -198,23 +198,27 @@ def view(cfg: ViewStagesConfig) -> None:
         object_sdf_floor_cols = signed_distance_colors(object_sdf_floor_pts[:, 2], _L_flr_view)
 
         parts = cfg.task_name.split("_")
-        # Prefer the façade-resolved global mesh (captured_objects/<obj>.obj); fall back
-        # to the bundled models/<obj>/<obj>.obj for the legacy (non-façade) invocation.
-        # The captured_objects mesh is the canonical unit object: its per-sequence size is
-        # the OMOMO obj_scale (same .p as the betas), so it must be scaled in object-local
-        # space to match the human. The bundled models/ mesh is already pre-scaled (it is
-        # the captured one × obj_scale), so it keeps obj_geom_scale = 1.
-        obj_geom_scale = 1.0
-        if cfg.obj_path is not None and Path(cfg.obj_path).exists():
+        # The .pt object poses place the object's CENTROID, so the mesh must be centred on
+        # its centroid and at the sequence's real size. Two equivalent sources:
+        #  - bundled models/<obj>/<obj>.obj: already centred + pre-scaled (= captured one
+        #    recentred × obj_scale), and the exact mesh the solver loads. Preferred, but
+        #    only a few objects are bundled.
+        #  - façade captured_objects/<obj>.obj: the canonical UNIT mesh with an off-origin
+        #    frame, covering every object. Recentre it on its centroid and scale by the
+        #    per-sequence obj_scale (same .p as the betas) to reproduce the bundled one.
+        bundled = (Path("models") / parts[1] / f"{parts[1]}.obj") if len(parts) >= 2 else None
+        obj_geom_scale, obj_recenter = 1.0, False
+        if bundled is not None and bundled.exists():
+            obj_file = bundled
+        elif cfg.obj_path is not None and Path(cfg.obj_path).exists():
             obj_file = Path(cfg.obj_path)
+            obj_recenter = True
             _os = load_object_scale(cfg.omomo_dir, cfg.task_name) if cfg.omomo_dir else None
             if _os is not None:
                 obj_geom_scale = _os
             else:
                 logger.warning("No obj_scale for %s; object shown at native (unit) size.",
                                cfg.task_name)
-        elif len(parts) >= 2:
-            obj_file = Path("models") / parts[1] / f"{parts[1]}.obj"
         else:
             obj_file = None
         try:
@@ -224,15 +228,18 @@ def view(cfg: ViewStagesConfig) -> None:
                 object_pose_scaled = convert_object_poses_to_mujoco_order(
                     scale_object_poses_to_center(obj_poses, smpl_scale))
                 mesh = trimesh.load(str(obj_file), force="mesh", process=False)
-                # Resize the canonical mesh to the sequence's real object size (obj_scale)
-                # in object-local space; the pose origin is unchanged so placement holds.
-                object_mesh_verts = np.asarray(mesh.vertices, np.float32) * obj_geom_scale
+                _verts = np.asarray(mesh.vertices, np.float32)
+                # Recentre the off-origin captured mesh onto its centroid (no-op for the
+                # already-centred bundled mesh), then resize to the real object size.
+                obj_geom_center = _verts.mean(0) if obj_recenter else np.zeros(3, np.float32)
+                object_mesh_verts = (_verts - obj_geom_center) * obj_geom_scale
                 object_mesh_faces = np.asarray(mesh.faces, np.uint32)
                 # Native-size local samples (same sampling as the solve: sample_count=100,
                 # seed=42); placed at the active stage's pose, native size on every stage.
                 object_points_local, _ = load_object_data(
                     str(obj_file), smpl_scale=smpl_scale, sample_count=100)
-                object_points_local = np.asarray(object_points_local, np.float32) * obj_geom_scale
+                object_points_local = (np.asarray(object_points_local, np.float32)
+                                       - obj_geom_center) * obj_geom_scale
 
                 # Object SDF for the "SDF Object" band-shell viz. Uses the SAME keyed,
                 # disk-cached field as the solve (load_or_build_object_sdf), resolved at the
@@ -246,11 +253,11 @@ def view(cfg: ViewStagesConfig) -> None:
                 logger.info("Object SDF %s: %s  (L=%.3f m, res=%.3f m, %d nodes)",
                             "loaded" if _existed else "built+cached", _cache.name,
                             _L_view, _sc.sdf_resolution, int(np.prod(sdf.dims)))
-                # Band points + distances live in the canonical mesh frame; scale both by
-                # obj_geom_scale so the shell wraps the resized mesh and the colour scale
-                # (vs _L_view) still reflects true metric distances.
+                # Band points + distances live in the mesh frame; recentre + scale the
+                # points like the mesh so the shell wraps the resized object, and scale the
+                # distances so the colour scale (vs _L_view) still reads true metric depth.
                 band_pts, band_dist = band_points(sdf, _L_view)
-                object_sdf_pts = band_pts * obj_geom_scale
+                object_sdf_pts = (band_pts - obj_geom_center) * obj_geom_scale
                 object_sdf_cols = signed_distance_colors(band_dist * obj_geom_scale, _L_view)
             else:
                 logger.warning("No object mesh at %s; object disabled.", obj_file)
