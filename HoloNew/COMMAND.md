@@ -50,21 +50,34 @@ python examples/robot_retarget.py \
 The same script also accepts a `--dataset` key plus three explicit, no-default paths
 (`--model-path` / `--motion-path` / `--obj-path`). When `--dataset` is set it replaces
 `--data_path`/`--task-name`/`--data_format`; the legacy flags above keep working when it
-is omitted.
+is omitted. `<...>` below are placeholders for paths outside this repo.
 
 ```bash
-# OMOMO robot_only: motion from the new .pt, betas from the non-new pickle.
-# --smpl-model-dir is explicit (no default) — it provides the SMPL-H body model
-# used to turn the betas into a stature for the scale factor.
+# OMOMO robot_only — motion from the new .pt, betas from the non-new pickle.
+# --smpl-model-dir is explicit (no default): the SMPL-H body model that turns the
+# betas into a stature for the scale factor.
 python examples/robot_retarget.py --dataset omomo --task-type robot_only \
-  --model-path /path/OMOMO/data/train_diffusion_manip_seq_joints24.p \
-  --motion-path demo_data/OMOMO_new/sub3_largebox_003.pt \
-  --smpl-model-dir /path/models/smplh
+  --model-path     <OMOMO>/data/train_diffusion_manip_seq_joints24.p \
+  --motion-path    <OMOMO_NEW>/sub3_largebox_003.pt \
+  --smpl-model-dir <MODELS>/smplh
 
-# HOI-M3 robot_only: raw SMPL-X .npz + SMPL-X body model dir
+# OMOMO object_interaction — same, plus the object mesh via --obj-path.
+python examples/robot_retarget.py --dataset omomo --task-type object_interaction \
+  --model-path     <OMOMO>/data/train_diffusion_manip_seq_joints24.p \
+  --motion-path    <OMOMO_NEW>/sub3_largebox_003.pt \
+  --obj-path       <OMOMO>/data/captured_objects/largebox.obj \
+  --smpl-model-dir <MODELS>/smplh
+
+# HOI-M3 robot_only — raw SMPL-X .npz; --model-path is the SMPL-X body-model dir.
 python examples/robot_retarget.py --dataset hoim3 --task-type robot_only \
-  --model-path /path/models/models_smplx_v1_1/models/smplx \
-  --motion-path /path/HOI-M3/smplx/subject01_baseball.npz
+  --model-path  <MODELS>/models_smplx_v1_1/models/smplx \
+  --motion-path <HOIM3>/smplx/subject01_baseball.npz
+
+# HOI-M3 object_interaction — plus the object 6DoF .npz via --obj-path.
+python examples/robot_retarget.py --dataset hoim3 --task-type object_interaction \
+  --model-path  <MODELS>/models_smplx_v1_1/models/smplx \
+  --motion-path <HOIM3>/smplx/subject01_baseball.npz \
+  --obj-path    <HOIM3>/object/subject01_baseball.npz
 ```
 
 ### GMR-SOCP / TEST-SOCP
@@ -237,15 +250,16 @@ solvers receive (no extra re-grounding — the `Original` stage is the literal
 preprocess input, so the mesh stays aligned with it). Two data sources, both used
 automatically:
 
-- **SMPL-X model dir** — `SMPLX_MODEL_DIR_DEFAULT`:
-  `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models`
+- **SMPL-X model dir** — `SMPLX_MODEL_DIR_DEFAULT`
+  (`src/test_socp/correspondence/constants.py`): `<MODELS>/models_smplx_v1_1/models`
 - **Subject shape (betas + gender)** — loaded by default from `OMOMO_DIR_DEFAULT`
-  (the original OMOMO release holding `data/{train,test}_diffusion_manip_seq_joints24.p`,
-  NOT `OMOMO_new`), so the mesh gets the subject's real body, not the neutral mean:
-  `/home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO`
+  (`src/test_socp/contact/constants.py` — the original OMOMO release holding
+  `data/{train,test}_diffusion_manip_seq_joints24.p`, NOT `OMOMO_new`), so the mesh
+  gets the subject's real body, not the neutral mean: `<OMOMO>`
 
 Override the OMOMO root with `--omomo_dir <path>` if needed; a missing file degrades
-to the neutral shape.
+to the neutral shape. (`<...>` are placeholders — the two constants currently hold
+absolute paths; see the note below.)
 
 ```bash
 # betas load automatically — no extra flag needed
