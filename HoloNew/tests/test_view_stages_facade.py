@@ -41,3 +41,34 @@ def test_facade_hoim3_feeds_load():
     assert cfg.data_format == "smplx"
     assert hj.shape[1:] == (22, 3)
     assert scale > 0
+
+
+_OMOMO_ROOT = _REPO / "data/00_raw_datasets/OMOMO"
+_OMOMO_NEW_ROOT = _REPO / "data/00_raw_datasets/OMOMO_new/OMOMO_new"
+_SMPLH_DIR = _REPO / "data/00_raw_datasets/models/smplh"
+_HOIM3_ROOT = _REPO / "data/00_raw_datasets/HOI-M3"
+_SMPLX_ROOT = _REPO / "data/00_raw_datasets/models/models_smplx_v1_1/models"
+
+
+@pytest.mark.skipif(not ((_OMOMO_NEW_ROOT / "sub3_largebox_003.pt").exists() and _SMPLH_DIR.exists()),
+                    reason="OMOMO global roots not present")
+def test_facade_by_name_omomo(monkeypatch):
+    monkeypatch.setenv("WBT_OMOMO_NEW_DIR", str(_OMOMO_NEW_ROOT))
+    monkeypatch.setenv("WBT_OMOMO_DIR", str(_OMOMO_ROOT))
+    monkeypatch.setenv("WBT_SMPLH_DIR", str(_SMPLH_DIR))
+    cfg = RetargetingConfig(dataset="omomo", task_type="robot_only", motion_name="sub3_largebox_003")
+    hj, op, scale = _load_like_view(cfg)
+    assert cfg.task_name == "sub3_largebox_003" and hj.shape[1:] == (52, 3) and scale > 0
+
+
+@pytest.mark.skipif(not ((_HOIM3_ROOT / "smplx/subject01_baseball.npz").exists() and _SMPLX_DIR.exists()),
+                    reason="HOI-M3 global roots not present")
+def test_facade_by_name_hoim3(monkeypatch):
+    monkeypatch.setenv("WBT_HOIM3_DIR", str(_HOIM3_ROOT))
+    monkeypatch.setenv("WBT_SMPLX_DIR", str(_SMPLX_ROOT))
+    # robot_only here: the resolver still fills obj_path by name (object_interaction
+    # loading for smplx is a separate, not-yet-wired path).
+    cfg = RetargetingConfig(dataset="hoim3", task_type="robot_only", motion_name="subject01_baseball")
+    hj, op, scale = _load_like_view(cfg)
+    assert cfg.data_format == "smplx" and hj.shape[1:] == (22, 3)
+    assert cfg.obj_path is not None and cfg.obj_path.name == "subject01_baseball.npz"

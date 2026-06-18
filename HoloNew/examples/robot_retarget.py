@@ -629,6 +629,8 @@ def main(cfg: RetargetingConfig) -> RetargetResult | None:
     # the dataset key maps to the internal data_format; otherwise use the legacy field.
     if cfg.dataset is not None:
         from HoloNew.src.data_loaders import DATASET_TO_FORMAT, resolve_loader
+        from HoloNew.src.data_loaders.facade import resolve_motion_name_into_cfg
+        resolve_motion_name_into_cfg(cfg)  # --motion-name -> the three paths
         _validate_dataset_paths(cfg)
         data_format = DATASET_TO_FORMAT[cfg.dataset]
     else:

@@ -185,26 +185,31 @@ python examples/view_stages.py
 
 #### 3-path façade on the stage viewer (OMOMO mixed / HOI-M3)
 
-`view_stages.py` accepts the same `--dataset` + `--model-path` / `--motion-path`
-(/ `--obj-path`) façade as `robot_retarget.py`. When `--dataset` is set, the three
-paths are normalized into the internal load fields, so all selected methods
-(holosoma / GMR-SOCP / TEST-SOCP) run on the chosen sequence. HOI-M3's raw SMPL-X is
-prepped once (cached) into the processed format the smplx path consumes. Paths below
-are our current local config.
+`view_stages.py` accepts the same `--dataset` façade as `robot_retarget.py`. The
+**simplest form is `--motion-name <seq>`**: with `--dataset`, the model / motion /
+object files are resolved automatically from the global dataset roots (the
+`WBT_OMOMO_DIR` / `WBT_OMOMO_NEW_DIR` / `WBT_HOIM3_DIR` / `WBT_SMPLX_DIR` /
+`WBT_SMPLH_DIR` env vars, exported by `source_retargeting_setup.sh`). All selected
+methods (holosoma / GMR-SOCP / TEST-SOCP) then run on that sequence. HOI-M3's raw
+SMPL-X is prepped once (cached) into the processed format the smplx path consumes.
 
 ```bash
-# OMOMO (motion from the new .pt, betas from the non-new pickle), all three methods
+# By name — files resolved from the global roots, nothing else to type:
 python examples/view_stages.py --dataset omomo --task-type robot_only \
-  --model-path  /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/OMOMO/data/train_diffusion_manip_seq_joints24.p \
-  --motion-path demo_data/OMOMO_new/sub3_largebox_003.pt \
-  --methods gmr_socp test_socp
+  --motion-name sub3_largebox_003 --methods gmr_socp test_socp
 
-# HOI-M3 (raw SMPL-X; --model-path is the SMPL-X body-model dir)
 python examples/view_stages.py --dataset hoim3 --task-type robot_only \
-  --model-path  /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx \
-  --motion-path /home/gbesset/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/smplx/subject01_baseball.npz \
-  --methods test_socp --max-frames 200
+  --motion-name subject01_baseball --methods test_socp --max-frames 200
 ```
+
+The explicit-path form still works (and overrides name resolution) when files live
+elsewhere — `--model-path` / `--motion-path` (/ `--obj-path`, `--smpl-model-dir`).
+`--motion-name` is supported for `omomo` and `hoim3`; the same flags work on
+`robot_retarget.py`.
+
+> Note: `--obj-path` is resolved by name too, but the **object overlay in the viewer
+> is currently wired only for the OMOMO smplh path** — HOI-M3 shows human + robot, not
+> the object.
 
 Use `--methods` to solve only a subset instead of all three. Choices:
 `holosoma`, `gmr_socp`, `test_socp` (space-separated, order preserved).

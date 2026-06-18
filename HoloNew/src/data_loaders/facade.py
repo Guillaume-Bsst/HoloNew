@@ -11,6 +11,7 @@ unchanged.
 """
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -23,14 +24,74 @@ from HoloNew.src.data_loaders.hoim3 import prep_hoim3_processed
 _HOIM3_CACHE_DIR = Path(tempfile.gettempdir()) / "holonew_hoim3_processed"
 
 
+def _root(env: str, label: str) -> Path:
+    """Read a global dataset root from an env var; raise a clear error if unset.
+
+    Roots are exported (repo-relative, overridable) by scripts/source_retargeting_setup.sh.
+    """
+    val = os.environ.get(env, "")
+    if not val:
+        raise ValueError(
+            f"--motion-name needs ${env} set ({label}); source "
+            f"scripts/source_retargeting_setup.sh or export it.")
+    return Path(val)
+
+
+def resolve_paths_by_name(dataset: str, name: str):
+    """Resolve (model_path, motion_path, obj_path, smpl_model_dir) from the global
+    dataset roots given only the sequence name. obj_path is None when absent/not
+    applicable. Supported for omomo and hoim3 (the multi-file datasets)."""
+    if dataset == "omomo":
+        motion = _root("WBT_OMOMO_NEW_DIR", "OMOMO_new .pt dir") / f"{name}.pt"
+        omomo = _root("WBT_OMOMO_DIR", "OMOMO release root")
+        model = omomo / "data" / "train_diffusion_manip_seq_joints24.p"
+        smpl_model_dir = _root("WBT_SMPLH_DIR", "SMPL-H model dir")
+        # Object name is the 2nd token (sub3_largebox_003 -> largebox); meshes are
+        # named <obj>_cleaned_simplified.obj.
+        obj = None
+        parts = name.split("_")
+        if len(parts) >= 2:
+            matches = sorted((omomo / "data" / "captured_objects").glob(
+                f"{parts[1]}_cleaned_simplified.obj"))
+            obj = matches[0] if matches else None
+        return model, motion, obj, smpl_model_dir
+
+    if dataset == "hoim3":
+        root = _root("WBT_HOIM3_DIR", "HOI-M3 release root")
+        motion = root / "smplx" / f"{name}.npz"
+        obj = root / "object" / f"{name}.npz"
+        model = _root("WBT_SMPLX_DIR", "SMPL-X models root") / "smplx"
+        return model, motion, (obj if obj.exists() else None), None
+
+    raise ValueError(
+        f"--motion-name is not supported for dataset {dataset!r}; pass explicit "
+        f"--model-path/--motion-path instead.")
+
+
+def resolve_motion_name_into_cfg(cfg) -> None:
+    """Fill cfg.model_path/motion_path/obj_path/smpl_model_dir from cfg.motion_name via
+    the global dataset roots. Explicit paths already set are kept (explicit wins).
+    No-op if motion_name is None or both core paths are already provided."""
+    if cfg.motion_name is None or (cfg.model_path is not None and cfg.motion_path is not None):
+        return
+    model, motion, obj, smpl_model_dir = resolve_paths_by_name(cfg.dataset, cfg.motion_name)
+    cfg.model_path = cfg.model_path or model
+    cfg.motion_path = cfg.motion_path or motion
+    cfg.obj_path = cfg.obj_path or obj
+    cfg.smpl_model_dir = cfg.smpl_model_dir or smpl_model_dir
+
+
 def normalize_dataset_cfg(cfg) -> None:
     """When cfg.dataset is set, fill the legacy fields in place. No-op otherwise."""
     if cfg.dataset is None:
         return
 
+    # --motion-name: resolve model/motion/obj/smpl-model from the global dataset roots.
+    resolve_motion_name_into_cfg(cfg)
+
     if cfg.model_path is None or cfg.motion_path is None:
         raise ValueError(
-            f"--dataset {cfg.dataset} requires --model-path and --motion-path.")
+            f"--dataset {cfg.dataset} requires --motion-name, or --model-path and --motion-path.")
 
     dataset = cfg.dataset
     cfg.data_format = DATASET_TO_FORMAT[dataset]

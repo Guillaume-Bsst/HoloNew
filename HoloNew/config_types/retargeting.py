@@ -52,6 +52,11 @@ class RetargetingConfig:
     obj_path: Path | None = None
     """Façade slot 3 — object source (required for object_interaction)."""
 
+    motion_name: str | None = None
+    """Sequence name (e.g. sub3_largebox_003, subject01_baseball). When set with
+    --dataset, model/motion/obj paths are resolved automatically from the global
+    dataset roots (env vars), so the explicit paths are not needed."""
+
     smpl_model_dir: Path | None = None
     """Explicit body-model directory (no default). Required by datasets that need
     forward kinematics from a separate model (omomo, for its betas-based height)."""
