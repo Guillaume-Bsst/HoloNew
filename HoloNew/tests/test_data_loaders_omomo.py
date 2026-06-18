@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -6,6 +7,10 @@ import joblib
 import pytest
 
 from HoloNew.src.data_loaders.omomo import OmomoMixedLoader
+
+# Shared SMPL-H model dir, resolved relative to the wbt_rl repo root (no machine path).
+# tests/<this file> -> parents[5] == wbt_rl repo root.
+_SMPLH_DIR = Path(__file__).resolve().parents[5] / "data/00_raw_datasets/models/smplh"
 
 
 def _make_pt(path, T=4):
@@ -23,6 +28,18 @@ def _make_pickle(path, seq_name):
     joblib.dump({0: entry}, path)
 
 
+def test_omomo_requires_explicit_model_dir(tmp_path):
+    seq = "sub3_largebox_003"
+    pt = tmp_path / f"{seq}.pt"; _make_pt(pt)
+    pk = tmp_path / "train.p"; _make_pickle(pk, seq)
+    with pytest.raises(ValueError, match="smpl-model-dir"):
+        OmomoMixedLoader().load(
+            model_path=pk, motion_path=pt, obj_path=None, task_type="robot_only",
+            constants=SimpleNamespace(ROBOT_HEIGHT=1.32), motion_data_config=None,
+            smpl_model_dir=None)
+
+
+@pytest.mark.skipif(not _SMPLH_DIR.exists(), reason="shared SMPL-H model not present")
 def test_omomo_loader_robot_only(tmp_path):
     seq = "sub3_largebox_003"
     pt = tmp_path / f"{seq}.pt"; _make_pt(pt)
@@ -31,7 +48,8 @@ def test_omomo_loader_robot_only(tmp_path):
 
     hj, op, scale = OmomoMixedLoader().load(
         model_path=pk, motion_path=pt, obj_path=None,
-        task_type="robot_only", constants=constants, motion_data_config=None)
+        task_type="robot_only", constants=constants, motion_data_config=None,
+        smpl_model_dir=_SMPLH_DIR)
 
     assert hj.shape == (4, 52, 3)
     assert op.shape == (4, 7)

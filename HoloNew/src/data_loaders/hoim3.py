@@ -47,7 +47,8 @@ def hoim3_object_poses(npz_path: Path) -> np.ndarray:
 @register_loader("hoim3")
 class HoiM3Loader(MotionLoader):
     def load(self, *, model_path, motion_path, obj_path, task_type,
-             constants, motion_data_config):
+             constants, motion_data_config, smpl_model_dir=None):
+        # hoim3 uses model_path as its SMPL-X body-model dir; smpl_model_dir is unused.
         human_joints, height = hoim3_fk(Path(motion_path), Path(model_path))
         smpl_scale = float(constants.ROBOT_HEIGHT) / height
 

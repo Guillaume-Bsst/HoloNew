@@ -53,10 +53,13 @@ The same script also accepts a `--dataset` key plus three explicit, no-default p
 is omitted.
 
 ```bash
-# OMOMO robot_only: motion from the new .pt, betas from the non-new pickle
+# OMOMO robot_only: motion from the new .pt, betas from the non-new pickle.
+# --smpl-model-dir is explicit (no default) — it provides the SMPL-H body model
+# used to turn the betas into a stature for the scale factor.
 python examples/robot_retarget.py --dataset omomo --task-type robot_only \
   --model-path /path/OMOMO/data/train_diffusion_manip_seq_joints24.p \
-  --motion-path demo_data/OMOMO_new/sub3_largebox_003.pt
+  --motion-path demo_data/OMOMO_new/sub3_largebox_003.pt \
+  --smpl-model-dir /path/models/smplh
 
 # HOI-M3 robot_only: raw SMPL-X .npz + SMPL-X body model dir
 python examples/robot_retarget.py --dataset hoim3 --task-type robot_only \

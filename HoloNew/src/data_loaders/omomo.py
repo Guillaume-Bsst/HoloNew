@@ -8,9 +8,7 @@ import numpy as np
 import smplx
 import torch
 
-from HoloNew.src.data_loaders.base import (
-    MotionLoader, SMPLH_MODEL_DIR_DEFAULT, register_loader,
-)
+from HoloNew.src.data_loaders.base import MotionLoader, register_loader
 from HoloNew.src.utils import load_intermimic_data
 
 
@@ -45,13 +43,18 @@ def _betas_for_seq(pickle_path: Path, seq_name: str) -> tuple[np.ndarray, str]:
 @register_loader("omomo")
 class OmomoMixedLoader(MotionLoader):
     def load(self, *, model_path, motion_path, obj_path, task_type,
-             constants, motion_data_config):
+             constants, motion_data_config, smpl_model_dir=None):
+        if smpl_model_dir is None:
+            raise ValueError(
+                "OMOMO height needs the SMPL-H body model: pass --smpl-model-dir "
+                "(e.g. <models>/smplh). No default is assumed.")
+
         human_joints, object_poses = load_intermimic_data(str(motion_path))
         if task_type == "robot_only":
             n = human_joints.shape[0]
             object_poses = np.tile(np.array([[1, 0, 0, 0, 0, 0, 0]]), (n, 1))
 
         betas, gender = _betas_for_seq(Path(model_path), Path(motion_path).stem)
-        height = omomo_height_from_betas(betas, gender, SMPLH_MODEL_DIR_DEFAULT)
+        height = omomo_height_from_betas(betas, gender, Path(smpl_model_dir))
         smpl_scale = float(constants.ROBOT_HEIGHT) / height
         return human_joints, object_poses, smpl_scale

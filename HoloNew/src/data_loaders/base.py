@@ -8,7 +8,6 @@ motion contract consumed by robot_retarget.main():
 """
 from __future__ import annotations
 
-import os
 from abc import ABC, abstractmethod
 from pathlib import Path
 
@@ -23,23 +22,20 @@ DATASET_TO_FORMAT: dict[str, str] = {
     "climbing": "mocap",
 }
 
-# Shared body-model directories (env-overridable; default to the wbt_rl shared models).
-# Default is anchored to the wbt_rl repo root relative to this file
-# (base.py is at modules/01_retargeting/HoloNew/HoloNew/src/data_loaders/base.py),
-# so it is independent of the current working directory.
-_WBT_REPO_ROOT = Path(__file__).resolve().parents[6]
-SMPLH_MODEL_DIR_DEFAULT = Path(
-    os.environ.get("WBT_SMPLH_DIR", str(_WBT_REPO_ROOT / "data/00_raw_datasets/models/smplh"))
-)
-
 
 class MotionLoader(ABC):
-    """Turns (model_path, motion_path, obj_path) into the unified motion contract."""
+    """Turns (model_path, motion_path, obj_path) into the unified motion contract.
+
+    `smpl_model_dir` is an explicit, no-default body-model directory used only by
+    loaders that need forward kinematics from a separate model (OMOMO, for its
+    betas-based height). Loaders that don't need it ignore the argument.
+    """
 
     @abstractmethod
     def load(self, *, model_path: Path | None, motion_path: Path,
              obj_path: Path | None, task_type: str, constants,
-             motion_data_config) -> tuple[np.ndarray, np.ndarray, float]:
+             motion_data_config,
+             smpl_model_dir: Path | None = None) -> tuple[np.ndarray, np.ndarray, float]:
         ...
 
 

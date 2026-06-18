@@ -670,6 +670,7 @@ def main(cfg: RetargetingConfig) -> RetargetResult | None:
         human_joints, object_poses, smpl_scale = resolve_loader(cfg.dataset).load(
             model_path=cfg.model_path, motion_path=cfg.motion_path, obj_path=cfg.obj_path,
             task_type=task_type, constants=constants, motion_data_config=cfg.motion_data_config,
+            smpl_model_dir=cfg.smpl_model_dir,
         )
     else:
         human_joints, object_poses, smpl_scale = load_motion_data(

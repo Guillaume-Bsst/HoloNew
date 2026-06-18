@@ -13,7 +13,7 @@ class LegacyLoader(MotionLoader):
         self.dataset = dataset
 
     def load(self, *, model_path, motion_path, obj_path, task_type,
-             constants, motion_data_config):
+             constants, motion_data_config, smpl_model_dir=None):
         motion_path = Path(motion_path)
         return load_motion_data(
             task_type,

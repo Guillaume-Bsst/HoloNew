@@ -52,6 +52,10 @@ class RetargetingConfig:
     obj_path: Path | None = None
     """Façade slot 3 — object source (required for object_interaction)."""
 
+    smpl_model_dir: Path | None = None
+    """Explicit body-model directory (no default). Required by datasets that need
+    forward kinematics from a separate model (omomo, for its betas-based height)."""
+
     save_dir: Path | None = None
     """Directory to save results. Auto-determined if None."""
 
