@@ -11,7 +11,7 @@ import numpy as np
 
 from HoloNew.src.holosoma.interaction_mesh import transform_points_world_to_local
 from HoloNew.src.test_socp.contact.backends.floor import floor_field
-from HoloNew.src.test_socp.solve.spec import ResidualBlock
+from HoloNew.src.test_socp.solve.spec import LinearConstraint, ResidualBlock
 
 
 def _world_to_object_local(pts_world: np.ndarray, obj_pose: np.ndarray) -> np.ndarray:
@@ -1183,3 +1183,231 @@ def build_p_blocks(rt, q_pin: np.ndarray, t: int,
     B_p = np.vstack(B_p_rows)      # (3*K, nv_a)
     r_p = np.concatenate(r_p_rows) # (3*K,)
     return [ResidualBlock(A=B_p, c=-r_p, name="W_p")]
+
+
+# ---------------------------------------------------------------------------
+# LinearConstraint versions of hard constraint builders (numpy, no cvxpy Variables)
+# ---------------------------------------------------------------------------
+
+def build_obj_surface_nonpen_blocks(rt, q_pin: np.ndarray, t: int,
+                                    obj_pose: np.ndarray,
+                                    tol: float = 0.0) -> list:
+    """Hard non-penetration of robot control points against the object surface.
+
+    Numpy/solver-agnostic counterpart of :func:`build_obj_surface_nonpen_constraints`.
+    Returns :class:`~HoloNew.src.test_socp.solve.spec.LinearConstraint` instances
+    instead of cvxpy inequalities.
+
+    The original constraint per active point i is::
+
+        d0_i + n0_i @ (J_i @ dqa) - n0_i @ (Bobj_i @ dxi) >= -tol
+
+    Rewritten as ``A·dqa + A_obj·dxi >= lb``::
+
+        A     = n0_i[np.newaxis] @ J_i           # (1, nv_a)
+        A_obj = -(n0_i[np.newaxis] @ Bobj_i)     # (1, 6)  [negated: dxi is subtracted]
+        lb    = np.array([-tol - d0_i])           # (1,)
+
+    When the object SDF is absent or ``obj_pose`` is None, returns an empty list.
+    ``A_obj`` is set only when the object is a variable (``has_dxi=True``); callers
+    that want the robot-only version should pass ``has_dxi=False`` (default).
+
+    Args:
+        rt: TestSocpRetargeter instance.
+        q_pin: Pinocchio configuration vector.
+        t: Frame index (unused — kept for signature parity with other builders).
+        obj_pose: (7,) [qw, qx, qy, qz, x, y, z] object pose.
+        tol: Non-penetration tolerance (metres). Defaults to 0.
+
+    Returns:
+        List of LinearConstraint, one per active point.
+    """
+    if obj_pose is None or getattr(rt, "object_sdf", None) is None:
+        return []
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
+    P = robot_control_points(rt, q_pin)
+    fobj, _ = query_entities(rt, P, obj_pose, margin_obj=L_obj)
+    active = np.where(np.asarray(fobj.active, dtype=bool))[0]
+    if active.size == 0:
+        return []
+
+    Robj = _robj_from_pose(obj_pose)
+    link_names = [corr.link_names[corr.link_idx[i]] for i in active]
+    offsets = corr.offset_local[active]
+    jacs = [J[:, rt.v_a_indices] for J in rt.pin.point_jacobians(q_pin, link_names, offsets)]
+    I3 = np.eye(3)
+    cons = []
+    for k, i in enumerate(active):
+        n0 = np.asarray(fobj.direction[i], dtype=float)   # surface->point (world)
+        d0 = float(fobj.distance[i])
+        # A·dqa >= lb  with A = n0 @ J_i, lb = -tol - d0
+        A = (n0[np.newaxis] @ jacs[k])                    # (1, nv_a)
+        lb = np.array([-tol - d0])                        # (1,)
+        # A_obj·dxi contributes -n0 @ Bobj_i @ dxi, so A_obj = -(n0 @ Bobj_i)
+        Bobj_i = np.hstack([I3, -_skew(P[i])])            # world rigid motion (3, 6)
+        A_obj_i = Robj.T  # rotate to object-local frame for the Bobj contribution
+        # Constraint in world frame: n0 @ J_i @ dqa - n0 @ Bobj_i @ dxi >= -tol - d0
+        # Note: n0 from fobj is already in object-local frame (fobj is queried in local frame)
+        # and Bobj_i = R_obj.T @ [I, -skew(p_i)] maps world dxi to object-local displacement.
+        # See build_obj_surface_nonpen_constraints lines 247-249.
+        A_obj = -(n0[np.newaxis] @ (Robj.T @ np.hstack([I3, -_skew(P[i])])))  # (1, 6)
+        cons.append(LinearConstraint(A=A, lb=lb, A_obj=A_obj, name=f"nonpen_obj_{i}"))
+    return cons
+
+
+def build_p_constraint_blocks(rt, q_pin: np.ndarray, t: int,
+                               obj_pose: np.ndarray,
+                               tol: float) -> list:
+    """Hard tangential band constraints for contact persistence.
+
+    Numpy/solver-agnostic counterpart of :func:`build_p_constraints`.
+    Returns :class:`~HoloNew.src.test_socp.solve.spec.LinearConstraint` instances
+    instead of cvxpy inequalities.
+
+    The original pair of cvxpy constraints per active carrier k::
+
+        Aproj_k @ dqa <= bproj_k + tol_vec
+        Aproj_k @ dqa >= bproj_k - tol_vec
+
+    maps to a single two-sided LinearConstraint::
+
+        A  = Aproj_k                         # (3, nv_a)
+        lb = bproj_k - tol_vec               # (3,)
+        ub = bproj_k + tol_vec               # (3,)
+
+    No ``A_obj`` term: the P constraint has no object-DOF coupling (the object
+    position enters only through constant offsets that are folded into ``lb``/``ub``).
+
+    Args:
+        rt: TestSocpRetargeter instance.
+        q_pin: Pinocchio configuration vector.
+        t: Current frame index (must be >= 1).
+        obj_pose: (7,) [qw, qx, qy, qz, x, y, z] current object pose.
+        tol: Band half-width in metres.
+
+    Returns:
+        List of LinearConstraint, one per active carrier. Empty if no carriers
+        have active persistent contacts.
+    """
+    state = rt._p_state
+    corr = rt.correspondence
+    M = corr.link_idx.shape[0]
+    L_obj = getattr(rt, "L_object", rt.smplx_ground_probe.margin)
+    L_flr = getattr(rt, "L_floor", rt.smplx_ground_probe.margin)
+
+    Robj_t = _robj_from_pose(obj_pose) if obj_pose is not None else None
+    obj_t = np.asarray(obj_pose[4:7], dtype=float) if obj_pose is not None else None
+    obj_prev_pose = state["obj_prev"]
+    Robj_tm1 = _robj_from_pose(obj_prev_pose)
+    obj_tm1 = np.asarray(obj_prev_pose[4:7], dtype=float)
+
+    P = robot_control_points(rt, q_pin)
+
+    fobj, fflr = query_entities(rt, P, obj_pose, margin_obj=L_obj, margin_flr=L_flr)
+
+    d_obj_ref_t,  _,  d_flr_ref_t,  _, p_ref_t   = frame_references(rt, t)
+    d_obj_ref_tm1, _, d_flr_ref_tm1, _, p_ref_tm1 = frame_references(rt, t - 1)
+
+    d_prev_obj   = state["d_prev_obj"]
+    d_prev_flr   = state["d_prev_flr"]
+    a_prev_obj   = state["a_prev_obj"]
+    a_prev_flr   = state["a_prev_flr"]
+    p_prev_world = state["p_prev_world"]
+
+    dp_ref_world = p_ref_t - p_ref_tm1
+
+    alpha_obj_t = np.array([_activation(d_obj_ref_t[i], L_obj) for i in range(M)])
+    alpha_flr_t = np.array([_activation(d_flr_ref_t[i], L_flr) for i in range(M)])
+
+    def _hat_obj(d_prev_i):
+        return _activation(float(d_prev_i), L_obj)
+
+    def _hat_flr(d_prev_i):
+        return _activation(float(d_prev_i), L_flr)
+
+    gamma_obj = np.minimum(np.minimum(alpha_obj_t, a_prev_obj),
+                           np.array([_hat_obj(d_prev_obj[i]) for i in range(M)]))
+    active_obj = (gamma_obj > 0) & np.asarray(fobj.active, dtype=bool)
+
+    gamma_flr = np.minimum(np.minimum(alpha_flr_t, a_prev_flr),
+                           np.array([_hat_flr(d_prev_flr[i]) for i in range(M)]))
+    active_flr = (gamma_flr > 0) & np.asarray(fflr.active, dtype=bool)
+
+    active_union = np.where(active_obj | active_flr)[0]
+    if active_union.size == 0:
+        return []
+
+    link_names_active = [corr.link_names[corr.link_idx[i]] for i in active_union]
+    offsets_active = corr.offset_local[active_union]
+    jacs_full = rt.pin.point_jacobians(q_pin, link_names_active, offsets_active)
+    jacs = [J[:, rt.v_a_indices] for J in jacs_full]
+    idx_to_pos = {int(active_union[k]): k for k in range(len(active_union))}
+
+    I3 = np.eye(3)
+
+    # Accumulate per-carrier projected rows and targets (mirrors build_p_constraints).
+    carrier_data: dict[int, dict] = {}
+
+    # --- Object channel (object-local frame) ---
+    for i in np.where(active_obj)[0]:
+        li = int(corr.link_idx[i])
+        Ji = jacs[idx_to_pos[i]]
+        Jloc = Robj_t.T @ Ji
+
+        n0 = np.asarray(fobj.direction[i], dtype=float)
+        Pi0 = I3 - np.outer(n0, n0)
+
+        p_prev_local_i = Robj_tm1.T @ (p_prev_world[i] - obj_tm1)
+        const_i = Robj_t.T @ (P[i] - obj_t) - p_prev_local_i
+
+        p_ref_t_loc   = Robj_t.T @ (p_ref_t[i] - obj_t)
+        p_ref_tm1_loc = Robj_tm1.T @ (p_ref_tm1[i] - obj_tm1)
+        dp_ref_loc    = p_ref_t_loc - p_ref_tm1_loc
+
+        Aproj_row = Pi0 @ Jloc                            # (3, nv_a)
+        bproj_row = Pi0 @ (dp_ref_loc - const_i)          # (3,)
+
+        if li not in carrier_data:
+            carrier_data[li] = {"A_rows": [], "b_rows": []}
+        carrier_data[li]["A_rows"].append(Aproj_row)
+        carrier_data[li]["b_rows"].append(bproj_row)
+
+    # --- Floor channel (world frame) ---
+    for i in np.where(active_flr)[0]:
+        li = int(corr.link_idx[i])
+        Ji = jacs[idx_to_pos[i]]
+
+        n0 = np.asarray(fflr.direction[i], dtype=float)
+        Pi0 = I3 - np.outer(n0, n0)
+
+        const_i  = P[i] - p_prev_world[i]
+        dp_ref_i = dp_ref_world[i]
+
+        Aproj_row = Pi0 @ Ji                              # (3, nv_a)
+        bproj_row = Pi0 @ (dp_ref_i - const_i)           # (3,)
+
+        if li not in carrier_data:
+            carrier_data[li] = {"A_rows": [], "b_rows": []}
+        carrier_data[li]["A_rows"].append(Aproj_row)
+        carrier_data[li]["b_rows"].append(bproj_row)
+
+    if not carrier_data:
+        return []
+
+    cons = []
+    tol_vec = np.full(3, tol)
+    for li, data in carrier_data.items():
+        A_stack = np.stack(data["A_rows"], axis=0)   # (N_pts, 3, nv_a)
+        b_stack = np.stack(data["b_rows"], axis=0)   # (N_pts, 3)
+        Aproj_k = A_stack.mean(axis=0)               # (3, nv_a)
+        bproj_k = b_stack.mean(axis=0)               # (3,)
+        # Band: lb <= Aproj_k @ dqa <= ub
+        cons.append(LinearConstraint(
+            A=Aproj_k,
+            lb=bproj_k - tol_vec,
+            ub=bproj_k + tol_vec,
+            name=f"p_band_{li}",
+        ))
+    return cons
