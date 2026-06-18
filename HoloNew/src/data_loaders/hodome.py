@@ -109,7 +109,7 @@ def prep_hodome_processed(npz_path: Path, model_dir: Path) -> dict:
         "global_joint_positions": joints.astype(np.float32),
         "global_joint_orientations": quats,
         "height": np.float32(height),
-        "betas": np.asarray(d["betas"][:1], np.float32),
+        "betas": np.asarray(d["betas"][0], np.float32).reshape(-1),
         "gender": str(d["gender"]),
     }
 
