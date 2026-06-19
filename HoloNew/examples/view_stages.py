@@ -58,6 +58,18 @@ from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
 
+
+def resolve_captured_obj_scale(omomo_dir, task_name) -> float:
+    """obj_scale for a non-centred captured mesh; raise if unknown (no silent unit fallback)."""
+    scale = load_object_scale(omomo_dir, task_name) if omomo_dir else None
+    if scale is None:
+        raise ValueError(
+            f"obj_scale missing for {task_name}: captured mesh is off-origin and unscaled, "
+            f"so it would render at the wrong size. Provide a bundled models/<obj>/<obj>.obj "
+            f"or a valid OMOMO .p with obj_scale.")
+    return float(scale)
+
+
 Method = Literal["holosoma", "gmr_socp", "test_socp"]
 
 
@@ -223,12 +235,7 @@ def view(cfg: ViewStagesConfig) -> None:
         elif cfg.obj_path is not None and Path(cfg.obj_path).exists():
             obj_file = Path(cfg.obj_path)
             obj_recenter = True
-            _os = load_object_scale(cfg.omomo_dir, cfg.task_name) if cfg.omomo_dir else None
-            if _os is not None:
-                obj_geom_scale = _os
-            else:
-                logger.warning("No obj_scale for %s; object shown at native (unit) size.",
-                               cfg.task_name)
+            obj_geom_scale = resolve_captured_obj_scale(cfg.omomo_dir, cfg.task_name)
         else:
             obj_file = None
         try:
