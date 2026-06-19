@@ -1,14 +1,15 @@
-# Loading-pipeline fixes (#2–#6) — design
+# Loading-pipeline fixes (#2–#5) — design
 
 Date: 2026-06-19
 Status: approved (design), pending implementation plan
-Scope: data loading / preprocessing for TEST-SOCP. Findings #2–#6 from the loading
+Scope: data loading / preprocessing for TEST-SOCP. Findings #2–#5 from the loading
 audit. Finding #1 (only `largebox` bundled) is subsumed by #2 and not a separate item.
+Finding #6 (MJCF object inertia) is **explicitly out of scope** (dropped by request).
 
 ## Background
 
-The loading audit surfaced six issues. Five are in scope here. Two distinct loading
-paths exist:
+The loading audit surfaced six issues. Four are in scope here (#2–#5); #6 was dropped
+by request. Two distinct loading paths exist:
 
 - **`MotionLoader`** (`src/data_loaders/`) → unified contract for
   `examples/robot_retarget.main()`; also provides `object_source()`.
@@ -21,10 +22,6 @@ Key facts established during the audit (must stay true):
   `models/<obj>/<obj>.obj` is already **recentred on its centroid + pre-scaled**
   (= captured unit mesh recentred × `obj_scale`). The captured
   `captured_objects/<obj>_cleaned_simplified.obj` is the **unit, off-origin** mesh.
-- The object is driven **kinematically** in the solve
-  (`test_socp.py:1103-1104`: `q[-7:] = poses; mj_forward`). No dynamics integration,
-  so MJCF mass/inertia is **cosmetic for the solve** and only matters for downstream
-  MuJoCo simulation.
 - `captured_objects/` and HODome `scaned_object/` are present locally under the
   `path.yaml` roots, so both fallbacks are testable.
 - Test env: `/home/gbesset/.holonew_deps/miniconda3/envs/holonew/bin/python`,
@@ -121,23 +118,9 @@ not — so the contact-probe hands are collapsed to rest, which matters most for
    already exist** in the cache (sampled on the full rest mesh); only their posing
    changes — no density change.
 
-## Fix #6 — Geometry-derived inertia with an explicit placeholder mass
+## Fix #6 — out of scope
 
-**Problem.** `hodome_scene.py:13-23` hardcodes `mass=0.1`,
-`diaginertia="0.002 0.002 0.002"` for every object (copied from largebox).
-
-**Design.** In `hodome_scene.py`, compute the inertia from the object mesh:
-- `trimesh` `mass_properties` at unit density → inertia tensor + center of mass, then
-  **normalize to a placeholder mass `M`**. The true object masses are unknown, so `M`
-  is an **explicit, documented constant** (default `0.1` kg) — NOT fabricated from an
-  invented density. Emit MJCF `fullinertia` (handles products of inertia) + `pos`
-  (center of mass).
-- Mesh non-watertight → fallback to an AABB-box inertia for mass `M`.
-- Comment that this is **cosmetic for the kinematic solve** and matters for downstream
-  MuJoCo simulation.
-
-(Open option deferred to implementation: expose `M` as a required parameter instead of
-a default — left as a default `0.1` kg knob unless the user requests otherwise.)
+Dropped by request. `hodome_scene.py`'s hardcoded mass/inertia is left untouched.
 
 ## Testing (TDD; conda env; cwd `HoloNew/HoloNew`)
 
@@ -147,12 +130,10 @@ a default — left as a default `0.1` kg knob unless the user requests otherwise
 - **#4**: `omomo_scale_factor` betas-FK; builder == loader; golden regeneration.
 - **#5**: `placed_verts_smpl` moves hand vertices when 52 quats are passed (vs
   identity); prep emits 52 orientations.
-- **#6**: inertia tensor scales with mesh size; `fullinertia` emitted; non-watertight
-  fallback path.
 
 ## Modules touched
 
 `src/data_loaders/omomo.py`, `examples/view_stages.py`, `src/test_socp/builder.py`,
 `src/holosoma/preprocess.py`, `data_utils/prep_amass_smplx_for_rt.py`,
 `src/data_loaders/hodome.py`, `src/test_socp/correspondence/human_body.py`,
-`src/data_loaders/hodome_scene.py`, plus tests under `tests/`.
+plus tests under `tests/`.
