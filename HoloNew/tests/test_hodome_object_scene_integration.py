@@ -24,7 +24,8 @@ def _hodome_seq_present() -> bool:
 def test_hodome_object_scene_end_to_end():
     cfg = RetargetingConfig(
         dataset="hodome", motion_name=_NAME, task_type="object_interaction",
-        retargeter=TestSocpRetargeterConfig(activate_obj_non_penetration=True))
+        retargeter=TestSocpRetargeterConfig(activate_obj_non_penetration=True,
+                                            load_object_scene=True))
     normalize_dataset_cfg(cfg)                       # façade: paths, object_name=baseball
     assert cfg.task_config.object_name == "baseball"
     rt = TestSocpRetargeter.from_config(cfg)
