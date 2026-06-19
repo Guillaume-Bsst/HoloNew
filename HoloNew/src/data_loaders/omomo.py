@@ -61,4 +61,18 @@ class OmomoMixedLoader(MotionLoader):
 
     def object_source(self, *, motion_path, obj_path, model_path, task_type,
                       constants, motion_data_config, smpl_model_dir=None):
-        return []   # real implementation lands in Task 2
+        if task_type == "robot_only" or motion_path is None:
+            return []
+        from HoloNew.src.data_loaders.base import ObjectSource
+        from HoloNew.src.utils import load_intermimic_data
+        name = Path(motion_path).stem
+        parts = name.split("_")
+        obj_name = parts[1] if len(parts) >= 2 else name
+        # The bundled, centred + pre-scaled mesh is the solver's canonical object (same
+        # mesh the legacy OBJECT_MESH_FILE path uses). No bundled mesh -> no object SDF,
+        # matching the builder's "object mesh not found" behaviour.
+        bundled = Path("models") / obj_name / f"{obj_name}.obj"
+        if not bundled.exists():
+            return []
+        _, poses = load_intermimic_data(str(motion_path))
+        return [ObjectSource(mesh_path=bundled, poses_raw=np.asarray(poses, np.float64))]
