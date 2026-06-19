@@ -346,9 +346,11 @@ def setup_object_data(
         if constants.OBJECT_MESH_FILE is None:
             raise ValueError("OBJECT_MESH_FILE not set for object_interaction task")
 
-        object_local_pts, object_local_pts_demo = load_object_data(
-            constants.OBJECT_MESH_FILE, smpl_scale=smpl_scale, sample_count=100
-        )
+        # Even surface samples via the solver's density-based sampler; the demo
+        # (scaled) variant is the same cloud times smpl_scale, applied here.
+        from HoloNew.src.test_socp.movable import sample_object_surface
+        object_local_pts = sample_object_surface(constants.OBJECT_MESH_FILE)
+        object_local_pts_demo = object_local_pts * smpl_scale
         return object_local_pts, object_local_pts_demo, constants.OBJECT_URDF_FILE
 
     if task_type == "climbing":

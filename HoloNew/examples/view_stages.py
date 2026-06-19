@@ -244,12 +244,12 @@ def view(cfg: ViewStagesConfig) -> None:
                 obj_geom_center = _verts.mean(0) if obj_recenter else np.zeros(3, np.float32)
                 object_mesh_verts = (_verts - obj_geom_center) * obj_geom_scale
                 object_mesh_faces = np.asarray(mesh.faces, np.uint32)
-                # Native-size local samples (same sampling as the solve: sample_count=100,
-                # seed=42); placed at the active stage's pose, native size on every stage.
-                object_points_local, _ = load_object_data(
-                    str(obj_file), smpl_scale=smpl_scale, sample_count=100)
-                object_points_local = (np.asarray(object_points_local, np.float32)
-                                       - obj_geom_center) * obj_geom_scale
+                # Native-size local samples via the solver's sample_object_surface
+                # (density-based, same sampler the movable term uses); placed at the active
+                # stage's pose, native size on every stage.
+                from HoloNew.src.test_socp.movable import sample_object_surface
+                object_points_local = sample_object_surface(str(obj_file)).astype(np.float32)
+                object_points_local = (object_points_local - obj_geom_center) * obj_geom_scale
 
                 # Object SDF for the "SDF Object" band-shell viz. Uses the SAME keyed,
                 # disk-cached field as the solve (load_or_build_object_sdf), resolved at the
@@ -288,8 +288,8 @@ def view(cfg: ViewStagesConfig) -> None:
             mesh = trimesh.load(str(mesh_path), force="mesh", process=False)
             object_mesh_verts = np.asarray(mesh.vertices, np.float32)
             object_mesh_faces = np.asarray(mesh.faces, np.uint32)
-            object_points_local, _ = load_object_data(
-                str(mesh_path), smpl_scale=smpl_scale, sample_count=100)
+            from HoloNew.src.test_socp.movable import sample_object_surface
+            object_points_local = sample_object_surface(str(mesh_path)).astype(np.float32)
         except Exception as exc:  # noqa: BLE001
             logger.warning("HODome object unavailable (%s); object disabled.", exc)
 
