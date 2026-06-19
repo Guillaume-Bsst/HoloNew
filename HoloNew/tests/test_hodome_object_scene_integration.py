@@ -28,9 +28,14 @@ def test_hodome_object_scene_end_to_end():
                                             load_object_scene=True))
     normalize_dataset_cfg(cfg)                       # façade: paths, object_name=baseball
     assert cfg.task_config.object_name == "baseball"
-    rt = TestSocpRetargeter.from_config(cfg)
-    assert rt.object_name == "baseball"
-    assert rt.has_dynamic_object is True             # scene swap added the object free joint
-    res = rt.retarget(max_frames=3)
-    assert np.all(np.isfinite(res.qpos))
-    assert res.qpos.shape[1] >= 7 + rt.nq_a          # trailing object DOFs present
+    # Generated scene xml written next to the robot meshes; clean it up after the run.
+    scene = Path("models/g1/g1_29dof_w_baseball.xml")
+    try:
+        rt = TestSocpRetargeter.from_config(cfg)
+        assert rt.object_name == "baseball"
+        assert rt.has_dynamic_object is True          # scene swap added the object free joint
+        res = rt.retarget(max_frames=3)
+        assert np.all(np.isfinite(res.qpos))
+        assert res.qpos.shape[1] >= 7 + rt.nq_a       # trailing object DOFs present
+    finally:
+        scene.unlink(missing_ok=True)
