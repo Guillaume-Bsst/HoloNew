@@ -4,10 +4,20 @@ import numpy as np
 import pytest
 
 from HoloNew.src.data_loaders.hodome import (
+    _YUP_TO_ZUP,
     HodomeMeshPoser,
     global_orientations_zup,
     prep_hodome_processed,
 )
+
+
+def test_yup_to_zup_is_a_proper_rotation():
+    # A bare y<->z axis swap is a reflection (det -1) that mirrors the subject and
+    # renders the SMPL mesh inside-out. The transform must be a proper rotation.
+    Q = _YUP_TO_ZUP
+    assert np.allclose(Q @ Q.T, np.eye(3), atol=1e-9)            # orthonormal
+    assert np.isclose(np.linalg.det(Q), 1.0)                     # rotation, not reflection
+    assert np.allclose(Q @ np.array([0.0, 1.0, 0.0]), [0.0, 0.0, 1.0])  # Y-up -> Z-up
 
 _REPO = Path(__file__).resolve().parents[5]
 _HODOME_NPZ = _REPO / "data/00_raw_datasets/HODome/smplx/subject01_baseball.npz"
@@ -69,3 +79,10 @@ def test_mesh_poser_aligns_with_joints():
     # Wrist (SMPL-X body joint 21) and head (15) joints lie on the mesh surface.
     assert np.linalg.norm(v - joints[f, 21], axis=1).min() < 0.05
     assert np.linalg.norm(v - joints[f, 15], axis=1).min() < 0.10
+    # Right-side-out: most face normals point away from the body centroid (a reflection
+    # would invert the winding and push this below 0.5 -> inside-out render).
+    import trimesh
+    faces = poser.faces.astype(np.int64)
+    mesh = trimesh.Trimesh(vertices=v, faces=faces, process=False)
+    outward = ((mesh.face_normals * (v[faces].mean(1) - v.mean(0))).sum(1) > 0).mean()
+    assert outward > 0.55

@@ -11,10 +11,21 @@ import torch
 from scipy.spatial.transform import Rotation as R
 
 from HoloNew.src.data_loaders.base import MotionLoader, register_loader
-from HoloNew.src.utils import transform_y_up_to_z_up
 
 # Disk cache for object meshes extracted from scaned_object/<token>.tar.
 _HODOME_MESH_CACHE = Path(tempfile.gettempdir()) / "holonew_hodome_meshes"
+
+# Y-up -> Z-up as a proper ROTATION Rx(+90 deg): (x, y, z) -> (x, -z, y). A bare axis
+# SWAP (y<->z) is a reflection (det -1) that mirrors the subject and reverses face
+# winding, rendering the SMPL mesh inside-out; the rotation preserves chirality and
+# winding. Applied identically to joints, per-joint orientations, the object pose, and
+# the mesh vertices so the whole scene stays consistent AND un-mirrored.
+_YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+
+
+def _to_zup(points: np.ndarray) -> np.ndarray:
+    """Rotate (..., 3) points from the Y-up frame to Z-up (row-vector convention)."""
+    return points @ _YUP_TO_ZUP.T
 
 
 def extract_hodome_object_mesh(token: str, scaned_object_dir: Path,
@@ -63,7 +74,7 @@ def hodome_fk(npz_path: Path, model_dir: Path) -> tuple[np.ndarray, float]:
         expression=_t("expression"),
     )
     joints = out.joints.detach().numpy()[:, :22, :]          # SMPL-X body order
-    joints = transform_y_up_to_z_up(joints)                  # dataset is Y-up
+    joints = _to_zup(joints)                                 # dataset is Y-up (rotate, no mirror)
 
     rest = model(betas=betas[:1])
     rv = rest.vertices.detach().numpy()[0]
@@ -75,10 +86,10 @@ class HodomeMeshPoser:
     """Per-frame SMPL-X body mesh for HODome, in the Z-up world frame.
 
     The mesh MUST be posed by a raw SMPL-X forward in the model's native (Y-up) frame,
-    then mapped to Z-up by swapping the vertices (exactly how hodome_fk builds the
-    joints). Posing instead from the Y->Z *conjugated* global orientations
-    (placed_verts_smpl) feeds reflected rotations to a non-reflected mesh template and
-    collapses the body. Caches the last frame so toggles/redraws are cheap.
+    then rotated to Z-up on the vertices (exactly how hodome_fk builds the joints).
+    Posing instead from the Y->Z conjugated global orientations (placed_verts_smpl)
+    re-poses the canonical template and collapses the body. Caches the last frame so
+    toggles/redraws are cheap.
     """
 
     _COMPONENTS = ("global_orient", "body_pose", "transl", "left_hand_pose",
@@ -104,14 +115,9 @@ class HodomeMeshPoser:
         with torch.no_grad():
             out = self.model(betas=torch.from_numpy(self._betas), **kw)
         verts = out.vertices[0].detach().numpy()
-        verts = transform_y_up_to_z_up(verts)                          # native Y-up -> Z-up
+        verts = _to_zup(verts)                                         # native Y-up -> Z-up (rotate)
         self._cache_idx, self._cache_verts = frame, verts
         return verts
-
-
-# Y-up -> Z-up coordinate swap, matching transform_y_up_to_z_up:
-# M = [[1,0,0],[0,0,1],[0,1,0]] (swap Y and Z). M is its own inverse.
-_YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 1.0, 0.0]])
 
 
 def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) -> np.ndarray:
@@ -120,7 +126,7 @@ def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) ->
     `global_orient` (T,3) is the root axis-angle, `body_pose` (T,63) the 21 body
     joints. Global orientations are built by FK down the SMPL-X tree (reusing the
     AMASS-prep helper), then expressed in Z-up by conjugating each rotation with the
-    y<->z swap M (R' = M R M), which preserves det = +1 so the result is a rotation.
+    Y->Z rotation Q (R' = Q R Q^T), consistent with the joints/object/mesh transform.
     """
     from HoloNew.data_utils.prep_amass_smplx_for_rt import (
         _SMPLX_BODY_PARENTS, compute_global_joint_orientations,
@@ -131,7 +137,7 @@ def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) ->
     q_yup = compute_global_joint_orientations(aa, _SMPLX_BODY_PARENTS)  # (T,22,4) wxyz, Y-up
     t, j, _ = q_yup.shape
     Rm = R.from_quat(q_yup[..., [1, 2, 3, 0]].reshape(-1, 4)).as_matrix()  # xyzw -> (N,3,3)
-    Rz = _YUP_TO_ZUP @ Rm @ _YUP_TO_ZUP                          # conjugation, Z-up
+    Rz = _YUP_TO_ZUP @ Rm @ _YUP_TO_ZUP.T                        # Q R Q^T, Z-up
     q_xyzw = R.from_matrix(Rz).as_quat().reshape(t, j, 4)
     return q_xyzw[..., [3, 0, 1, 2]].astype(np.float32)          # -> wxyz
 
@@ -156,13 +162,13 @@ def hodome_object_poses(npz_path: Path) -> np.ndarray:
     """Object 6DoF (T,7) [qw,qx,qy,qz,x,y,z] in Z-up from object_R (T,3,3) + object_T.
 
     HODome stores the object in the same Y-up frame as the raw SMPL-X, so the pose is
-    expressed in Z-up to match the (Y->Z transformed) human joints: translation gets the
-    y<->z swap M, rotation the conjugation M R M (det preserved)."""
+    expressed in Z-up to match the (Y->Z rotated) human joints: translation gets the
+    Y->Z rotation Q, rotation the conjugation Q R Q^T (same Q as the human)."""
     d = np.load(str(npz_path), allow_pickle=True)
     rot = np.asarray(d["object_R"], np.float64)                  # (T,3,3) Y-up
     trans = np.asarray(d["object_T"], np.float64).reshape(-1, 3)  # (T,3) Y-up
-    trans_z = trans @ _YUP_TO_ZUP.T                              # swap y<->z per row
-    rot_z = _YUP_TO_ZUP @ rot @ _YUP_TO_ZUP                      # conjugation -> Z-up
+    trans_z = trans @ _YUP_TO_ZUP.T                              # rotate Y-up -> Z-up per row
+    rot_z = _YUP_TO_ZUP @ rot @ _YUP_TO_ZUP.T                    # Q R Q^T -> Z-up
     quat_xyzw = R.from_matrix(rot_z).as_quat()                   # (T,4) xyzw
     quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
     return np.concatenate([quat_wxyz, trans_z], axis=1)
