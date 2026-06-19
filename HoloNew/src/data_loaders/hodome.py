@@ -125,8 +125,15 @@ def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) ->
 
     `global_orient` (T,3) is the root axis-angle, `body_pose` (T,63) the 21 body
     joints. Global orientations are built by FK down the SMPL-X tree (reusing the
-    AMASS-prep helper), then expressed in Z-up by conjugating each rotation with the
-    Y->Z rotation Q (R' = Q R Q^T), consistent with the joints/object/mesh transform.
+    AMASS-prep helper) in the model's native Y-up frame, then expressed in Z-up.
+
+    hodome_fk rotates the joint POINTS rigidly by Q=_YUP_TO_ZUP (joints @ Q.T), i.e.
+    it physically rotates the whole scene. A frame/orientation in that rotated scene is
+    obtained by LEFT-multiplying Q (R' = Q R), NOT by conjugation (Q R Q^T): conjugation
+    additionally rotates each joint's LOCAL axes by Q^T, which mis-articulates every limb
+    relative to the joints/mesh (re-poses the canonical template and collapses the body,
+    see HodomeMeshPoser). Left-multiply leaves the articulation (relative-to-parent
+    rotations) unchanged and only re-bases the root, matching the rotated joints exactly.
     """
     from HoloNew.data_utils.prep_amass_smplx_for_rt import (
         _SMPLX_BODY_PARENTS, compute_global_joint_orientations,
@@ -137,7 +144,7 @@ def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) ->
     q_yup = compute_global_joint_orientations(aa, _SMPLX_BODY_PARENTS)  # (T,22,4) wxyz, Y-up
     t, j, _ = q_yup.shape
     Rm = R.from_quat(q_yup[..., [1, 2, 3, 0]].reshape(-1, 4)).as_matrix()  # xyzw -> (N,3,3)
-    Rz = _YUP_TO_ZUP @ Rm @ _YUP_TO_ZUP.T                        # Q R Q^T, Z-up
+    Rz = _YUP_TO_ZUP @ Rm                                        # Q R (world rotation), Z-up
     q_xyzw = R.from_matrix(Rz).as_quat().reshape(t, j, 4)
     return q_xyzw[..., [3, 0, 1, 2]].astype(np.float32)          # -> wxyz
 
@@ -162,13 +169,16 @@ def hodome_object_poses(npz_path: Path) -> np.ndarray:
     """Object 6DoF (T,7) [qw,qx,qy,qz,x,y,z] in Z-up from object_R (T,3,3) + object_T.
 
     HODome stores the object in the same Y-up frame as the raw SMPL-X, so the pose is
-    expressed in Z-up to match the (Y->Z rotated) human joints: translation gets the
-    Y->Z rotation Q, rotation the conjugation Q R Q^T (same Q as the human)."""
+    expressed in Z-up to match the (Y->Z rotated) human joints. The object mesh is used
+    in its NATIVE local frame (no Y->Z swap on the vertices), so a rigid world rotation
+    Q=_YUP_TO_ZUP LEFT-multiplies both the translation (Q t) and the rotation (Q R) —
+    NOT a conjugation (Q R Q^T), which would extra-rotate the object's local axes and
+    mis-orient it (same reasoning as the human global_orientations_zup)."""
     d = np.load(str(npz_path), allow_pickle=True)
     rot = np.asarray(d["object_R"], np.float64)                  # (T,3,3) Y-up
     trans = np.asarray(d["object_T"], np.float64).reshape(-1, 3)  # (T,3) Y-up
     trans_z = trans @ _YUP_TO_ZUP.T                              # rotate Y-up -> Z-up per row
-    rot_z = _YUP_TO_ZUP @ rot @ _YUP_TO_ZUP.T                    # Q R Q^T -> Z-up
+    rot_z = _YUP_TO_ZUP @ rot                                    # Q R (world rotation) -> Z-up
     quat_xyzw = R.from_matrix(rot_z).as_quat()                   # (T,4) xyzw
     quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
     return np.concatenate([quat_wxyz, trans_z], axis=1)

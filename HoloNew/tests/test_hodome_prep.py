@@ -24,14 +24,18 @@ _HODOME_NPZ = _REPO / "data/00_raw_datasets/HODome/smplx/subject01_baseball.npz"
 _SMPLX_DIR = _REPO / "data/00_raw_datasets/models/models_smplx_v1_1/models/smplx"
 
 
-def test_zero_pose_gives_identity_orientations():
+def test_zero_pose_gives_world_rotation_orientations():
+    from scipy.spatial.transform import Rotation as R
     T = 3
     global_orient = np.zeros((T, 3), np.float32)
     body_pose = np.zeros((T, 63), np.float32)
     q = global_orientations_zup(global_orient, body_pose)
     assert q.shape == (T, 22, 4)
-    # zero axis-angle -> identity rotation; M-conjugation of identity is identity.
-    assert np.allclose(q, np.tile([1.0, 0.0, 0.0, 0.0], (T, 22, 1)), atol=1e-6)
+    # Zero axis-angle -> every global rotation is identity in the native Y-up frame.
+    # Expressing that rest pose in the physically Y->Z rotated scene left-multiplies Q,
+    # so every joint orientation is Q itself (NOT identity: the body now stands up Z-up).
+    q_Q = R.from_matrix(_YUP_TO_ZUP).as_quat()[[3, 0, 1, 2]]   # xyzw -> wxyz
+    assert np.allclose(q, np.tile(q_Q, (T, 22, 1)), atol=1e-6)
 
 
 def test_orientations_are_unit_quaternions():
@@ -86,3 +90,67 @@ def test_mesh_poser_aligns_with_joints():
     mesh = trimesh.Trimesh(vertices=v, faces=faces, process=False)
     outward = ((mesh.face_normals * (v[faces].mean(1) - v.mean(0))).sum(1) > 0).mean()
     assert outward > 0.55
+
+
+def test_global_orientations_zup_is_world_rotation_not_conjugation():
+    # global_joint_positions are built as a NATIVE Y-up forward then a rigid world
+    # rotation Q=_YUP_TO_ZUP applied to the points (hodome_fk: joints @ Q.T). For the
+    # per-joint orientations to describe that SAME physically-rotated scene, a frame is
+    # transformed by LEFT-multiplying Q (R -> Q R), NOT by conjugation (R -> Q R Q^T).
+    # Conjugation rotates the joint-LOCAL axes too, so it mis-articulates every limb
+    # relative to the joints/mesh (the "collapsed body" the mesh poser docstring warns
+    # of). Two invariants of a rigid world rotation pin this down:
+    #   * root orientation is left-multiplied by Q;
+    #   * relative-to-parent (articulation) rotations are UNCHANGED.
+    from scipy.spatial.transform import Rotation as R
+    from HoloNew.data_utils.prep_amass_smplx_for_rt import (
+        _SMPLX_BODY_PARENTS, compute_global_joint_orientations,
+    )
+    rng = np.random.default_rng(1)
+    go = rng.normal(scale=0.4, size=(1, 3))
+    bp = rng.normal(scale=0.4, size=(1, 63))
+    aa = np.concatenate([go.reshape(1, 1, 3), bp.reshape(1, 21, 3)], axis=1)   # (1,22,3)
+    q_yup = compute_global_joint_orientations(aa, _SMPLX_BODY_PARENTS)[0]      # (22,4) wxyz
+    q_zup = global_orientations_zup(go, bp)[0]                                 # (22,4) wxyz
+    Ry = R.from_quat(q_yup[:, [1, 2, 3, 0]]).as_matrix()                       # wxyz -> xyzw
+    Rz = R.from_quat(q_zup[:, [1, 2, 3, 0]]).as_matrix()
+    Q = _YUP_TO_ZUP
+    parents = _SMPLX_BODY_PARENTS
+    assert np.allclose(Rz[0], Q @ Ry[0], atol=1e-6)                            # root: left-mult
+    for j in range(1, 22):                                                    # children: rel unchanged
+        p = parents[j]
+        rel_y = Ry[p].T @ Ry[j]
+        rel_z = Rz[p].T @ Rz[j]
+        assert np.allclose(rel_z, rel_y, atol=1e-6), f"joint {j} articulation changed"
+
+
+@pytest.mark.skipif(not (_HODOME_NPZ.exists() and _SMPLX_DIR.exists()),
+                    reason="HODome data / SMPL-X model not present")
+def test_orientations_reproduce_joint_positions():
+    # End-to-end consistency: re-posing the SMPL-X body from the stored
+    # global_joint_orientations (exactly how the contact probe's placed_verts_smpl does:
+    # global -> relative-to-parent local rotations -> SMPL-X forward) must reproduce the
+    # stored global_joint_positions. Conjugated orientations mis-articulate the body, so
+    # the re-posed joints drift far from the positions; the correct left-multiply matches.
+    import torch
+    import smplx
+    from scipy.spatial.transform import Rotation as R
+    from HoloNew.data_utils.prep_amass_smplx_for_rt import _SMPLX_BODY_PARENTS
+    out = prep_hodome_processed(_HODOME_NPZ, _SMPLX_DIR)
+    ori, pos = out["global_joint_orientations"], out["global_joint_positions"]
+    betas = np.asarray(out["betas"], np.float32).reshape(1, -1)
+    model = smplx.SMPLX(model_path=str(_SMPLX_DIR), gender=str(out["gender"]), ext="npz",
+                        num_betas=betas.shape[-1], use_pca=False)
+    parents = _SMPLX_BODY_PARENTS
+    f = min(500, pos.shape[0] - 1)
+    grot = R.from_quat(ori[f][:, [1, 2, 3, 0]]).as_matrix()                   # (22,3,3) global
+    rel = np.matmul(np.transpose(grot[parents], (0, 2, 1)), grot)             # parent^T child
+    rel[parents == -1] = grot[parents == -1]                                  # root keeps global
+    go = torch.from_numpy(R.from_matrix(rel[0]).as_rotvec()).float().view(1, 3)
+    bp = torch.from_numpy(R.from_matrix(rel[1:22]).as_rotvec()).float().view(1, -1)
+    with torch.no_grad():
+        o = model(global_orient=go, body_pose=bp,
+                  betas=torch.from_numpy(betas), return_verts=True)
+    j = o.joints[0, :22].numpy()
+    j = j - j[0] + pos[f, 0]                                                   # align pelvis (drop transl)
+    assert np.linalg.norm(j - pos[f], axis=1).max() < 0.02                    # <2 cm everywhere

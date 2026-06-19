@@ -25,11 +25,42 @@ def _make_object_npz(path, T=3):
 
 
 def test_hodome_object_poses_identity(tmp_path):
+    from scipy.spatial.transform import Rotation as R
+    from HoloNew.src.data_loaders.hodome import _YUP_TO_ZUP
     p = tmp_path / "seq_object.npz"; _make_object_npz(p, T=3)
     op = hodome_object_poses(p)
     assert op.shape == (3, 7)
-    assert np.allclose(op[:, :4], [1, 0, 0, 0])      # identity R -> wxyz unit quat
-    assert np.allclose(op[:, 4], [0, 1, 2])          # translation X
+    # Identity native R, expressed in the physically Y->Z rotated scene, is the world
+    # rotation Q itself (NOT identity): the object's native frame stands up Z-up.
+    q_Q = R.from_matrix(_YUP_TO_ZUP).as_quat()[[3, 0, 1, 2]]   # xyzw -> wxyz
+    assert np.allclose(op[:, :4], q_Q)
+    assert np.allclose(op[:, 4], [0, 1, 2])          # translation X (unchanged by Q here)
+
+
+def test_hodome_object_poses_is_world_rotation_not_conjugation(tmp_path):
+    # The object mesh is used in its NATIVE (Y-up) local frame (sample_object_surface /
+    # trimesh load apply no Y->Z swap), so the returned Z-up pose must reproduce the
+    # rigidly Y->Z rotated scene: applying it to a native point == Q @ (its native Y-up
+    # placement). That holds for a world rotation (Q R), NOT for conjugation (Q R Q^T),
+    # which extra-rotates the object's local axes and mis-orients it (cf. the human
+    # global_orientations_zup fix).
+    from scipy.spatial.transform import Rotation as R
+    from HoloNew.src.data_loaders.hodome import _YUP_TO_ZUP
+    rng = np.random.default_rng(2)
+    T = 4
+    Rm = R.from_rotvec(rng.normal(scale=0.7, size=(T, 3))).as_matrix()   # native Y-up
+    Tt = rng.normal(size=(T, 1, 3))
+    p = tmp_path / "seq_object.npz"
+    np.savez(p, object_R=Rm, object_T=Tt, mocap_frame_rate=60)
+    op = hodome_object_poses(p)
+    quat, trans = op[:, :4], op[:, 4:7]
+    Q = _YUP_TO_ZUP
+    v = rng.normal(size=(5, 3))                                          # native object-local points
+    for i in range(T):
+        Rz = R.from_quat(quat[i][[1, 2, 3, 0]]).as_matrix()
+        world_zup = v @ Rz.T + trans[i]                                 # returned Z-up pose on native pts
+        world_yup = v @ Rm[i].T + Tt[i, 0]                              # native Y-up placement
+        assert np.allclose(world_zup, world_yup @ Q.T, atol=1e-9)      # == rigid Q rotation of the scene
 
 
 def test_hodome_object_source(tmp_path):
