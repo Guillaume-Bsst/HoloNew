@@ -599,6 +599,11 @@ class Viewer:
                 self._object_pts_handle.points = transform_points_local_to_world(
                     quat, trans, self.object_points_local).astype(np.float32)
                 self._object_pts_handle.visible = True
+            # Keep the object frame on the SAME solved pose as the mesh/points it annotates.
+            if self._object_frame_handle is not None and self._tog_object_frame.value:
+                self._object_frame_handle.wxyz = np.asarray(quat, np.float32)
+                self._object_frame_handle.position = np.asarray(trans, np.float32)
+                self._object_frame_handle.visible = True
         # (2) Solve-state readout: CoM height (solved vs grounded target), foot slip
         # (mm), and |L| (solved vs reference). Targets shown as "(→tgt)" when present.
         parts = []

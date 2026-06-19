@@ -93,6 +93,30 @@ def test_object_frame_drawn_at_object_pose(robot_urdf):
     v.close()
 
 
+def test_object_frame_follows_solved_pose(robot_urdf):
+    # With "Solved object pose" on, the mesh/points switch to the method's solved pose;
+    # the frame must follow the SAME pose so it stays consistent with the mesh.
+    kw = _obj_kwargs()
+    solved = np.tile([1.0, 0.0, 0.0, 0.0, 5.0, 6.0, 7.0], (3, 1)).astype(np.float32)  # [wxyz,xyz]
+    m = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((3, 36)),
+                  stages={"Original": np.zeros((3, 5, 3))}, solved_object_poses=solved)
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("test_socp",), **kw)
+    v.bind_methods([m])
+    v._stage_dd.value = "Original"
+    v._tog_object_frame.value = True
+    v._tog_solved_obj.value = True
+    v._redraw(0)
+    h = v._object_frame_handle
+    np.testing.assert_array_equal(h.position, solved[0][4:7])   # solved translation
+    np.testing.assert_array_equal(h.wxyz, solved[0][:4])        # solved orientation
+    # Turning the solved toggle off snaps the frame back to the reference pose.
+    v._tog_solved_obj.value = False
+    v._redraw(0)
+    np.testing.assert_array_equal(h.position, kw["object_pose_raw"][0, :3])
+    v.close()
+
+
 def test_object_handles_are_persistent_not_recreated(robot_urdf):
     # The object must not flicker: its mesh/points handles are created once and updated
     # in place across redraws, never appended to the per-frame _dynamic_handles.
