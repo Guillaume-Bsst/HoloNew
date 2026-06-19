@@ -109,3 +109,33 @@ def test_smplh_dataset_keeps_object_interaction(tmp_path):
     facade.normalize_dataset_cfg(cfg)
     assert cfg.data_format == "smplh"
     assert cfg.task_type == "object_interaction"
+
+
+def _dataset_cfg(**kw):
+    from types import SimpleNamespace
+    import numpy as np
+    base = dict(dataset="hodome", motion_name=None, model_path="m",
+                motion_path="smplx/sub3_box.npz", obj_path="object/sub3_box.npz",
+                smpl_model_dir=None, data_format=None, task_type="object_interaction",
+                task_name=None, data_path=None, omomo_dir=None)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_hodome_with_object_keeps_object_interaction(monkeypatch):
+    import numpy as np
+    monkeypatch.setattr(facade, "_has_object_source", lambda cfg: True)
+    monkeypatch.setattr(facade, "prep_hodome_processed", lambda *a, **k: {
+        "global_joint_positions": np.zeros((1, 22, 3), "float32"),
+        "global_joint_orientations": np.zeros((1, 22, 4), "float32"),
+        "height": np.float32(1.7), "betas": np.zeros(10, "float32"), "gender": "neutral"})
+    cfg = _dataset_cfg()
+    facade.normalize_dataset_cfg(cfg)
+    assert cfg.task_type == "object_interaction"
+
+
+def test_smplx_no_object_forces_robot_only(monkeypatch):
+    monkeypatch.setattr(facade, "_has_object_source", lambda cfg: False)
+    cfg = _dataset_cfg(dataset="sfu", obj_path=None, motion_path="sub3.npz")
+    facade.normalize_dataset_cfg(cfg)
+    assert cfg.task_type == "robot_only"
