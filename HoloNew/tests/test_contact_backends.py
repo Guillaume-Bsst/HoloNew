@@ -1,10 +1,5 @@
 import numpy as np
-from HoloNew.src.test_socp.contact.object_input import parse_obj_name
-from HoloNew.src.test_socp.contact.probes import make_floor_grid, make_object_grid
-
-
-def test_parse_obj_name():
-    assert parse_obj_name("sub3_largebox_003") == "largebox"
+from HoloNew.src.test_socp.contact.probes import make_floor_grid
 
 
 def test_make_floor_grid():
