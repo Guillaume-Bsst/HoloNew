@@ -191,4 +191,12 @@ class HoDomeLoader(MotionLoader):
 
     def object_source(self, *, motion_path, obj_path, model_path, task_type,
                       constants, motion_data_config, smpl_model_dir=None):
-        return []   # real implementation lands in Task 3
+        if task_type == "robot_only" or obj_path is None:
+            return []
+        from HoloNew.src.data_loaders.base import ObjectSource
+        stem = Path(obj_path).stem
+        token = stem.split("_", 1)[1] if "_" in stem else stem
+        scaned = Path(obj_path).parent.parent / "scaned_object"
+        mesh_path = extract_hodome_object_mesh(token, scaned)
+        poses = hodome_object_poses(Path(obj_path))    # (T,7) Z-up
+        return [ObjectSource(mesh_path=Path(mesh_path), poses_raw=poses)]
