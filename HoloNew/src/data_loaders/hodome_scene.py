@@ -33,10 +33,16 @@ def build_hodome_scene_xml(robot_xml_path, token, mesh_obj_path, output_path=Non
     content = robot_xml_path.read_text()
 
     asset = f'    <mesh name="{token}_mesh" file="{mesh_abs}" scale="1 1 1"/>\n'
-    i = content.index("</asset>")               # first </asset> = the mesh-asset block
+    try:
+        i = content.index("</asset>")               # first </asset> = the mesh-asset block
+    except ValueError:
+        raise ValueError(f"No </asset> in robot MJCF {robot_xml_path}") from None
     content = content[:i] + asset + content[i:]
 
-    j = content.index("</worldbody>")
+    try:
+        j = content.index("</worldbody>")
+    except ValueError:
+        raise ValueError(f"No </worldbody> in robot MJCF {robot_xml_path}") from None
     content = content[:j] + _OBJECT_BLOCK.format(token=token) + content[j:]
 
     if output_path is None:
