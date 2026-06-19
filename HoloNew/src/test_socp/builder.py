@@ -83,6 +83,9 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         task_type=task_type,
     )
 
+    from HoloNew.src.data_loaders.hodome_scene import ensure_object_scene_xml
+    ensure_object_scene_xml(cfg, constants)
+
     # Build retargeter kwargs and construct the retargeter
     kwargs = build_retargeter_kwargs_from_config(
         cfg.retargeter, constants, object_urdf_path=None, task_type=task_type

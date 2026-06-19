@@ -26,3 +26,8 @@ data_utils/lafan1
 
 # On-demand object-SDF caches (rebaked per interaction length; not tracked)
 assets/contact/*_L*_r*.npz
+
+# Generated robot+object scene xmls for arbitrary (HODome) objects, written next to
+# the robot meshes per object token. Not tracked; keep the committed largebox scenes.
+models/*/*_w_*.xml
+!models/*/*_w_largebox.xml
