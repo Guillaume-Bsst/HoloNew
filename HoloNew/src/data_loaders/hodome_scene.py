@@ -63,12 +63,23 @@ def ensure_object_scene_xml(cfg, constants) -> "Path | None":
 
     Returns the written Path, or None when the scene xml is not needed:
     - cfg.dataset is not "hodome"
-    - task_type is "robot_only"
+    - task_type is not "object_interaction" (e.g. "robot_only")
+    - cfg.retargeter.activate_obj_non_penetration is False
+    - cfg.retargeter.load_object_scene is False
+    - constants.OBJECT_NAME is None or "ground"
     - the loader returns no object sources
     """
-    if cfg.dataset != "hodome":
+    if getattr(cfg, "dataset", None) != "hodome":
         return None
-    if cfg.task_type == "robot_only":
+    if cfg.task_type != "object_interaction":
+        return None
+
+    sc = getattr(cfg, "retargeter", None)
+    if not (getattr(sc, "activate_obj_non_penetration", False)
+            and getattr(sc, "load_object_scene", True)):
+        return None
+    token = getattr(constants, "OBJECT_NAME", None)
+    if token in (None, "ground"):
         return None
 
     loader = resolve_loader("hodome")
@@ -84,6 +95,5 @@ def ensure_object_scene_xml(cfg, constants) -> "Path | None":
     if not sources:
         return None
 
-    token = constants.OBJECT_NAME
     robot_xml_path = Path(constants.ROBOT_URDF_FILE).with_suffix(".xml")
     return build_hodome_scene_xml(robot_xml_path, token, sources[0].mesh_path)

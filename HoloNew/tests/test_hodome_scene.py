@@ -38,8 +38,17 @@ def test_scene_parses_and_adds_free_joint(tmp_path):
 
 # --- Task 3: ensure_object_scene_xml ---
 
+def _make_retargeter(activate_obj_non_penetration=True, load_object_scene=True):
+    """Minimal retargeter-like namespace carrying the two scene-swap flags."""
+    return SimpleNamespace(
+        activate_obj_non_penetration=activate_obj_non_penetration,
+        load_object_scene=load_object_scene,
+    )
+
+
 def _make_cfg(dataset, task_type="object_interaction", obj_path=None,
-              motion_path=None, model_path=None, smpl_model_dir=None):
+              motion_path=None, model_path=None, smpl_model_dir=None,
+              retargeter=None):
     """Minimal cfg-like namespace for ensure_object_scene_xml tests."""
     return SimpleNamespace(
         dataset=dataset,
@@ -49,6 +58,7 @@ def _make_cfg(dataset, task_type="object_interaction", obj_path=None,
         model_path=model_path,
         smpl_model_dir=smpl_model_dir,
         motion_data_config=SimpleNamespace(),
+        retargeter=retargeter if retargeter is not None else _make_retargeter(),
     )
 
 
@@ -81,9 +91,31 @@ def test_ensure_returns_none_for_robot_only():
     assert result is None
 
 
+def test_ensure_returns_none_when_flag_off():
+    """ensure_object_scene_xml is a no-op when activate_obj_non_penetration=False."""
+    cfg = _make_cfg(dataset="hodome", task_type="object_interaction",
+                    retargeter=_make_retargeter(activate_obj_non_penetration=False))
+    constants = _make_constants()
+    assert ensure_object_scene_xml(cfg, constants) is None
+
+
+def test_ensure_returns_none_when_load_object_scene_false():
+    """ensure_object_scene_xml is a no-op when load_object_scene=False."""
+    cfg = _make_cfg(dataset="hodome", task_type="object_interaction",
+                    retargeter=_make_retargeter(load_object_scene=False))
+    constants = _make_constants()
+    assert ensure_object_scene_xml(cfg, constants) is None
+
+
+def test_ensure_returns_none_when_object_name_is_ground():
+    """ensure_object_scene_xml is a no-op when OBJECT_NAME is 'ground'."""
+    cfg = _make_cfg(dataset="hodome", task_type="object_interaction")
+    constants = _make_constants(token="ground")
+    assert ensure_object_scene_xml(cfg, constants) is None
+
+
 def test_ensure_returns_none_when_no_object_source(tmp_path):
     """ensure_object_scene_xml returns None when the loader returns no object sources."""
-    import numpy as np
     cfg = _make_cfg(dataset="hodome", task_type="object_interaction",
                     obj_path=tmp_path / "s01_baseball.npz")
     constants = _make_constants()
