@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from HoloNew.src.data_loaders.base import resolve_loader
+
 # Object body block, copied verbatim from g1_29dof_w_largebox.xml (convex-hull mesh
 # geom, fixed mass/inertia). {token} fills the object name.
 _OBJECT_BLOCK = """    <body name="{token}_link">
@@ -50,3 +52,38 @@ def build_hodome_scene_xml(robot_xml_path, token, mesh_obj_path, output_path=Non
     output_path = Path(output_path)
     output_path.write_text(content)
     return output_path
+
+
+def ensure_object_scene_xml(cfg, constants) -> "Path | None":
+    """Build and write the robot+object scene xml for a HODome object_interaction run.
+
+    Calls the HODome loader's object_source to retrieve the mesh path, then delegates
+    to build_hodome_scene_xml to write the scene xml next to the robot xml (the path
+    TestSocpRetargeter.__init__ expects: ROBOT_URDF_FILE with .urdf -> _w_<token>.xml).
+
+    Returns the written Path, or None when the scene xml is not needed:
+    - cfg.dataset is not "hodome"
+    - task_type is "robot_only"
+    - the loader returns no object sources
+    """
+    if cfg.dataset != "hodome":
+        return None
+    if cfg.task_type == "robot_only":
+        return None
+
+    loader = resolve_loader("hodome")
+    sources = loader.object_source(
+        motion_path=cfg.motion_path,
+        obj_path=cfg.obj_path,
+        model_path=cfg.model_path,
+        task_type=cfg.task_type,
+        constants=constants,
+        motion_data_config=cfg.motion_data_config,
+        smpl_model_dir=getattr(cfg, "smpl_model_dir", None),
+    )
+    if not sources:
+        return None
+
+    token = constants.OBJECT_NAME
+    robot_xml_path = Path(constants.ROBOT_URDF_FILE).with_suffix(".xml")
+    return build_hodome_scene_xml(robot_xml_path, token, sources[0].mesh_path)
