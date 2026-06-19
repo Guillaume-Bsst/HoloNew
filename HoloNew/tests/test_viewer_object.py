@@ -71,6 +71,28 @@ def test_redraw_with_object_runs_for_each_stage(robot_urdf):
     v.close()
 
 
+def test_object_frame_drawn_at_object_pose(robot_urdf):
+    # The "Object frame" triad sits at the object's pose (the same pose the mesh uses), so
+    # the mesh's local origin is at the triad origin. Toggling off hides it.
+    kw = _obj_kwargs()
+    m = MethodViz(label="GMR-SOCP", robot_key="gmr_socp", qpos=np.zeros((3, 36)),
+                  stages={"Original": np.zeros((3, 5, 3))})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("gmr_socp",), **kw)
+    v.bind_methods([m])
+    v._stage_dd.value = "Original"
+    v._tog_object_frame.value = True
+    v._redraw(0)
+    h = v._object_frame_handle
+    assert h is not None and h.visible
+    np.testing.assert_array_equal(h.position, kw["object_pose_raw"][0, :3])   # frame origin = pose trans
+    np.testing.assert_array_equal(h.wxyz, kw["object_pose_raw"][0, 3:7])      # frame orient = pose quat
+    v._tog_object_frame.value = False
+    v._redraw(0)
+    assert v._object_frame_handle.visible is False
+    v.close()
+
+
 def test_object_handles_are_persistent_not_recreated(robot_urdf):
     # The object must not flicker: its mesh/points handles are created once and updated
     # in place across redraws, never appended to the per-frame _dynamic_handles.

@@ -160,6 +160,7 @@ class Viewer:
         # so the object does not flicker during playback, like the SMPL-X mesh.
         self._object_mesh_handle = None
         self._object_pts_handle = None
+        self._object_frame_handle = None
         self._g1_pts_handle = None
         self._sdf_handle = None
         self._human_handle = None
@@ -257,6 +258,7 @@ class Viewer:
             self._tog_urdf = self.server.gui.add_checkbox("Show G1 URDF", True)
             self._tog_smplx = self.server.gui.add_checkbox("SMPL mesh", False)
             self._tog_object = self.server.gui.add_checkbox("Object mesh", False)
+            self._tog_object_frame = self.server.gui.add_checkbox("Object frame", False)
 
         with self.server.gui.add_folder("Skeleton"):
             self._tog_body_bones = self.server.gui.add_checkbox("Body bones", True)
@@ -284,7 +286,8 @@ class Viewer:
             # morphological-graph keypoints (the robot links the Laplacian matches).
             self._tog_object_pts = self.server.gui.add_checkbox("Object points", False)
             self._tog_g1_pts = self.server.gui.add_checkbox("G1 points", False)
-        for _cb in (self._tog_smplx, self._tog_object, self._tog_object_pts, self._tog_g1_pts):
+        for _cb in (self._tog_smplx, self._tog_object, self._tog_object_frame,
+                    self._tog_object_pts, self._tog_g1_pts):
             @_cb.on_update
             def _(_evt):
                 self._redraw(int(self._slider.value))
@@ -538,6 +541,26 @@ class Viewer:
                 self._object_mesh_handle.visible = True
         elif self._object_mesh_handle is not None:
             self._object_mesh_handle.visible = False
+
+        # Object frame: the RGB triad at the object's local origin (pose translation) with
+        # the object's orientation (pose quat) — the SAME pose the mesh is placed with, so
+        # the mesh's local origin sits at the triad origin and its axes align with it.
+        if pose is not None and self._tog_object_frame.value:
+            length = float(self._axis_size.value)
+            if self._object_frame_handle is None:
+                self._object_frame_handle = self.server.scene.add_frame(
+                    "/object/frame", show_axes=True, axes_length=length,
+                    axes_radius=length * AXIS_RADIUS_FRAC,
+                    wxyz=np.asarray(pose[frame, 3:7], np.float32),
+                    position=np.asarray(pose[frame, :3], np.float32))
+            else:
+                self._object_frame_handle.wxyz = np.asarray(pose[frame, 3:7], np.float32)
+                self._object_frame_handle.position = np.asarray(pose[frame, :3], np.float32)
+                self._object_frame_handle.axes_length = length
+                self._object_frame_handle.axes_radius = length * AXIS_RADIUS_FRAC
+                self._object_frame_handle.visible = True
+        elif self._object_frame_handle is not None:
+            self._object_frame_handle.visible = False
 
         if pose is not None and self._tog_object_pts.value and self.object_points_local is not None:
             pts = transform_points_local_to_world(
