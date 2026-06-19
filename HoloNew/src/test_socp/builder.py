@@ -27,12 +27,14 @@ def resolve_object_inputs(cfg, constants, pt_path):
         assert len(sources) <= 1, f"multi-object not supported yet: {len(sources)} sources"
         if not sources:
             return None, None
-        return sources[0].mesh_path, np.asarray(sources[0].poses_raw, np.float64)
+        # Preserve the source dtype (float32 for the .pt path): promoting to float64 here
+        # shifts the solve numerics enough to drift tight golden tests (atol 1e-6).
+        return sources[0].mesh_path, np.asarray(sources[0].poses_raw)
     mesh_file = getattr(constants, "OBJECT_MESH_FILE", None)
     if mesh_file is None or pt_path is None:
         return None, None
-    _, poses = load_intermimic_data(str(pt_path))
-    return mesh_file, np.asarray(poses, np.float64)
+    _, poses = load_intermimic_data(str(pt_path))   # float32, as the legacy blocks used
+    return mesh_file, poses
 
 
 def build_from_config(cls, cfg) -> "TestSocpRetargeter":
