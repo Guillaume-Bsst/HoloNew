@@ -167,8 +167,8 @@ def validate_config(cfg: RetargetingConfig) -> None:
     # Task-specific format requirements
     if cfg.task_type == "climbing" and cfg.data_format not in (None, "mocap"):
         raise ValueError("Climbing task requires 'mocap' data format")
-    if cfg.task_type == "object_interaction" and cfg.data_format not in (None, "smplh"):
-        raise ValueError("Object interaction requires 'smplh' data format")
+    if cfg.task_type == "object_interaction" and cfg.data_format not in (None, "smplh", "smplx"):
+        raise ValueError("Object interaction requires 'smplh' or 'smplx' data format")
     # robot_only accepts any format in the registry (already validated above)
 
 
@@ -346,9 +346,11 @@ def setup_object_data(
         if constants.OBJECT_MESH_FILE is None:
             raise ValueError("OBJECT_MESH_FILE not set for object_interaction task")
 
-        object_local_pts, object_local_pts_demo = load_object_data(
-            constants.OBJECT_MESH_FILE, smpl_scale=smpl_scale, sample_count=100
-        )
+        # Even surface samples via the solver's density-based sampler; the demo
+        # (scaled) variant is the same cloud times smpl_scale, applied here.
+        from HoloNew.src.test_socp.movable import sample_object_surface
+        object_local_pts = sample_object_surface(constants.OBJECT_MESH_FILE)
+        object_local_pts_demo = object_local_pts * smpl_scale
         return object_local_pts, object_local_pts_demo, constants.OBJECT_URDF_FILE
 
     if task_type == "climbing":
@@ -673,10 +675,18 @@ def main(cfg: RetargetingConfig) -> RetargetResult | None:
         task_type=task_type,
     )
 
-    # Façade object_interaction: take the object mesh/URDF straight from --obj-path.
+    # Façade object_interaction object setup. When --obj-path is a mesh (OMOMO .obj),
+    # take it straight as the object mesh/URDF. For pose-file datasets (HODome .npz), the
+    # mesh comes from the loader's object_source instead — here we only set OBJECT_NAME
+    # (from the sequence token) so the builder's object gate (object_name != "ground") passes.
     if cfg.dataset is not None and task_type == "object_interaction" and cfg.obj_path is not None:
-        constants.OBJECT_MESH_FILE = str(cfg.obj_path)
-        constants.OBJECT_URDF_FILE = str(Path(cfg.obj_path).with_suffix(".urdf"))
+        op = Path(cfg.obj_path)
+        if op.suffix == ".obj":
+            constants.OBJECT_MESH_FILE = str(op)
+            constants.OBJECT_URDF_FILE = str(op.with_suffix(".urdf"))
+        else:
+            stem = op.stem
+            constants.OBJECT_NAME = stem.split("_", 1)[1] if "_" in stem else stem
 
     # Load motion data — new façade dispatches to a dataset loader; else legacy path.
     if cfg.dataset is not None:

@@ -8,6 +8,34 @@ from __future__ import annotations
 
 import numpy as np
 
+from HoloNew.src.utils import load_intermimic_data
+
+
+def resolve_object_inputs(cfg, constants, pt_path):
+    """(mesh_path, poses_raw) for the object channel, dataset-agnostic.
+
+    Dataset path: the loader's object_source (one object; assert <=1). Legacy
+    path (no --dataset): constants.OBJECT_MESH_FILE + load_intermimic_data(.pt).
+    Returns (None, None) when there is no object."""
+    if cfg.dataset is not None:
+        from HoloNew.src.data_loaders.base import resolve_loader
+        sources = resolve_loader(cfg.dataset).object_source(
+            motion_path=cfg.motion_path, obj_path=cfg.obj_path, model_path=cfg.model_path,
+            task_type=cfg.task_type, constants=constants,
+            motion_data_config=cfg.motion_data_config,
+            smpl_model_dir=getattr(cfg, "smpl_model_dir", None))
+        assert len(sources) <= 1, f"multi-object not supported yet: {len(sources)} sources"
+        if not sources:
+            return None, None
+        # Preserve the source dtype (float32 for the .pt path): promoting to float64 here
+        # shifts the solve numerics enough to drift tight golden tests (atol 1e-6).
+        return sources[0].mesh_path, np.asarray(sources[0].poses_raw)
+    mesh_file = getattr(constants, "OBJECT_MESH_FILE", None)
+    if mesh_file is None or pt_path is None:
+        return None, None
+    _, poses = load_intermimic_data(str(pt_path))   # float32, as the legacy blocks used
+    return mesh_file, poses
+
 
 def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     """Build a TestSocpRetargeter and populate its motion inputs.
@@ -239,6 +267,13 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # is unchanged; the None fallbacks only matter when an axis is explicitly set to AUTO.
     _obj_xy = sc.scale_xy_object if sc.scale_xy_object is not None else smpl_scale
     _obj_z = sc.scale_z_object if sc.scale_z_object is not None else 1.0
+
+    # Object mesh + raw poses, resolved dataset-agnostically (loader object_source when
+    # --dataset is set) or via the legacy OBJECT_MESH_FILE + .pt path otherwise. Consumed
+    # by the MuJoCo-drive, SDF, movable and probe blocks below. (None, None) = no object.
+    _pt = pt_path if pt_path.exists() else None
+    _mesh_file, _obj_poses_all = resolve_object_inputs(cfg, constants, _pt)
+
     rt.gmr_stages = compute_stages(
         rt.gmr_grounded, human_quat, scale_xy=_rob_xy, scale_z=_rob_z,
     )
@@ -277,11 +312,9 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # baseline default) loads poses with no free joint and trips the guard below.
     rt._obj_poses_mj = None
     if (sc.activate_obj_non_penetration and sc.load_object_scene
-            and rt.object_name not in (None, "ground")):
+            and rt.object_name not in (None, "ground") and _obj_poses_all is not None):
         from HoloNew.examples.robot_retarget import convert_object_poses_to_mujoco_order
-        from HoloNew.src.utils import load_intermimic_data
-        _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
-        obj_poses = obj_poses[:T].copy()
+        obj_poses = _obj_poses_all[:T].copy()           # (T, 7) [qw,qx,qy,qz,x,y,z]
         # Place the object independently of the robot (no-op at the TEST defaults 1.0).
         obj_poses[:, 4:6] *= _obj_xy   # XY
         obj_poses[:, 6] *= _obj_z      # Z
@@ -323,7 +356,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     _L_flr_eff = sc.L_floor if sc.L_floor is not None else sc.L_interaction
     _probe_margin = float(max(_L_flr_eff, _L_obj_eff))
     _sdf_res = sc.sdf_resolution
-    _mesh_file = getattr(constants, "OBJECT_MESH_FILE", None)
+    # _mesh_file resolved above via resolve_object_inputs (object_source or legacy).
     # Build/load the object SDF only for tasks that actually have an object. robot_only
     # (object_name "ground", e.g. smplx locomotion clips with no .pt object poses) must not
     # pull in object loading. Floor-only inertia keeps object_sdf=None.
@@ -355,12 +388,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         from HoloNew.src.test_socp.contact.constants import CONTACT_MARGIN_M, OMOMO_DIR_DEFAULT
         from HoloNew.src.test_socp.contact.smplx_field import build_smplx_ground_probe
         from HoloNew.src.test_socp.correspondence.human_body import PointCloudCache
-        from HoloNew.src.utils import load_intermimic_data
-        # When an object SDF is present, load its raw poses so retarget() and
+        # When an object SDF is present, use its raw poses so retarget() and
         # build_dx_terms can access them; floor-only mode has no object channel.
-        if rt.object_sdf is not None:
-            _, obj_poses = load_intermimic_data(str(pt_path))   # (T, 7) [qw,qx,qy,qz,x,y,z]
-            obj_poses = obj_poses[:T].copy()
+        if rt.object_sdf is not None and _obj_poses_all is not None:
+            obj_poses = _obj_poses_all[:T].copy()           # (T, 7) [qw,qx,qy,qz,x,y,z]
             # Place the object independently (no-op at the TEST defaults 1.0); the D/X
             # interaction and movable terms read these poses.
             obj_poses[:, 4:6] *= _obj_xy   # XY

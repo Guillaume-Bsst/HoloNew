@@ -72,6 +72,18 @@ def resolve_motion_name_into_cfg(cfg) -> None:
     cfg.smpl_model_dir = cfg.smpl_model_dir or smpl_model_dir
 
 
+def _has_object_source(cfg) -> bool:
+    """True when the dataset loader yields an object for this sequence."""
+    if cfg.obj_path is None:
+        return False
+    from HoloNew.src.data_loaders.base import resolve_loader
+    srcs = resolve_loader(cfg.dataset).object_source(
+        motion_path=cfg.motion_path, obj_path=cfg.obj_path, model_path=cfg.model_path,
+        task_type=cfg.task_type, constants=None, motion_data_config=cfg.motion_data_config,
+        smpl_model_dir=getattr(cfg, "smpl_model_dir", None))
+    return len(srcs) > 0
+
+
 def normalize_dataset_cfg(cfg) -> None:
     """When cfg.dataset is set, fill the legacy fields in place. No-op otherwise."""
     if cfg.dataset is None:
@@ -87,14 +99,15 @@ def normalize_dataset_cfg(cfg) -> None:
     dataset = cfg.dataset
     cfg.data_format = DATASET_TO_FORMAT[dataset]
 
-    # The smplx solve path is robot-only: objects are a viewer overlay (resolved from the
-    # dataset's own files), not wired into the solver's InterMimic .pt object channel. So
-    # object_interaction has no .pt to load and would build a wrong object SDF — force
-    # robot_only for smplx datasets (the object overlay still shows, gated on the dataset).
-    if cfg.data_format == "smplx" and cfg.task_type == "object_interaction":
+    # A smplx dataset WITHOUT an object source is robot-only: there is no object to wire
+    # into the solver, so object_interaction would build a wrong/empty object SDF — force
+    # robot_only. When the loader DOES yield an object (e.g. HODome with an object .npz),
+    # keep object_interaction so the SDF/contact channel is built from object_source.
+    if (cfg.data_format == "smplx" and cfg.task_type == "object_interaction"
+            and not _has_object_source(cfg)):
         import logging
         logging.getLogger(__name__).info(
-            "Dataset %s is smplx (object is a viewer overlay); using task_type=robot_only "
+            "Dataset %s smplx has no object source; using task_type=robot_only "
             "for the solve instead of object_interaction.", dataset)
         cfg.task_type = "robot_only"
 
