@@ -188,3 +188,7 @@ class HoDomeLoader(MotionLoader):
         else:
             object_poses = hodome_object_poses(Path(obj_path))[:n]
         return human_joints, object_poses, smpl_scale
+
+    def object_source(self, *, motion_path, obj_path, model_path, task_type,
+                      constants, motion_data_config, smpl_model_dir=None):
+        return []   # real implementation lands in Task 3

@@ -9,9 +9,22 @@ motion contract consumed by robot_retarget.main():
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+
+@dataclass(frozen=True)
+class ObjectSource:
+    """One object's solver inputs, in the human_joints Z-up world frame.
+
+    mesh_path: a mesh file usable directly by load_or_build_object_sdf, in the
+        object-local frame consistent with poses_raw.
+    poses_raw: (T, 7) [qw, qx, qy, qz, x, y, z] object pose per frame.
+    """
+    mesh_path: Path
+    poses_raw: np.ndarray
 
 # Dataset key -> internal data_format (drives joint registry / mapping / toe names).
 DATASET_TO_FORMAT: dict[str, str] = {
@@ -36,6 +49,16 @@ class MotionLoader(ABC):
              obj_path: Path | None, task_type: str, constants,
              motion_data_config,
              smpl_model_dir: Path | None = None) -> tuple[np.ndarray, np.ndarray, float]:
+        ...
+
+    @abstractmethod
+    def object_source(self, *, motion_path: Path, obj_path: Path | None,
+                      model_path: Path | None, task_type: str, constants,
+                      motion_data_config,
+                      smpl_model_dir: Path | None = None) -> list["ObjectSource"]:
+        """Object sources for the sequence (Z-up world of human_joints).
+
+        Empty list when the sequence has no object (or task_type robot_only)."""
         ...
 
 

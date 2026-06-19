@@ -24,6 +24,10 @@ class LegacyLoader(MotionLoader):
             motion_data_config,
         )
 
+    def object_source(self, *, motion_path, obj_path, model_path, task_type,
+                      constants, motion_data_config, smpl_model_dir=None):
+        return []   # lafan / sfu / climbing have no .pt object channel here
+
 
 @register_loader("lafan")
 class LafanLoader(LegacyLoader):

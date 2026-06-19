@@ -58,3 +58,7 @@ class OmomoMixedLoader(MotionLoader):
         height = omomo_height_from_betas(betas, gender, Path(smpl_model_dir))
         smpl_scale = float(constants.ROBOT_HEIGHT) / height
         return human_joints, object_poses, smpl_scale
+
+    def object_source(self, *, motion_path, obj_path, model_path, task_type,
+                      constants, motion_data_config, smpl_model_dir=None):
+        return []   # real implementation lands in Task 2
