@@ -12,6 +12,7 @@ unchanged.
 from __future__ import annotations
 
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -128,6 +129,11 @@ def normalize_dataset_cfg(cfg) -> None:
             np.savez(processed, **data)
         cfg.data_path = _HODOME_CACHE_DIR
         cfg.task_name = stem
+        # Object name = token (2nd "_"-segment), so create_task_constants propagates
+        # OBJECT_NAME=token to the builder gate AND the scene-swap path (_w_<token>.xml).
+        if cfg.task_type == "object_interaction" and _has_object_source(cfg):
+            token = stem.split("_", 1)[1] if "_" in stem else stem
+            cfg.task_config = replace(cfg.task_config, object_name=token)
 
     else:
         # lafan / sfu / climbing: motion_path locates the file; reuse its parent/stem.
