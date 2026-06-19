@@ -358,13 +358,27 @@ def view(cfg: ViewStagesConfig) -> None:
         # Per-joint orientations of the mapped bodies, so their joint frames can be drawn.
         sq = {gmr_labels[name]: rt.gmr_stages[name]["quat"][:T]
               for name in ("mapped", "scaled", "offset", "ground")}
-        # The 52-joint raw source skeleton, then the exact grounded input the GMR chain
-        # consumed (rt.gmr_grounded), so Mapped/Scaled/Offset/Floor stay consistent with it.
-        stages = {"Original": raw_joints[:T, :, :], "Grounded": rt.gmr_grounded[:T], **stages}
+        # The raw source skeleton, then the grounded input the GMR chain consumed. For
+        # smplh raw_joints is the 52-joint layout and rt.gmr_grounded matches it. For smplx
+        # the source is the 22 SMPL-X joints, but rt.gmr_grounded is the SMPLH 52-slot array
+        # with only the 14 mapped slots filled (the rest at the origin) — drawing that as a
+        # full skeleton scatters stray points at (0,0,0). So re-ground the same 22 joints
+        # the Original stage shows, drawn with the SMPL-X topology, for a consistent skeleton.
+        if data_format == "smplx":
+            from HoloNew.src.holosoma.preprocess import ground_to_floor
+            from HoloNew.src.test_socp.targets import SMPLX_BODY_JOINT_NAMES
+            _toe = [SMPLX_BODY_JOINT_NAMES.index("left_foot"),
+                    SMPLX_BODY_JOINT_NAMES.index("right_foot")]
+            grounded = ground_to_floor(raw_joints[:T], _toe).astype(np.float32)
+        else:
+            grounded = rt.gmr_grounded[:T]
+        stages = {"Original": raw_joints[:T, :, :], "Grounded": grounded, **stages}
         rs, rq = robot_link_poses(robot_mjcf, robot_bodies, res.qpos)
         g1 = robot_link_poses(robot_mjcf, g1_links, res.qpos)[0]
         sb = {name: gmr_bones for name in ("Mapped", "Scaled", "Offset", "Floor")}
         sb[ROBOT_STAGE] = gmr_bones
+        if data_format == "smplx":
+            sb["Grounded"] = skeleton.SMPLX_BODY_BONES
         mv = MethodViz(label, key, res.qpos, stages, stage_bones=sb,
                        robot_skeleton=rs, stage_quats=sq, robot_quats=rq, g1_points=g1)
         # TEST-SOCP exposes the per-frame interaction data (probes at the Grounded pose,

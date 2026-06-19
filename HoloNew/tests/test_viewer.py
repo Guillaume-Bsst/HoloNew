@@ -65,6 +65,28 @@ def test_original_stage_renders_with_toggles(robot_urdf):
     v._stage_dd.value = "Mapped"; v._redraw(0)
     v.close()
 
+
+def test_smplx_grounded_stage_renders_22_joints(robot_urdf):
+    # smplx Grounded is a 22-joint skeleton drawn with SMPLX_BODY_BONES (not the SMPLH
+    # 52-slot array, which scattered stray points at the origin). _draw_stage must route
+    # a non-52-joint stage through its stage_bones without an IndexError.
+    import numpy as np
+    from HoloNew.src import skeleton
+    from HoloNew.src.viewer import Viewer, MethodViz
+    oj = np.zeros((3, 22, 3), dtype=np.float32)
+    grounded = oj.copy(); grounded[:, :, 2] += 0.04          # rigid floor drop
+    m = MethodViz(label="TEST-SOCP", robot_key="test_socp", qpos=np.zeros((3, 36)),
+                  stages={"Original": oj, "Grounded": grounded},
+                  stage_bones={"Grounded": skeleton.SMPLX_BODY_BONES})
+    v = Viewer(robot_model_path=robot_urdf, object_model_path=None,
+               stage_keys=("test_socp",), original_joints=oj,
+               original_bones=skeleton.SMPLX_BODY_BONES)
+    v.bind_methods([m])
+    v._stage_dd.value = "Grounded"; v._redraw(0)             # no IndexError, no origin points
+    # The mesh root follows the grounded stage's pelvis, not the raw one.
+    np.testing.assert_allclose(v._active_human_pelvis(0), grounded[0, 0])
+    v.close()
+
 def test_smplx_original_stage_renders_with_22_joint_bones(robot_urdf):
     # smplx sources carry only the 22 SMPL-X body joints; the Original skeleton must
     # use SMPLX_BODY_BONES, not the 52-joint SMPLH BODY_BONES (which indexes joint 33

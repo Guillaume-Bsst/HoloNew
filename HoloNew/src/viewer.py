@@ -436,15 +436,18 @@ class Viewer:
             self._dynamic_handles.append(h)
 
     def _active_human_pelvis(self, frame: int) -> np.ndarray:
-        """Root the SMPL-X mesh follows: the active stage's pelvis when that stage is a full
-        52-joint human skeleton (Original -> raw/in the air, Grounded -> lowered, Scaled),
-        else the raw pelvis. Stages differ from Original by a rigid offset, so the mesh
-        tracks the displayed skeleton by translating its root onto this pelvis."""
+        """Root the SMPL-X mesh follows: the active stage's pelvis when that stage is a human
+        skeleton with the pelvis at index 0 (the 52-joint SMPLH stages, or the smplx human
+        stages Original/Grounded), else the raw pelvis. Stages differ from Original by a
+        rigid offset, so the mesh tracks the displayed skeleton via its root. This is what
+        makes the mesh follow the Grounded drop instead of staying at the raw height."""
         methods = getattr(self, "_methods", None)
         if methods is not None:
             method = methods.get(self._method_dd.value)
-            pos = method.stages.get(self._stage_dd.value) if method is not None else None
-            if pos is not None and pos.ndim == 3 and pos.shape[1] == 52:
+            stage = self._stage_dd.value
+            pos = method.stages.get(stage) if method is not None else None
+            if (pos is not None and pos.ndim == 3
+                    and (pos.shape[1] == 52 or stage in self.SMPLX_STAGES)):
                 return pos[frame, 0]
         return self.original_joints[frame, 0]
 
