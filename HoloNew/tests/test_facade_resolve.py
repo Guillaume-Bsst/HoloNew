@@ -124,8 +124,9 @@ def _dataset_cfg(**kw):
     return SimpleNamespace(**base)
 
 
-def test_hodome_with_object_keeps_object_interaction(monkeypatch):
+def test_hodome_with_object_keeps_object_interaction(monkeypatch, tmp_path):
     import numpy as np
+    monkeypatch.setattr(facade, "_HODOME_CACHE_DIR", tmp_path)   # isolate the disk cache
     monkeypatch.setattr(facade, "_has_object_source", lambda cfg: True)
     monkeypatch.setattr(facade, "prep_hodome_processed", lambda *a, **k: {
         "global_joint_positions": np.zeros((1, 22, 3), "float32"),
@@ -143,8 +144,9 @@ def test_smplx_no_object_forces_robot_only(monkeypatch):
     assert cfg.task_type == "robot_only"
 
 
-def test_hodome_sets_object_name_token(monkeypatch):
+def test_hodome_sets_object_name_token(monkeypatch, tmp_path):
     import numpy as np
+    monkeypatch.setattr(facade, "_HODOME_CACHE_DIR", tmp_path)   # isolate the disk cache
     monkeypatch.setattr(facade, "_has_object_source", lambda cfg: True)
     monkeypatch.setattr(facade, "prep_hodome_processed", lambda *a, **k: {
         "global_joint_positions": np.zeros((1, 22, 3), "float32"),
