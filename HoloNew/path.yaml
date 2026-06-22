@@ -5,5 +5,7 @@
 omomo:        data/00_raw_datasets/OMOMO                            # OMOMO release root (betas pickle under data/)
 omomo_new:    data/00_raw_datasets/OMOMO_new/OMOMO_new              # InterMimic .pt sequences
 hodome:       data/00_raw_datasets/HODome                           # HODome release (smplx/, object/, scaned_object/)
+sfu:          data/00_raw_datasets/SFU/SFU                          # SFU release (<subject>/<name>.npz)
+lafan:        data/00_raw_datasets/LAFAN/lafan1                     # LAFAN preprocessed <name>.npy (extract_global_positions output)
 smplx_models: data/00_raw_datasets/models/models_smplx_v1_1/models  # contains smplx/SMPLX_*.npz
 smplh_models: data/00_raw_datasets/models/smplh                     # SMPL-H neutral / male / female

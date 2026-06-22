@@ -200,12 +200,24 @@ python examples/view_stages.py --dataset omomo --task-type robot_only \
 
 python examples/view_stages.py --dataset hodome --task-type robot_only \
   --motion-name subject01_baseball --methods test_socp --max-frames 200
+
+# SFU / LAFAN are object-less: --task-type is optional (object_interaction auto-
+# downgrades to robot_only).
+#   SFU  : <sfu>/<subject>/<name>.npz is raw AMASS SMPL-X; it is FK-prepped to the
+#          processed format on first use and cached (like HODome) — no manual step.
+#   LAFAN: <lafan>/<name>.npy is the preprocessed positions — run extract_global_positions
+#          on the .bvh first (see README).
+python examples/view_stages.py --dataset sfu \
+  --motion-name 0008_ChaCha001_stageii --methods test_socp --max-frames 200
+
+python examples/view_stages.py --dataset lafan \
+  --motion-name dance2_subject1 --methods gmr_socp test_socp
 ```
 
 The explicit-path form still works (and overrides name resolution) when files live
 elsewhere — `--model-path` / `--motion-path` (/ `--obj-path`, `--smpl-model-dir`).
-`--motion-name` is supported for `omomo` and `hodome`; the same flags work on
-`robot_retarget.py`.
+`--motion-name` is supported for `omomo`, `hodome`, `sfu` and `lafan`; the same flags
+work on `robot_retarget.py`.
 
 > The object overlay is wired for **both** OMOMO (mesh from the global
 > `captured_objects/`) and HODome (single object per sequence; mesh auto-extracted from

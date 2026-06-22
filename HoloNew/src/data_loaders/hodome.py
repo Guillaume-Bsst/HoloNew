@@ -35,11 +35,28 @@ def _to_zup(points: np.ndarray) -> np.ndarray:
 
 def extract_hodome_object_mesh(token: str, scaned_object_dir: Path,
                               cache_dir: Path | None = None) -> Path:
-    """Extract <token>/<token>.obj from scaned_object/<token>.tar into a cache dir
-    and return the .obj path. Idempotent (re-uses the cache)."""
+    """Extract the scanned object mesh from scaned_object/<token>.tar into a cache dir and
+    return its path. Idempotent (re-uses the cache).
+
+    Prefers the decimated *_face1000.obj* (1000-face) mesh — the exact file the NeuralDome
+    toolbox loads (scripts/hodome_visualize_pyrender.py: ``{obj}_face1000.obj``). Its
+    centroid differs from the full ``{token}.obj`` by ~2.6 cm (decimation redistributes
+    vertices), and the object_R/T poses are calibrated against THIS mesh's centroid, so
+    using the full mesh leaves the object ~2.6 cm off the actor along its long axis. Falls
+    back to ``{token}.obj`` when the decimated mesh is absent (e.g. synthetic test tars)."""
     cache_dir = Path(cache_dir) if cache_dir is not None else _HODOME_MESH_CACHE
-    out = cache_dir / token / f"{token}.obj"
-    if out.exists():
+    face1000 = cache_dir / token / f"{token}_face1000.obj"
+    full = cache_dir / token / f"{token}.obj"
+
+    def _resolve() -> Path | None:
+        if face1000.exists():
+            return face1000
+        if full.exists():
+            return full
+        return None
+
+    out = _resolve()
+    if out is not None:
         return out
     tar_path = Path(scaned_object_dir) / f"{token}.tar"
     if not tar_path.exists():
@@ -47,8 +64,10 @@ def extract_hodome_object_mesh(token: str, scaned_object_dir: Path,
     cache_dir.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tar_path) as t:
         t.extractall(cache_dir)
-    if not out.exists():
-        raise FileNotFoundError(f"{token}/{token}.obj not found inside {tar_path}")
+    out = _resolve()
+    if out is None:
+        raise FileNotFoundError(
+            f"{token}/{token}_face1000.obj (or {token}.obj) not found inside {tar_path}")
     return out
 
 

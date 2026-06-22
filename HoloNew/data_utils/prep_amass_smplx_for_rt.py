@@ -272,6 +272,57 @@ def get_npz_files(amass_root_folder, subdataset_folder=None):
     return npz_files
 
 
+def process_amass_file(npz_file_path, bm_dict, num_body_joints: int = 22) -> dict:
+    """FK one AMASS SMPL-X npz to the processed retargeting dict the smplx path reads:
+    global_joint_positions (T,22,3), global_joint_orientations (T,55,4 WXYZ), height,
+    betas, gender. ``bm_dict`` is a prep_smplx_model() result, reused across files in
+    batch mode. Shared by main() (batch) and the --motion-name façade (single file)."""
+    data = load_ori_npz_file(npz_file_path)
+    gender = data["gender"]
+    betas = data["betas"]  # 16
+    root_trans = data["trans"]  # T X 3
+    aa_rot_rep = data["poses"]  # T X 165 (55*3)
+    aa_rot_52 = aa_rot_rep.reshape(-1, 55, 3)[:, :52, :]  # T X 52 X 3
+
+    root_trans = torch.from_numpy(root_trans).float()[None]  # 1 X T X 3
+    aa_rot_52 = torch.from_numpy(aa_rot_52).float()[None]  # 1 X T X 52 X 3
+    betas_t = torch.from_numpy(betas).float()[None]  # 1 X 16
+
+    global_joint_positions, _verts, _faces = run_smplx_model(
+        root_trans=root_trans, aa_rot_rep=aa_rot_52, betas=betas_t, gender=[gender], bm_dict=bm_dict
+    )
+    global_joint_positions = (
+        global_joint_positions.squeeze(0).detach().cpu().numpy()[:, :num_body_joints, :]
+    )  # T X 22 X 3
+
+    bm_neutral = bm_dict["neutral"]
+    kintree = getattr(bm_neutral, "kintree_table", None)
+    if kintree is not None:
+        parents55 = np.asarray(kintree)[0][:55].astype(np.int64).copy()
+        parents55[0] = -1
+    else:
+        parents55 = _SMPLX_PARENTS_55
+    aa_full = aa_rot_rep.reshape(-1, 55, 3)  # T X 55 X 3, native SMPL-X order
+    global_joint_orientations = compute_global_joint_orientations(aa_full, parents55)  # T X 55 X 4 wxyz
+
+    height = compute_height(bm_dict, betas_t, gender=[gender])
+    return {
+        "global_joint_positions": global_joint_positions.astype(np.float32),
+        "global_joint_orientations": global_joint_orientations,
+        "height": np.float32(height),
+        "betas": np.asarray(betas_t, dtype=np.float32).reshape(-1),
+        "gender": str(gender),
+    }
+
+
+def prep_amass_processed(npz_path, model_root_folder) -> dict:
+    """Single-file entry: build the SMPL-X body models and FK one AMASS npz to the
+    processed dict. ``model_root_folder`` is the dir whose ``smplx/`` subfolder holds the
+    SMPLX_*.npz. For batch use, call prep_smplx_model() once and reuse process_amass_file()."""
+    bm_dict = prep_smplx_model(str(model_root_folder))
+    return process_amass_file(str(npz_path), bm_dict)
+
+
 @dataclass
 class Config:
     """Configuration for processing AMASS SMPLX data."""
@@ -302,61 +353,19 @@ def main(cfg: Config):
 
     num_body_joints = 22
     for npz_file_path in npz_file_paths:
-        data = load_ori_npz_file(npz_file_path)
-        gender = data["gender"]
-        betas = data["betas"]  # 16
-        root_trans = data["trans"]  # T X 3
-        aa_rot_rep = data["poses"]  # T X 165 (55*3)
-        aa_rot_52 = aa_rot_rep.reshape(-1, 55, 3)[:, :52, :]  # T X 52 X 3
-
-        # Convert numpy to tensor
-        root_trans = torch.from_numpy(root_trans).float()[None]  # 1 X T X 3
-        aa_rot_52 = torch.from_numpy(aa_rot_52).float()[None]  # 1 X T X 52 X 3
-        betas = torch.from_numpy(betas).float()[None]  # 1 X 16
-
-        # Run FK to obtain global joint positions and global joint rotations
-        global_joint_positions, global_joint_verts, mesh_faces = run_smplx_model(
-            root_trans=root_trans, aa_rot_rep=aa_rot_52, betas=betas, gender=[gender], bm_dict=bm_dict
-        )
-
-        global_joint_positions = (
-            global_joint_positions.squeeze(0).detach().cpu().numpy()[:, :num_body_joints, :]
-        )  # T X 22 X 3
-
-        # Global per-joint world orientations (WXYZ) from the local axis-angle poses
-        # — these are what the TEST-SOCP Style objective needs and the positions-only
-        # output dropped. Prefer the body model's own kinematic tree; fall back to the
-        # standard SMPL-X body parents if it is not exposed.
-        # Full 55-joint SMPL-X axis-angle (body + face + both MANO hands) so the contact
-        # probe can pose the hands. aa_rot_rep is the raw (T, 165) pose; reshape to 55x3.
-        bm_neutral = bm_dict["neutral"]
-        kintree = getattr(bm_neutral, "kintree_table", None)
-        if kintree is not None:
-            parents55 = np.asarray(kintree)[0][:55].astype(np.int64).copy()
-            parents55[0] = -1
-        else:
-            parents55 = _SMPLX_PARENTS_55
-        aa_full = aa_rot_rep.reshape(-1, 55, 3)  # T X 55 X 3, native SMPL-X order
-        global_joint_orientations = compute_global_joint_orientations(aa_full, parents55)  # T X 55 X 4 wxyz
-
-        # Compute height based on min_z and max_z value of all the vertices
-        height = compute_height(bm_dict, betas, gender=[gender])
-        print(f"Height: {height}")
+        # FK -> processed dict (global_joint_positions, global_joint_orientations, height,
+        # betas, gender). betas + gender are saved too: the SMPL-X contact probe (inertia
+        # mode on these clips) needs the subject shape to sample the body surface.
+        data_dict = process_amass_file(npz_file_path, bm_dict, num_body_joints)
+        print(f"Height: {data_dict['height']}")
 
         # Save the processed data to the output folder
         npz_path = Path(npz_file_path)
         subset_data_name = npz_path.parts[-3]
         sub_name = npz_path.parts[-2]
         output_file_path = os.path.join(cfg.output_folder, subset_data_name + "_" + sub_name + "_" + npz_path.name)
-        # Save betas + gender too: the SMPL-X contact probe (inertia mode on these
-        # clips) needs the subject shape to sample the body surface.
-        np.savez(output_file_path, global_joint_positions=global_joint_positions,
-                 global_joint_orientations=global_joint_orientations, height=height,
-                 betas=np.asarray(betas, dtype=np.float32).reshape(-1),
-                 gender=str(gender))
+        np.savez(output_file_path, **data_dict)
         print(f"Saved processed data to {output_file_path}")
-
-        # break
 
     print("All data processed successfully")
 

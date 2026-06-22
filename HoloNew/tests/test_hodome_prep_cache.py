@@ -7,12 +7,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from HoloNew.src.data_loaders.facade import _hodome_cache_valid, ensure_hodome_processed
+from HoloNew.src.data_loaders.facade import _processed_cache_valid, ensure_hodome_processed
 from HoloNew.src.data_loaders.hodome import PREP_FORMAT_VERSION
 
 
 def test_cache_missing_is_invalid(tmp_path):
-    assert _hodome_cache_valid(tmp_path / "nope.npz") is False
+    assert _processed_cache_valid(tmp_path / "nope.npz") is False
 
 
 def test_cache_without_version_is_stale(tmp_path):
@@ -20,21 +20,21 @@ def test_cache_without_version_is_stale(tmp_path):
     p = tmp_path / "seq.npz"
     np.savez(p, global_joint_positions=np.zeros((4, 22, 3), np.float32),
              global_joint_orientations=np.zeros((4, 22, 4), np.float32))
-    assert _hodome_cache_valid(p) is False
+    assert _processed_cache_valid(p) is False
 
 
 def test_cache_with_wrong_version_is_stale(tmp_path):
     p = tmp_path / "seq.npz"
     np.savez(p, prep_version=PREP_FORMAT_VERSION - 1,
              global_joint_orientations=np.zeros((4, 55, 4), np.float32))
-    assert _hodome_cache_valid(p) is False
+    assert _processed_cache_valid(p) is False
 
 
 def test_cache_with_current_version_is_valid(tmp_path):
     p = tmp_path / "seq.npz"
     np.savez(p, prep_version=PREP_FORMAT_VERSION,
              global_joint_orientations=np.zeros((4, 55, 4), np.float32))
-    assert _hodome_cache_valid(p) is True
+    assert _processed_cache_valid(p) is True
 
 
 _REPO = Path(__file__).resolve().parents[5]
