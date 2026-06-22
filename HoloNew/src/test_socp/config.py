@@ -31,6 +31,14 @@ class TestSocpRetargeterConfig(RetargeterConfig):
     scale_xy_object: float | None = 1.0
     scale_z_object: float | None = 1.0
 
+    # Floor correction (grounding): after the joint-grounding, drop the human so the
+    # placed SMPL-X surface soles rest on the floor instead of floating. The drop is
+    # median(per-frame lowest sole) + floor_contact_margin; the margin biases the planted
+    # foot slightly BELOW z=0 (a small penetration reads as solid floor contact, better
+    # than floating). None disables it (legacy joint-only grounding); a float (incl. 0.0)
+    # enables the surface correction with that contact margin in metres.
+    floor_contact_margin: float | None = 0.01
+
     # === §1 VARIABLES — what the solve optimises ===
 
     # [TEST] article formulation: q_a actuated joints / T_B floating base / T_m movable
