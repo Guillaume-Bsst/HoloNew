@@ -26,3 +26,12 @@ def test_committed_path_yaml_has_all_keys():
     cfg = paths.load_paths()  # the real committed path.yaml
     for key in ("omomo", "omomo_new", "hodome", "smplx_models", "smplh_models"):
         assert key in cfg and cfg[key]
+
+
+def test_calculate_scale_factor_is_cwd_independent(tmp_path, monkeypatch):
+    from HoloNew.src.holosoma.preprocess import calculate_scale_factor
+    # height_dict.pkl lives under the package demo_data; calling from an unrelated cwd
+    # must still resolve it (sub3 is a known OMOMO subject in the bundled dict).
+    monkeypatch.chdir(tmp_path)
+    scale = calculate_scale_factor("sub3_largebox_003", 1.0)
+    assert scale > 0.0

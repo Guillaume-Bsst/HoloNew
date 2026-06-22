@@ -5,15 +5,23 @@ Preprocessing helpers for holosoma motion retargeting.
 from __future__ import annotations
 
 import pickle
+from pathlib import Path
 
 import numpy as np
 
 from HoloNew.src.utils import extract_object_first_moving_frame
 
+_PKG_DIR = Path(__file__).resolve().parents[2]   # .../HoloNew/HoloNew
+
 
 def calculate_scale_factor(task_name, robot_height):
-    """Calculate scale factor based on human height."""
-    with open("demo_data/height_dict.pkl", "rb") as f:
+    """Calculate scale factor based on human height.
+
+    Reads the bundled height table at a package-anchored path so it works from any
+    working directory. (Legacy callers only; OMOMO scale is now betas-FK, see
+    omomo_scale_factor.)
+    """
+    with open(_PKG_DIR / "demo_data" / "height_dict.pkl", "rb") as f:
         height_dict = pickle.load(f)
     sub_name = task_name.split("_")[0]
     human_height = height_dict[sub_name]
