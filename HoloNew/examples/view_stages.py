@@ -56,6 +56,18 @@ from HoloNew.src.viewer import MethodViz, Viewer
 logger = logging.getLogger(__name__)
 
 
+def grounded_smplx_skeleton(raw_joints, toe_indices, n_frames):
+    """22-joint SMPL-X skeleton for the viewer's Grounded stage, grounded over the FULL
+    sequence (matching the solve's gmr_grounded) then sliced to n_frames.
+
+    Grounding over only the displayed [:n_frames] window would use a different floor
+    minimum than the solve (which grounds the whole clip), shifting the displayed human
+    in Z relative to the contact cloud whenever the sequence's lowest foot falls outside
+    the window (e.g. --max_frames 20 on a long HODome clip)."""
+    from HoloNew.src.holosoma.preprocess import ground_to_floor
+    return ground_to_floor(raw_joints, toe_indices)[:n_frames].astype(np.float32)
+
+
 Method = Literal["holosoma", "gmr_socp", "test_socp"]
 
 
@@ -349,11 +361,13 @@ def view(cfg: ViewStagesConfig) -> None:
         # full skeleton scatters stray points at (0,0,0). So re-ground the same 22 joints
         # the Original stage shows, drawn with the SMPL-X topology, for a consistent skeleton.
         if data_format == "smplx":
-            from HoloNew.src.holosoma.preprocess import ground_to_floor
             from HoloNew.src.test_socp.targets import SMPLX_BODY_JOINT_NAMES
             _toe = [SMPLX_BODY_JOINT_NAMES.index("left_foot"),
                     SMPLX_BODY_JOINT_NAMES.index("right_foot")]
-            grounded = ground_to_floor(raw_joints[:T], _toe).astype(np.float32)
+            # Ground over the FULL sequence (matching rt.gmr_grounded used by the contact
+            # probe), then slice — NOT ground_to_floor(raw_joints[:T]) which would use the
+            # window's floor min and Z-shift the displayed human off the contact cloud.
+            grounded = grounded_smplx_skeleton(raw_joints, _toe, T)
         else:
             grounded = rt.gmr_grounded[:T]
         stages = {"Original": raw_joints[:T, :, :], "Grounded": grounded, **stages}

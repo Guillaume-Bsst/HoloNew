@@ -18,11 +18,38 @@ from pathlib import Path
 import numpy as np
 
 from HoloNew.src.data_loaders.base import DATASET_TO_FORMAT
-from HoloNew.src.data_loaders.hodome import prep_hodome_processed
+from HoloNew.src.data_loaders.hodome import PREP_FORMAT_VERSION, prep_hodome_processed
 from HoloNew.src.paths import get_path
 
 # Disk cache for prepped HODome processed npz (one per sequence stem).
 _HODOME_CACHE_DIR = Path(tempfile.gettempdir()) / "holonew_hodome_processed"
+
+
+def _hodome_cache_valid(path: Path) -> bool:
+    """True iff the cached processed npz exists and matches the current prep format
+    version. A pre-versioning cache (no ``prep_version`` key, e.g. the old 22-joint
+    orientations) or a stale version is treated as invalid so it gets rebuilt."""
+    path = Path(path)
+    if not path.exists():
+        return False
+    try:
+        with np.load(path) as d:
+            return "prep_version" in d.files and int(d["prep_version"]) == PREP_FORMAT_VERSION
+    except Exception:  # noqa: BLE001 - corrupt/unreadable cache -> rebuild
+        return False
+
+
+def ensure_hodome_processed(motion_path, model_path, cache_dir=None) -> Path:
+    """Path to the processed HODome npz, (re)built when missing or stale (prep format
+    version mismatch) and cached on disk keyed by sequence stem. Writes the current
+    ``prep_version`` so future format bumps invalidate older caches automatically."""
+    cache_dir = Path(cache_dir) if cache_dir is not None else _HODOME_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    processed = cache_dir / f"{Path(motion_path).stem}.npz"
+    if not _hodome_cache_valid(processed):
+        data = prep_hodome_processed(Path(motion_path), Path(model_path))
+        np.savez(processed, prep_version=PREP_FORMAT_VERSION, **data)
+    return processed
 
 
 def resolve_paths_by_name(dataset: str, name: str):
@@ -122,11 +149,9 @@ def normalize_dataset_cfg(cfg) -> None:
 
     elif dataset == "hodome":
         stem = Path(cfg.motion_path).stem
-        _HODOME_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        processed = _HODOME_CACHE_DIR / f"{stem}.npz"
-        if not processed.exists():
-            data = prep_hodome_processed(Path(cfg.motion_path), Path(cfg.model_path))
-            np.savez(processed, **data)
+        # Version-checked disk cache: a pre-#5 cache (22-joint orientations, no version
+        # key) is detected as stale and rebuilt with 55-joint (hand-posing) orientations.
+        ensure_hodome_processed(cfg.motion_path, cfg.model_path)
         cfg.data_path = _HODOME_CACHE_DIR
         cfg.task_name = stem
         # Object name = token (2nd "_"-segment), so create_task_constants propagates

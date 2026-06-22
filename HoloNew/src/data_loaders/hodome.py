@@ -15,6 +15,11 @@ from HoloNew.src.data_loaders.base import MotionLoader, register_loader
 # Disk cache for object meshes extracted from scaned_object/<token>.tar.
 _HODOME_MESH_CACHE = Path(tempfile.gettempdir()) / "holonew_hodome_meshes"
 
+# Bump when prep_hodome_processed's output format changes so the façade's disk cache is
+# rebuilt instead of silently reused. v2 = 55-joint orientations (body+face+both hands),
+# enabling hand posing in the contact probe (v1 was 22 body joints only).
+PREP_FORMAT_VERSION = 2
+
 # Y-up -> Z-up as a proper ROTATION Rx(+90 deg): (x, y, z) -> (x, -z, y). A bare axis
 # SWAP (y<->z) is a reflection (det -1) that mirrors the subject and reverses face
 # winding, rendering the SMPL mesh inside-out; the rotation preserves chirality and
