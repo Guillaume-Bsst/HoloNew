@@ -2,10 +2,36 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Mapping, TypedDict
 
 import numpy as np
+
+
+def parse_robot_name(name: str) -> tuple[str, int | None]:
+    """Split a robot name into (robot_type, robot_dof). A bare type ('g1', 't1') yields
+    dof None (use the type default); a '_<N>dof' suffix ('g1_27dof') overrides the dof.
+    Case-insensitive, so '--robot g1_27dof' / 'G1_27dof' both switch to 27-DOF."""
+    m = re.fullmatch(r"([a-z]+\d*)(?:_(\d+)dof)?", name.strip().lower())
+    if not m:
+        return name, None
+    return m.group(1), (int(m.group(2)) if m.group(2) else None)
+
+
+def _g1_remap_27dof(overrides: dict[str, float], waist_pair: tuple[int, int]) -> dict[str, float]:
+    """Remap g1 joint-override indices from 29-DOF to 27-DOF. The 27-DOF model drops
+    waist_roll and waist_pitch, so their two indices are removed and every higher index
+    shifts down by 2. ``waist_pair`` is those two indices in this table's index space
+    (qpos for MANUAL_LB/UB, actuated-joint for MANUAL_COST)."""
+    hi = max(waist_pair)
+    out: dict[str, float] = {}
+    for k, v in overrides.items():
+        i = int(k)
+        if i in waist_pair:
+            continue
+        out[str(i - 2 if i > hi else i)] = v
+    return out
 
 
 # Default values per robot type
@@ -63,7 +89,14 @@ class RobotConfig:
     robot_defaults: dict[str, RobotDefaults] = field(default_factory=_default_robot_defaults)
 
     def __post_init__(self) -> None:
-        """Validate robot_type after initialization."""
+        """Validate robot_type; auto-split a dof-suffixed name ('g1_27dof' -> type 'g1',
+        dof 27) so '--robot g1_27dof' switches DOF at every construction site (frozen
+        dataclass -> object.__setattr__)."""
+        rtype, rdof = parse_robot_name(self.robot_type)
+        if rtype != self.robot_type:
+            object.__setattr__(self, "robot_type", rtype)
+            if rdof is not None and self.robot_dof is None:
+                object.__setattr__(self, "robot_dof", rdof)
         _validate_robot_type(self.robot_type, self.robot_defaults)
 
     # Robot configuration (optional overrides)
@@ -169,18 +202,21 @@ class RobotConfig:
         base: dict[str, float] = {"3": -1.0, "4": -1.0, "5": -1.0, "6": -1.0}  # quaternion bounds
 
         if self.robot_type == "g1":
-            base.update(
-                {
-                    "20": -0.3,  # waist roll
-                    "21": -0.1,  # waist pitch
-                    "26": -0.1,  # right wrist
-                    "27": -0.1,
-                    "28": -0.05,
-                    "33": -0.1,  # left wrist
-                    "34": -0.1,
-                    "35": -0.05,
-                }
-            )
+            # qpos-space indices (29-DOF): waist_roll 20, waist_pitch 21,
+            # left wrist 26-28, right wrist 33-35.
+            g1 = {
+                "20": -0.3,  # waist roll
+                "21": -0.1,  # waist pitch
+                "26": -0.1,  # left wrist roll/pitch/yaw
+                "27": -0.1,
+                "28": -0.05,
+                "33": -0.1,  # right wrist roll/pitch/yaw
+                "34": -0.1,
+                "35": -0.05,
+            }
+            if self.ROBOT_DOF == 27:
+                g1 = _g1_remap_27dof(g1, (20, 21))  # waist removed -> drop 20/21, shift >21 by -2
+            base.update(g1)
 
         return base
 
@@ -194,19 +230,22 @@ class RobotConfig:
         base: dict[str, float] = {"3": 1.0, "4": 1.0, "5": 1.0, "6": 1.0}  # quaternion bounds
 
         if self.robot_type == "g1":
-            base.update(
-                {
-                    "20": 0.3,  # waist roll
-                    "25": 1.4,  # right elbow
-                    "26": 0.2,  # right wrist
-                    "27": 0.3,
-                    "28": 0.05,
-                    "32": 1.4,  # elbow
-                    "33": 0.2,  # left wrist
-                    "34": 0.3,
-                    "35": 0.05,
-                }
-            )
+            # qpos-space indices (29-DOF): waist_roll 20, left elbow 25, left wrist 26-28,
+            # right elbow 32, right wrist 33-35.
+            g1 = {
+                "20": 0.3,  # waist roll
+                "25": 1.4,  # left elbow
+                "26": 0.2,  # left wrist
+                "27": 0.3,
+                "28": 0.05,
+                "32": 1.4,  # right elbow
+                "33": 0.2,  # right wrist
+                "34": 0.3,
+                "35": 0.05,
+            }
+            if self.ROBOT_DOF == 27:
+                g1 = _g1_remap_27dof(g1, (20, 21))  # waist removed -> drop 20, shift >21 by -2
+            base.update(g1)
 
         return base
 
@@ -218,7 +257,12 @@ class RobotConfig:
             return self.manual_cost
 
         if self.robot_type == "g1":
-            return {"19": 0.2, "20": 0.2}  # waist yaw, waist roll
+            # Actuated-joint space (29-DOF).
+            cost = {"19": 0.2, "20": 0.2}
+            if self.ROBOT_DOF == 27:
+                # waist_roll/pitch are joints 13/14 here -> drop them, shift >14 by -2.
+                cost = _g1_remap_27dof(cost, (13, 14))
+            return cost
         return {}
 
     MANUAL_COST = property(_manual_cost, doc="Get manual cost weights.")

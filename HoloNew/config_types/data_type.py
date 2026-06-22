@@ -9,6 +9,7 @@ from HoloNew.config_types.robot import (
     RobotDefaults,
     _default_robot_defaults,
     _validate_robot_type,
+    parse_robot_name,
 )
 
 # Pre-defined constants for each data format
@@ -355,9 +356,14 @@ class MotionDataConfig:
     robot_defaults: dict[str, RobotDefaults] = field(default_factory=_default_robot_defaults)
 
     def __post_init__(self) -> None:
-        """Validate data_format and robot_type."""
+        """Validate data_format and robot_type; accept a dof-suffixed robot name
+        ('g1_27dof') by reducing it to the bare type the joint-mapping lookup is keyed by
+        (frozen dataclass -> object.__setattr__)."""
         _validate_data_format(self.data_format)
 
+        rtype, _ = parse_robot_name(self.robot_type)
+        if rtype != self.robot_type:
+            object.__setattr__(self, "robot_type", rtype)
         _validate_robot_type(self.robot_type, self.robot_defaults)
 
     # Optional overrides - if None, will use defaults from data_format

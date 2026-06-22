@@ -655,7 +655,9 @@ def main(cfg: RetargetingConfig) -> RetargetResult | None:
     logger.info("Task: %s, Type: %s, Format: %s", task_name, task_type, data_format)
     logger.info("Data path: %s, Save dir: %s", data_path, save_dir)
 
-    # Ensure configs match top-level selections
+    # Ensure configs match top-level selections. --robot may carry a dof suffix
+    # ('g1_27dof'); RobotConfig / MotionDataConfig auto-split it to (type, dof), so pass it
+    # through unchanged (the full name still drives save_dir naming above).
     if cfg.robot_config.robot_type != robot:
         cfg.robot_config = RobotConfig(robot_type=robot)
 

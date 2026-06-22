@@ -219,6 +219,11 @@ elsewhere — `--model-path` / `--motion-path` (/ `--obj-path`, `--smpl-model-di
 `--motion-name` is supported for `omomo`, `hodome`, `sfu` and `lafan`; the same flags
 work on `robot_retarget.py`.
 
+**Robot DOF** — `--robot` carries an optional dof suffix: `--robot g1_27dof` solves
+against the 27-DOF G1 (waist roll/pitch locked → qpos width 7+27), `g1_29dof` / `g1`
+the 29-DOF one. The retarget/optimisation runs on the selected model, and results save
+under `demo_results/<robot>/…` (e.g. `g1_27dof/`). Both DOFs reuse the shared meshes.
+
 > The object overlay is wired for **both** OMOMO (mesh from the global
 > `captured_objects/`) and HODome (single object per sequence; mesh auto-extracted from
 > `scaned_object/<token>.tar`, posed from the object `.npz`). HODome is single-object

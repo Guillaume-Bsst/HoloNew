@@ -234,8 +234,9 @@ def view(cfg: ViewStagesConfig) -> None:
 
     data_format = cfg.data_format or DEFAULT_DATA_FORMATS[cfg.task_type]
 
-    # Keep the nested configs consistent with the top-level selections, the same
-    # way robot_retarget.main() does before building constants / loading data.
+    # Keep the nested configs consistent with the top-level selections, the same way
+    # robot_retarget.main() does. --robot may carry a dof suffix ('g1_27dof'); RobotConfig
+    # and MotionDataConfig auto-split it to (type, dof), so pass it through unchanged.
     if cfg.robot_config.robot_type != cfg.robot:
         cfg.robot_config = RobotConfig(robot_type=cfg.robot)
     if cfg.motion_data_config.robot_type != cfg.robot or cfg.motion_data_config.data_format != data_format:
