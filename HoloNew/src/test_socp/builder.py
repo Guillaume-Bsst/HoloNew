@@ -244,6 +244,43 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     else:
         toe_indices = [constants.DEMO_JOINTS.index(n) for n in cfg.motion_data_config.toe_names]
     rt.gmr_grounded = ground_to_floor(raw_joints, toe_indices)
+
+    # Floor correction (§0): the joint-grounding above puts the lowest TOE JOINT over the
+    # clip on z=0, which leaves the SMPL-X surface soles floating a few cm at typical
+    # stance frames. Drop the grounded joints by robust_floor_offset (median lowest sole +
+    # contact margin) so the placed surface soles rest on the floor (biased to a small
+    # penetration = solid contact). Applied HERE, before compute_stages, so the contact
+    # probe, the GMR targets, and the viewer's Grounded display all share the corrected
+    # grounding. Skipped (offset 0) when the SMPL-X model is unavailable or margin is None.
+    import os
+    from HoloNew.src.test_socp.contact.smplx_field import robust_floor_offset
+    from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
+    rt._floor_offset = 0.0
+    if sc.floor_contact_margin is not None and os.path.isdir(SMPLX_MODEL_DIR_DEFAULT):
+        from pathlib import Path
+        from HoloNew.src.test_socp.contact.constants import OMOMO_DIR_DEFAULT
+        from HoloNew.src.test_socp.correspondence.human_body import HumanBody
+        _is_smplx_fo = rt._smplx_betas is not None
+        if _is_smplx_fo:
+            _fo_betas, _fo_gender = rt._smplx_betas, rt._smplx_gender
+        else:
+            from HoloNew.src.test_socp.correspondence.human_metadata import load_human_metadata
+            _fo_betas, _fo_gender = load_human_metadata(Path(OMOMO_DIR_DEFAULT), cfg.task_name)
+        _fo_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, _fo_betas, _fo_gender)
+        _fo_q = rt._smplx_orientations if _is_smplx_fo else human_quat
+        _fo_pelvis = rt.gmr_grounded[:, 0]
+        _nfo = _fo_q.shape[0]
+        _fo_samp = np.unique(np.linspace(0, _nfo - 1, min(_nfo, 40)).astype(int))
+        # Lowest posed VERTEX z per sampled frame (deterministic SMPL-X FK; NOT the
+        # randomly sampled point cloud, which would make the offset non-reproducible).
+        def _fo_sole_min(t):
+            v = (_fo_body.placed_verts_smpl(_fo_q[t], _fo_pelvis[t]) if _is_smplx_fo
+                 else _fo_body.placed_verts(_fo_q[t], _fo_pelvis[t]))
+            return float(v[:, 2].min())
+        _fo_mins = np.array([_fo_sole_min(t) for t in _fo_samp])
+        rt._floor_offset = robust_floor_offset(_fo_mins, sc.floor_contact_margin)
+        rt.gmr_grounded[:, :, 2] -= rt._floor_offset
+
     # Robot-root placement (config §0). Each axis: None -> AUTO = the per-clip
     # ROBOT_HEIGHT / human_height (computed, not hardcoded), which puts the root at the
     # robot's own height; a float = explicit multiplier on the raw grounded axis. TEST

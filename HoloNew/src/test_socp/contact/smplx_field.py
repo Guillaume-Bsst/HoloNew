@@ -90,3 +90,15 @@ def build_smplx_ground_probe(task_name, omomo_dir, model_dir, object_sdf,
     obj_poses = np.asarray(obj_poses, dtype=np.float64)
     return SmplxGroundProbe(body, cache, object_sdf, obj_poses[:, :4], obj_poses[:, 4:7],
                             margin, smpl_order=smpl_order)
+
+
+def robust_floor_offset(min_sole_per_frame: np.ndarray, margin: float) -> float:
+    """Constant per-clip z-drop that grounds the placed SMPL-X surface on the floor.
+
+    ``min_sole_per_frame`` is each (sampled) frame's lowest surface vertex z, with the
+    human already placed at its joint-grounded pose. The drop is the MEDIAN of those
+    minima (robust to outlier penetrating / crouch frames) plus a ``margin`` that biases
+    the planted foot slightly BELOW z=0 — a small penetration reads as solid floor
+    contact, which is preferable to floating (no contact). Subtract the returned value
+    from the grounded joints' z."""
+    return float(np.median(np.asarray(min_sole_per_frame, dtype=np.float64))) + float(margin)
