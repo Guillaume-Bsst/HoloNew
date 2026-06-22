@@ -52,6 +52,28 @@ def extract_hodome_object_mesh(token: str, scaned_object_dir: Path,
     return out
 
 
+def centered_object_mesh(mesh_path: Path) -> Path:
+    """Path to a centroid-centred copy of the scanned object mesh (written once next to
+    the original, idempotent).
+
+    HODome's object_R/T are defined relative to the CENTROID-CENTRED mesh: the NeuralDome
+    toolbox does ``obj_verts -= obj_verts.mean(0)`` before ``verts @ R.T + T``
+    (scripts/hodome_visualize_pyrender.py). The scanned .obj origin is arbitrary (e.g. at
+    the bat knob, ~0.30 m off-centroid), so the solve's object SDF + surface samples (built
+    from the mesh path) must use the centred mesh, not the raw scan — otherwise the object
+    is placed off the actor by its centroid. Mirrors OMOMO's resolver, which already returns
+    a centred mesh, so object_source is consistent across datasets."""
+    import trimesh
+    mesh_path = Path(mesh_path)
+    out = mesh_path.with_name(mesh_path.stem + "_centered.obj")
+    if not out.exists():
+        m = trimesh.load(str(mesh_path), force="mesh", process=False)
+        v = np.asarray(m.vertices, np.float64)
+        m.vertices = v - v.mean(0)
+        m.export(str(out))
+    return out
+
+
 def hodome_fk(npz_path: Path, model_dir: Path) -> tuple[np.ndarray, float]:
     """FK raw SMPL-X params to (T, 22, 3) Z-up joints; return (joints, rest_height_m)."""
     d = np.load(str(npz_path), allow_pickle=True)
@@ -226,6 +248,8 @@ class HoDomeLoader(MotionLoader):
         stem = Path(obj_path).stem
         token = stem.split("_", 1)[1] if "_" in stem else stem
         scaned = Path(obj_path).parent.parent / "scaned_object"
-        mesh_path = extract_hodome_object_mesh(token, scaned)
+        # Centred mesh: object_R/T reference the centroid-centred frame (see
+        # centered_object_mesh), so the solve's SDF + surface samples must use it.
+        mesh_path = centered_object_mesh(extract_hodome_object_mesh(token, scaned))
         poses = hodome_object_poses(Path(obj_path))    # (T,7) Z-up
         return [ObjectSource(mesh_path=Path(mesh_path), poses_raw=poses)]
