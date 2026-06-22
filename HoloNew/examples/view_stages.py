@@ -33,7 +33,6 @@ from HoloNew.src import skeleton
 from HoloNew.src.test_socp.contact.backends.sdf import (
     band_points,
     load_or_build_object_sdf,
-    object_sdf_cache_path,
 )
 from HoloNew.src.test_socp.contact.constants import OMOMO_DIR_DEFAULT
 from HoloNew.src.test_socp.contact.viz import signed_distance_colors
@@ -66,6 +65,33 @@ def grounded_smplx_skeleton(raw_joints, toe_indices, n_frames):
     the window (e.g. --max_frames 20 on a long HODome clip)."""
     from HoloNew.src.holosoma.preprocess import ground_to_floor
     return ground_to_floor(raw_joints, toe_indices)[:n_frames].astype(np.float32)
+
+
+def _sdf_floor_band(center_xy, l_floor, density=80.0):
+    """Floor SDF band for the viewer's 'SDF Floor' overlay: a stack of z-sheets in
+    [-l_floor, l_floor] over the floor extent around ``center_xy``, coloured by signed
+    z-distance. Returns (points (N,3) float32, colors (N,3)). Shared by the OMOMO and
+    HODome paths so both get the band."""
+    from HoloNew.src.test_socp.contact.probes import make_floor_grid
+    base = make_floor_grid(center_xy=center_xy, density=density)
+    layers = []
+    for z in np.linspace(-l_floor, l_floor, 3):
+        layer = base.copy()
+        layer[:, 2] = z
+        layers.append(layer)
+    pts = np.concatenate(layers).astype(np.float32)
+    return pts, signed_distance_colors(pts[:, 2], l_floor)
+
+
+def _sdf_object_band(mesh_file, l_object, sdf_resolution, cache_dir="assets/contact"):
+    """Object SDF band shell (object-LOCAL frame) + colours for the 'SDF Object' overlay,
+    from the same keyed, disk-cached field the solve uses (load_or_build_object_sdf). The
+    viewer lifts the points by the per-frame object pose. The mesh must already be in the
+    frame its poses reference (the OMOMO resolver pre-centres/scales it; HODome's scanned
+    mesh is native). Returns (points (M,3) float32, colors (M,3))."""
+    sdf = load_or_build_object_sdf(str(mesh_file), l_object, sdf_resolution, cache_dir=cache_dir)
+    band_pts, band_dist = band_points(sdf, l_object)
+    return band_pts.astype(np.float32), signed_distance_colors(band_dist, l_object)
 
 
 def _window_solve_frames(rt, start: int) -> None:
@@ -273,27 +299,19 @@ def view(cfg: ViewStagesConfig) -> None:
     object_pose_raw = object_pose_scaled = None
     object_sdf_pts = object_sdf_cols = None
     object_sdf_floor_pts = object_sdf_floor_cols = None
+    # Interaction lengths from the TEST-SOCP config, so the SDF band shells the viewer
+    # draws match the bands the solver actually uses (floor + object channels). Shared by
+    # the OMOMO (smplh) and HODome (smplx) object paths below; the floor band is centred
+    # on the human's pelvis track.
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    _sc = (cfg.retargeter if isinstance(cfg.retargeter, TestSocpRetargeterConfig)
+           else TestSocpRetargeterConfig())
+    _L_flr_view = _sc.L_floor if _sc.L_floor is not None else _sc.L_interaction
+    _L_view = _sc.L_object if _sc.L_object is not None else _sc.L_interaction
+    _floor_xy = (float(raw_joints[:, 0, 0].mean()), float(raw_joints[:, 0, 1].mean()))
     if data_format == "smplh":
-        # Interaction lengths from the TEST-SOCP config, so the SDF band shells the viewer
-        # draws match the bands the solver actually uses (floor + object channels).
-        from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
-        _sc = (cfg.retargeter if isinstance(cfg.retargeter, TestSocpRetargeterConfig)
-               else TestSocpRetargeterConfig())
-        _L_flr_view = _sc.L_floor if _sc.L_floor is not None else _sc.L_interaction
-        _L_view = _sc.L_object if _sc.L_object is not None else _sc.L_interaction
-        # Analytic floor SDF band: a thin sheet stack over the floor extent at z layers in
-        # [-L_floor, L_floor], coloured by signed z distance (drawn by the "SDF Floor" toggle).
-        from HoloNew.src.test_socp.contact.probes import make_floor_grid
-        _cx = float(raw_joints[:, 0, 0].mean())
-        _cy = float(raw_joints[:, 0, 1].mean())
-        _base = make_floor_grid(center_xy=(_cx, _cy), density=80.0)
-        _layers = []
-        for _z in np.linspace(-_L_flr_view, _L_flr_view, 3):
-            _l = _base.copy()
-            _l[:, 2] = _z
-            _layers.append(_l)
-        object_sdf_floor_pts = np.concatenate(_layers).astype(np.float32)
-        object_sdf_floor_cols = signed_distance_colors(object_sdf_floor_pts[:, 2], _L_flr_view)
+        # Floor SDF band (drawn by the "SDF Floor" toggle).
+        object_sdf_floor_pts, object_sdf_floor_cols = _sdf_floor_band(_floor_xy, _L_flr_view)
 
         # Object mesh via the shared resolver: bundled (centred + pre-scaled) first, else
         # the captured unit mesh recentred + scaled by obj_scale (same logic the solver
@@ -325,24 +343,11 @@ def view(cfg: ViewStagesConfig) -> None:
                 object_points_local = sample_object_surface(str(obj_file)).astype(np.float32)
                 object_points_local = (object_points_local - obj_geom_center) * obj_geom_scale
 
-                # Object SDF for the "SDF Object" band-shell viz. Uses the SAME keyed,
-                # disk-cached field as the solve (load_or_build_object_sdf), resolved at the
-                # run's interaction length (_L_view from the config above), so the viewer
-                # draws the band the solver actually uses — no fixed-band file to drift.
-                _cache = object_sdf_cache_path(str(obj_file), _L_view, _sc.sdf_resolution,
-                                               "assets/contact")
-                _existed = _cache.exists()
-                sdf = load_or_build_object_sdf(str(obj_file), _L_view, _sc.sdf_resolution,
-                                               cache_dir="assets/contact")
-                logger.info("Object SDF %s: %s  (L=%.3f m, res=%.3f m, %d nodes)",
-                            "loaded" if _existed else "built+cached", _cache.name,
-                            _L_view, _sc.sdf_resolution, int(np.prod(sdf.dims)))
-                # Band points + distances live in the mesh frame; recentre + scale the
-                # points like the mesh so the shell wraps the resized object, and scale the
-                # distances so the colour scale (vs _L_view) still reads true metric depth.
-                band_pts, band_dist = band_points(sdf, _L_view)
-                object_sdf_pts = (band_pts - obj_geom_center) * obj_geom_scale
-                object_sdf_cols = signed_distance_colors(band_dist * obj_geom_scale, _L_view)
+                # Object SDF band shell ("SDF Object" toggle) from the same keyed, disk-
+                # cached field the solve uses; the resolver pre-transforms the mesh, so the
+                # band is already in the object-local frame the poses reference.
+                object_sdf_pts, object_sdf_cols = _sdf_object_band(
+                    obj_file, _L_view, _sc.sdf_resolution)
             else:
                 logger.warning("No object mesh at %s; object disabled.", obj_file)
         except Exception as exc:  # noqa: BLE001
@@ -364,6 +369,12 @@ def view(cfg: ViewStagesConfig) -> None:
             object_mesh_faces = np.asarray(mesh.faces, np.uint32)
             from HoloNew.src.test_socp.movable import sample_object_surface
             object_points_local = sample_object_surface(str(mesh_path)).astype(np.float32)
+            # SDF band shells ("SDF Floor" / "SDF Object" toggles) — same helpers the OMOMO
+            # path uses, so HODome gets the SDF viz too. The scanned mesh is already in the
+            # frame its poses reference, so the object band needs no recenter/scale.
+            object_sdf_floor_pts, object_sdf_floor_cols = _sdf_floor_band(_floor_xy, _L_flr_view)
+            object_sdf_pts, object_sdf_cols = _sdf_object_band(
+                mesh_path, _L_view, _sc.sdf_resolution)
         except Exception as exc:  # noqa: BLE001
             logger.warning("HODome object unavailable (%s); object disabled.", exc)
 
