@@ -68,6 +68,47 @@ def grounded_smplx_skeleton(raw_joints, toe_indices, n_frames):
     return ground_to_floor(raw_joints, toe_indices)[:n_frames].astype(np.float32)
 
 
+def _window_solve_frames(rt, start: int) -> None:
+    """Slice every per-frame solve input on a GMR/TEST retargeter to ``[start:]`` so a
+    subsequent ``rt.retarget(max_frames=N)`` solves the window ``[start : start+N]`` rather
+    than ``[0:N]``. Mirrors the per-frame arrays the retargeters consume: the GMR ground
+    targets (gmr_ground / gmr_stages), the grounded SMPL-X joints (gmr_grounded), the
+    object reference/qpos poses (_obj_poses_raw / _obj_poses_mj), the probe orientations
+    (_smplx_orientations / human_quat) and the foot-sticking sequences.
+
+    ``rt.gmr_ground`` is the SAME dict object as ``rt.gmr_stages['ground']`` (builder.py
+    aliases them), so stage dicts are sliced once via an id() guard to avoid double
+    slicing. Frame-independent state (q_init_full, object_surface_local) is left untouched;
+    solve OUTPUTS are produced fresh over the window by retarget()."""
+    if start <= 0:
+        return
+    _seen: set[int] = set()
+
+    def _slice_stage(d) -> None:
+        if not isinstance(d, dict) or id(d) in _seen:
+            return
+        _seen.add(id(d))
+        for _k in ("pos", "quat"):
+            if d.get(_k) is not None:
+                d[_k] = d[_k][start:]
+
+    stages = getattr(rt, "gmr_stages", None)
+    if isinstance(stages, dict):
+        for _st in stages.values():
+            _slice_stage(_st)
+    _slice_stage(getattr(rt, "gmr_ground", None))   # usually stages['ground'] -> no-op
+
+    for _name in ("gmr_grounded", "_obj_poses_raw", "_obj_poses_mj",
+                  "_smplx_orientations", "human_quat"):
+        _v = getattr(rt, _name, None)
+        if _v is not None:
+            setattr(rt, _name, _v[start:])
+
+    _fss = getattr(rt, "foot_sticking_sequences", None)
+    if _fss:
+        rt.foot_sticking_sequences = list(_fss)[start:]
+
+
 Method = Literal["holosoma", "gmr_socp", "test_socp"]
 
 
@@ -85,11 +126,25 @@ class ViewStagesConfig(RetargetingConfig):
     # manipulation) run to several hundred frames; capping keeps the solve short
     # when you only want to inspect the motion. None solves the whole clip.
     max_frames: int | None = None
+    # Skip the first ``start_frame`` frames before solving/displaying, so an interaction
+    # that begins late in the clip (e.g. HODome subject01_baseball: the bat rests on the
+    # floor until ~frame 270, when the subject picks it up) can be inspected without
+    # solving the leading frames. With --max_frames it selects the window
+    # [start_frame : start_frame + max_frames]. 0 = start at the first frame. Honoured by
+    # the GMR-SOCP / TEST-SOCP methods; the holosoma method front-caps its solve in
+    # robot_retarget.main and does NOT support it, so start_frame > 0 with --methods
+    # holosoma is rejected.
+    start_frame: int = 0
 
 
 def view(cfg: ViewStagesConfig) -> None:
     if not cfg.methods:
         raise ValueError("--methods must select at least one optimizer")
+    if cfg.start_frame and "holosoma" in cfg.methods:
+        raise ValueError(
+            "--start-frame is not supported with the 'holosoma' method (its solve "
+            "front-caps frames in robot_retarget.main). Use --methods gmr_socp and/or "
+            "test_socp, or leave start_frame at 0.")
 
     # 3-path façade: when --dataset is set, translate model/motion/obj paths into the
     # legacy data_path/task_name/data_format (+ omomo_dir) fields, then clear `dataset`
@@ -121,6 +176,16 @@ def view(cfg: ViewStagesConfig) -> None:
         cfg.task_type, data_format, cfg.data_path, cfg.task_name, constants, cfg.motion_data_config
     )
 
+    # Frame window: skip the first ``start`` frames. raw_joints stays FULL here because
+    # some display grounding (grounded_smplx_skeleton) needs the whole-clip floor min;
+    # windowed views (raw_joints_win / original_quats_win below), the HODome mesh poser,
+    # the object poses and the retargeter's per-frame inputs (_window_solve_frames) are
+    # each offset by ``start`` so local frame 0 maps to global frame ``start``.
+    start = max(0, int(cfg.start_frame or 0))
+    if start >= raw_joints.shape[0]:
+        raise ValueError(
+            f"--start-frame {start} is at/after the clip length {raw_joints.shape[0]}.")
+
     # Per-joint orientations drive the SMPL-X mesh. The smplh .pt path carries the 52
     # MuJoCo-order quats; the smplx path carries the 22 SMPL-order global orientations
     # (from the processed npz), posed via placed_verts_smpl. Without them the viewer
@@ -143,6 +208,11 @@ def view(cfg: ViewStagesConfig) -> None:
                 smplx_gender = str(_npz["gender"])
         except Exception as exc:  # noqa: BLE001
             logger.warning("No SMPL-X orientations (%s); SMPL-X mesh disabled.", exc)
+
+    # Windowed display views (local frame 0 == global ``start``); raw_joints / original_quats
+    # are kept full above for whole-clip grounding, these are what the viewer/Original stage use.
+    raw_joints_win = raw_joints[start:]
+    original_quats_win = None if original_quats is None else original_quats[start:]
 
     # SMPL-X shape (betas) + gender for this subject, read from the original OMOMO
     # .p files keyed by sequence name. Without them the mesh uses the neutral mean
@@ -178,6 +248,14 @@ def view(cfg: ViewStagesConfig) -> None:
             human_body = HumanBody(SMPLX_MODEL_DIR_DEFAULT, _mesh_betas, _mesh_gender)
         except Exception as exc:  # noqa: BLE001
             logger.warning("SMPL-X unavailable (%s); mesh disabled.", exc)
+
+    # Re-base the HODome mesh poser onto the window: the viewer indexes it by the local
+    # frame, so slicing its raw per-frame params makes local frame 0 == global ``start``,
+    # matching raw_joints_win / original_quats_win passed to the viewer.
+    if start and human_mesh_poser is not None:
+        for _k in list(human_mesh_poser._params):
+            human_mesh_poser._params[_k] = human_mesh_poser._params[_k][start:]
+        human_mesh_poser._cache_idx = -1
 
     # NOTE: raw_joints is deliberately NOT re-grounded here. The Original stage must
     # be the exact input each solver's preprocess receives (holosoma and GMR both
@@ -289,6 +367,16 @@ def view(cfg: ViewStagesConfig) -> None:
         except Exception as exc:  # noqa: BLE001
             logger.warning("HODome object unavailable (%s); object disabled.", exc)
 
+    # Window the object reference poses to the displayed frame window. The mesh, surface
+    # samples and SDF live in the object's local (frame-independent) frame, so only the
+    # per-frame poses shift; _method_object_pose reads object_pose_raw, so do this before
+    # the builders run.
+    if start:
+        if object_pose_raw is not None:
+            object_pose_raw = object_pose_raw[start:]
+        if object_pose_scaled is not None:
+            object_pose_scaled = object_pose_scaled[start:]
+
     toe = [constants.DEMO_JOINTS.index(name) for name in cfg.motion_data_config.toe_names]
     # JOINTS_MAPPING is a dict {human_joint_name -> robot_link_name}; the mapped
     # indices select the human-side joints out of the 52-joint DEMO_JOINTS array.
@@ -340,6 +428,9 @@ def view(cfg: ViewStagesConfig) -> None:
     def build_gmr(label: str, key: str, cls) -> MethodViz:
         # GMR v1 / v2: solved qpos + full per-stage mapped-body point clouds.
         rt = cls.from_config(cfg)
+        # Offset the per-frame solve inputs by start_frame, so retarget(max_frames=N)
+        # solves the window [start : start+N] instead of [0:N] (no-op when start == 0).
+        _window_solve_frames(rt, start)
         # TEST-SOCP can emit CoM / angular-momentum / foot-slip diagnostics for the
         # viewer (no-op for GMR-SOCP, which lacks the flag).
         if hasattr(rt, "collect_diagnostics"):
@@ -365,12 +456,17 @@ def view(cfg: ViewStagesConfig) -> None:
             _toe = [SMPLX_BODY_JOINT_NAMES.index("left_foot"),
                     SMPLX_BODY_JOINT_NAMES.index("right_foot")]
             # Ground over the FULL sequence (matching rt.gmr_grounded used by the contact
-            # probe), then slice — NOT ground_to_floor(raw_joints[:T]) which would use the
-            # window's floor min and Z-shift the displayed human off the contact cloud.
-            grounded = grounded_smplx_skeleton(raw_joints, _toe, T)
+            # probe), then slice to the window — NOT ground_to_floor(raw_joints[:T]) which
+            # would use the window's floor min and Z-shift the displayed human off the
+            # contact cloud. start+T then [start:] keeps the whole-clip floor min.
+            grounded = grounded_smplx_skeleton(raw_joints, _toe, start + T)[start:].copy()
+            # The solve also drops gmr_grounded by the floor correction (median sole +
+            # contact margin); apply the same drop so the displayed human stays on the
+            # contact cloud (both rest on the floor). smplh already uses gmr_grounded.
+            grounded[:, :, 2] -= float(getattr(rt, "_floor_offset", 0.0))
         else:
             grounded = rt.gmr_grounded[:T]
-        stages = {"Original": raw_joints[:T, :, :], "Grounded": grounded, **stages}
+        stages = {"Original": raw_joints_win[:T, :, :], "Grounded": grounded, **stages}
         rs, rq = robot_link_poses(robot_mjcf, robot_bodies, res.qpos)
         g1 = robot_link_poses(robot_mjcf, g1_links, res.qpos)[0]
         sb = {name: gmr_bones for name in ("Mapped", "Scaled", "Offset", "Floor")}
@@ -423,7 +519,7 @@ def view(cfg: ViewStagesConfig) -> None:
 
     T = min(m.qpos.shape[0] for m in methods)
     for m in methods:
-        m.stages["Original"] = raw_joints[:T, :, :]
+        m.stages["Original"] = raw_joints_win[:T, :, :]
 
     keys = tuple(m.robot_key for m in methods)
     # Stages whose skeleton lives in the placed (scaled) world: the object follows the
@@ -442,8 +538,8 @@ def view(cfg: ViewStagesConfig) -> None:
         robot_model_path=cfg.robot_config.ROBOT_URDF_FILE,
         object_model_path=None,
         stage_keys=keys,
-        original_joints=raw_joints[:T, :, :],
-        original_quats=None if original_quats is None else original_quats[:T],
+        original_joints=raw_joints_win[:T, :, :],
+        original_quats=None if original_quats_win is None else original_quats_win[:T],
         # smplx sources carry only the 22 SMPL-X body joints (no fingers), so the
         # Original skeleton uses the SMPL-X topology instead of the 52-joint SMPLH one.
         original_bones=skeleton.SMPLX_BODY_BONES if data_format == "smplx" else None,
