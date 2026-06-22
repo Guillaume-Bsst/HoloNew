@@ -250,15 +250,29 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # defaults: XY 1.0 (raw, so the GMR targets and the SmplxGroundProbe contact field
     # share one world frame), Z None (auto). Placement is applied inside scale();
     # proportions and the Z floor-drop are unaffected.
-    from HoloNew.src.holosoma.preprocess import calculate_scale_factor
     _robot_h = constants.ROBOT_HEIGHT
     if data_format == "smplx":
         smpl_scale = _robot_h / float(_smplx_height)
     else:
-        try:
-            smpl_scale = calculate_scale_factor(cfg.task_name, _robot_h)
-        except Exception:  # noqa: BLE001 - height table may lack this subject
-            smpl_scale = _robot_h / (cfg.motion_data_config.default_human_height or 1.78)
+        # Canonical OMOMO scale: betas-FK stature (single source shared with the
+        # registry loader). smplh model dir from the config, else the path.yaml root.
+        from HoloNew.src.data_loaders.omomo import omomo_scale_factor
+        from HoloNew.src.paths import get_path
+        _smplh_dir = getattr(cfg, "smpl_model_dir", None)
+        if _smplh_dir is None:
+            try:
+                _smplh_dir = get_path("smplh_models")
+            except Exception:  # noqa: BLE001 - path.yaml may lack the key
+                _smplh_dir = None
+        _omomo_dir = getattr(cfg, "omomo_dir", None)
+        if _omomo_dir is None:
+            try:
+                _omomo_dir = get_path("omomo")    # dataset root holding the betas pickle
+            except Exception:  # noqa: BLE001 - path.yaml may lack the key
+                _omomo_dir = None
+        smpl_scale = omomo_scale_factor(
+            cfg.task_name, _robot_h, _omomo_dir, _smplh_dir,
+            default_human_height=(cfg.motion_data_config.default_human_height or 1.78))
     _rob_xy = sc.scale_xy_robot if sc.scale_xy_robot is not None else smpl_scale
     # Robot Z native default is the morphological base (HUMAN_SCALE_TABLE[pelvis]*ratio),
     # NOT smpl_scale: pass None straight through so scale() takes its native branch and the

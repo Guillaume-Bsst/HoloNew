@@ -25,6 +25,15 @@ SMPL_2_MUJOCO = [
 # Same mapping as a fixed index array, for the vectorized scatter in placed_verts.
 _SMPL_IDX = np.asarray(SMPL_2_MUJOCO)
 
+# Verified SMPL-H 52-joint parent tree (body identical to SMPL-X; hands are the same
+# MANO sub-tree, left 22:37 / right 37:52). Used to pose OMOMO hands, whose .pt quats
+# are SMPL-H-ordered, with the correct parents (the SMPL-X model's parents place the
+# 3 face joints at 22:25, which would misalign the hand chains).
+SMPLH_PARENTS = np.array(
+    [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19,
+     20, 22, 23, 20, 25, 26, 20, 28, 29, 20, 31, 32, 20, 34, 35,
+     21, 37, 38, 21, 40, 41, 21, 43, 44, 21, 46, 47, 21, 49, 50], dtype=np.int64)
+
 
 @dataclass(frozen=True)
 class PointCloudCache:
@@ -51,7 +60,7 @@ class HumanBody:
         num_betas = int(betas.shape[0]) if betas is not None else 10
         self.model = smplx.create(
             model_dir, model_type="smplx", gender=gender or "neutral",
-            use_pca=False, num_betas=num_betas, batch_size=1,
+            use_pca=False, flat_hand_mean=True, num_betas=num_betas, batch_size=1,
         )
         self.parents = self.model.parents.detach().cpu().numpy()
         self.faces = self.model.faces.astype(np.uint32)
@@ -63,20 +72,56 @@ class HumanBody:
         self._cache_idx: int = -1
         self._cache_verts: np.ndarray | None = None
 
+    def _forward_posed(self, q_smpl_xyzw, parents, pelvis_target,
+                       left_hand=None, right_hand=None) -> np.ndarray:
+        """Posed SMPL-X vertices (V,3) for one frame from per-joint GLOBAL rotations.
+
+        q_smpl_xyzw: (J,4) xyzw global per-joint rotations.
+        parents: (J,) parent index per joint (root = -1), in the SAME order as q.
+        left_hand / right_hand: (start, stop) slices selecting the 15 left/right hand
+            joints in q, or None to leave that hand at the model default.
+        Converts globals to parent-relative locals, then runs the SMPL-X forward with
+        global_orient + body_pose + (optional) left/right hand pose, and snaps the
+        pelvis onto pelvis_target.
+        """
+        from scipy.spatial.transform import Rotation as R
+        torch = self._torch
+        q = np.asarray(q_smpl_xyzw, dtype=float)
+        norms = np.linalg.norm(q, axis=1, keepdims=True)
+        q = np.where(norms > 1e-6, q / norms, np.array([0, 0, 0, 1.0]))
+        global_rots = R.from_quat(q).as_matrix()                      # (J,3,3)
+        par = np.asarray(parents)
+        rel = np.matmul(np.transpose(global_rots[par], (0, 2, 1)), global_rots)
+        rel[par == -1] = global_rots[par == -1]
+        rotvec = R.from_matrix(rel).as_rotvec()                       # (J,3)
+        kw = dict(
+            global_orient=torch.from_numpy(rotvec[0]).float().view(1, 3),
+            body_pose=torch.from_numpy(rotvec[1:22]).float().view(1, -1),
+            betas=self._betas, return_verts=True, return_joints=True,
+        )
+        if left_hand is not None:
+            s0, s1 = left_hand
+            kw["left_hand_pose"] = torch.from_numpy(rotvec[s0:s1]).float().view(1, -1)
+        if right_hand is not None:
+            s0, s1 = right_hand
+            kw["right_hand_pose"] = torch.from_numpy(rotvec[s0:s1]).float().view(1, -1)
+        with torch.no_grad():
+            output = self.model(**kw)
+        verts = output.vertices[0].detach().cpu().numpy()
+        pelvis = output.joints[0, 0].detach().cpu().numpy()
+        return verts - pelvis + pelvis_target
+
     def placed_verts(self, quats_wxyz: np.ndarray, pelvis_target: np.ndarray, frame_idx: int | None = None) -> np.ndarray:
         """Posed SMPL-X vertices (V,3) for one frame, in the Z-up world frame.
 
-        quats_wxyz: (52,4) per-joint global orientations in MuJoCo order (wxyz).
+        quats_wxyz: (52,4) per-joint global orientations in MuJoCo order (wxyz), SMPL-H
+            joint layout (body 0-21, left hand 22-36, right hand 37-51).
         pelvis_target: (3,) world position to snap the SMPL-X pelvis onto.
-        frame_idx: optional integer used to cache the result. If provided and
-            matches the previous call, the cached vertices are returned.
+        frame_idx: optional cache key; a repeat call with the same value returns the cache.
         """
         if frame_idx is not None and frame_idx == self._cache_idx:
             assert self._cache_verts is not None
             return self._cache_verts
-
-        from scipy.spatial.transform import Rotation as R
-        torch = self._torch
 
         q_mj_xyzw = quats_wxyz[:, [1, 2, 3, 0]]
         # Scatter each MuJoCo-order quat into its SMPL slot. SMPL_2_MUJOCO is a full
@@ -84,31 +129,10 @@ class HumanBody:
         q_smpl_xyzw = np.zeros((52, 4))
         q_smpl_xyzw[_SMPL_IDX] = q_mj_xyzw
 
-        norms = np.linalg.norm(q_smpl_xyzw, axis=1, keepdims=True)
-        q_smpl_xyzw = np.where(norms > 1e-6, q_smpl_xyzw / norms, np.array([0, 0, 0, 1.0]))
-
-        # Per-joint global rotations → local rotations via the parent transform,
-        # vectorized over all 52 joints: rel = parent_globalᵀ · global, with the root
-        # (parent == -1) kept as its own global rotation. parents is sliced to 52 (the
-        # model carries 55) to match the posed-joint count.
-        global_rots = R.from_quat(q_smpl_xyzw).as_matrix()      # (52, 3, 3)
-        parents = self.parents[:52]
-        rel_rots = np.matmul(np.transpose(global_rots[parents], (0, 2, 1)), global_rots)
-        root = parents == -1
-        rel_rots[root] = global_rots[root]
-
-        global_orient = torch.from_numpy(R.from_matrix(rel_rots[0]).as_rotvec()).float().view(1, 3)
-        body_pose = torch.from_numpy(R.from_matrix(rel_rots[1:22]).as_rotvec()).float().view(1, -1)
-
-        with torch.no_grad():
-            output = self.model(
-                global_orient=global_orient, body_pose=body_pose,
-                betas=self._betas, return_verts=True, return_joints=True,
-            )
-        verts = output.vertices[0].detach().cpu().numpy()
-        pelvis = output.joints[0, 0].detach().cpu().numpy()   # joint 0 = pelvis
-        out = verts - pelvis + pelvis_target
-
+        # SMPL-H parents + SMPL-H hand slots (the .pt quats are SMPL-H-ordered).
+        out = self._forward_posed(
+            q_smpl_xyzw, SMPLH_PARENTS, pelvis_target,
+            left_hand=(22, 37), right_hand=(37, 52))
         if frame_idx is not None:
             self._cache_idx = frame_idx
             self._cache_verts = out
@@ -144,39 +168,31 @@ class HumanBody:
 
     def placed_verts_smpl(self, quats_wxyz_22: np.ndarray, pelvis_target: np.ndarray,
                           frame_idx: int | None = None) -> np.ndarray:
-        """Posed SMPL-X vertices for one frame from SMPL-order body orientations.
+        """Posed SMPL-X vertices for one frame from SMPL-X-order global orientations.
 
-        Like placed_verts but the input is the 22 SMPL body joints' GLOBAL
-        orientations already in SMPL order (the AMASS prep output), so no MuJoCo
-        scatter is needed. Hand joints (22..51) are left at identity. Caches by
-        frame_idx the same way as placed_verts (shared cache slot).
+        Input is the per-joint GLOBAL orientations already in native SMPL-X order (the
+        prep output), so no MuJoCo scatter is needed. Accepts J in {22, 55}:
+          - J == 22: body only; hands stay at the model default (legacy npz).
+          - J >= 55: hands posed from SMPL-X slots 25:40 (left) / 40:55 (right).
+        Caches by frame_idx the same way as placed_verts (shared cache slot).
         """
         if frame_idx is not None and frame_idx == self._cache_idx:
             assert self._cache_verts is not None
             return self._cache_verts
 
-        from scipy.spatial.transform import Rotation as R
-        torch = self._torch
-
-        q_smpl_xyzw = np.zeros((52, 4))
+        q_in = np.asarray(quats_wxyz_22)
+        J = q_in.shape[0]
+        q_smpl_xyzw = np.zeros((max(J, 22), 4))
         q_smpl_xyzw[:, 3] = 1.0                                   # identity default
-        q_smpl_xyzw[:22] = np.asarray(quats_wxyz_22)[:, [1, 2, 3, 0]]
-        norms = np.linalg.norm(q_smpl_xyzw, axis=1, keepdims=True)
-        q_smpl_xyzw = np.where(norms > 1e-6, q_smpl_xyzw / norms, np.array([0, 0, 0, 1.0]))
-
-        global_rots = R.from_quat(q_smpl_xyzw).as_matrix()
-        parents = self.parents[:52]
-        rel_rots = np.matmul(np.transpose(global_rots[parents], (0, 2, 1)), global_rots)
-        rel_rots[parents == -1] = global_rots[parents == -1]
-
-        global_orient = torch.from_numpy(R.from_matrix(rel_rots[0]).as_rotvec()).float().view(1, 3)
-        body_pose = torch.from_numpy(R.from_matrix(rel_rots[1:22]).as_rotvec()).float().view(1, -1)
-        with torch.no_grad():
-            output = self.model(global_orient=global_orient, body_pose=body_pose,
-                                betas=self._betas, return_verts=True, return_joints=True)
-        verts = output.vertices[0].detach().cpu().numpy()
-        pelvis = output.joints[0, 0].detach().cpu().numpy()
-        out = verts - pelvis + pelvis_target
+        q_smpl_xyzw[:J] = q_in[:, [1, 2, 3, 0]]
+        if J >= 55:
+            parents = self.parents[:55]
+            left_hand, right_hand = (25, 40), (40, 55)
+        else:
+            parents = self.parents[:max(J, 22)]
+            left_hand = right_hand = None        # 22-joint legacy: hands at default
+        out = self._forward_posed(q_smpl_xyzw, parents, pelvis_target,
+                                  left_hand=left_hand, right_hand=right_hand)
         if frame_idx is not None:
             self._cache_idx = frame_idx
             self._cache_verts = out

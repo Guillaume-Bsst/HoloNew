@@ -30,12 +30,12 @@ def test_zero_pose_gives_world_rotation_orientations():
     global_orient = np.zeros((T, 3), np.float32)
     body_pose = np.zeros((T, 63), np.float32)
     q = global_orientations_zup(global_orient, body_pose)
-    assert q.shape == (T, 22, 4)
+    assert q.shape == (T, 55, 4)
     # Zero axis-angle -> every global rotation is identity in the native Y-up frame.
     # Expressing that rest pose in the physically Y->Z rotated scene left-multiplies Q,
     # so every joint orientation is Q itself (NOT identity: the body now stands up Z-up).
     q_Q = R.from_matrix(_YUP_TO_ZUP).as_quat()[[3, 0, 1, 2]]   # xyzw -> wxyz
-    assert np.allclose(q, np.tile(q_Q, (T, 22, 1)), atol=1e-6)
+    assert np.allclose(q, np.tile(q_Q, (T, 55, 1)), atol=1e-6)
 
 
 def test_orientations_are_unit_quaternions():
@@ -44,7 +44,7 @@ def test_orientations_are_unit_quaternions():
     global_orient = rng.normal(scale=0.3, size=(T, 3)).astype(np.float32)
     body_pose = rng.normal(scale=0.3, size=(T, 63)).astype(np.float32)
     q = global_orientations_zup(global_orient, body_pose)
-    assert q.shape == (T, 22, 4)
+    assert q.shape == (T, 55, 4)
     norms = np.linalg.norm(q, axis=-1)
     assert np.allclose(norms, 1.0, atol=1e-5)
 
@@ -56,7 +56,7 @@ def test_prep_hodome_processed_real():
     pos = out["global_joint_positions"]
     ori = out["global_joint_orientations"]
     assert pos.ndim == 3 and pos.shape[1:] == (22, 3)
-    assert ori.shape == (pos.shape[0], 22, 4)
+    assert ori.shape == (pos.shape[0], 55, 4)    # body + face + both MANO hands
     assert np.allclose(np.linalg.norm(ori, axis=-1), 1.0, atol=1e-4)
     assert 1.4 < float(out["height"]) < 2.1          # plausible human stature
     # Z-up: the vertical spread (Z) should dominate the lateral spread of the pelvis track.
@@ -143,7 +143,7 @@ def test_orientations_reproduce_joint_positions():
                         num_betas=betas.shape[-1], use_pca=False)
     parents = _SMPLX_BODY_PARENTS
     f = min(500, pos.shape[0] - 1)
-    grot = R.from_quat(ori[f][:, [1, 2, 3, 0]]).as_matrix()                   # (22,3,3) global
+    grot = R.from_quat(ori[f][:22, [1, 2, 3, 0]]).as_matrix()                 # (22,3,3) global body
     rel = np.matmul(np.transpose(grot[parents], (0, 2, 1)), grot)             # parent^T child
     rel[parents == -1] = grot[parents == -1]                                  # root keeps global
     go = torch.from_numpy(R.from_matrix(rel[0]).as_rotvec()).float().view(1, 3)
