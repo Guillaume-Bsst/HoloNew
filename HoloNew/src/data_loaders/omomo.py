@@ -87,6 +87,24 @@ def omomo_height_from_betas(betas: np.ndarray, gender: str, model_dir: Path) -> 
     return float(verts[:, 1].max() - verts[:, 1].min())
 
 
+def omomo_scale_factor(seq, robot_height, omomo_dir, smplh_model_dir,
+                       default_human_height: float = 1.78) -> float:
+    """Canonical OMOMO scale = robot_height / stature(seq), where stature comes from
+    SMPL-H rest-pose FK on the subject's betas (omomo_height_from_betas).
+
+    Falls back to robot_height / default_human_height when the betas metadata or the
+    SMPL-H model directory is unavailable, so callers degrade rather than crash.
+    """
+    from HoloNew.src.test_socp.correspondence.human_metadata import load_human_metadata
+    if smplh_model_dir is None or not Path(smplh_model_dir).is_dir():
+        return float(robot_height) / float(default_human_height)
+    betas, gender = load_human_metadata(Path(omomo_dir), str(seq)) if omomo_dir else (None, "neutral")
+    if betas is None:
+        return float(robot_height) / float(default_human_height)
+    height = omomo_height_from_betas(betas, gender, Path(smplh_model_dir))
+    return float(robot_height) / float(height)
+
+
 def _betas_for_seq(pickle_path: Path, seq_name: str) -> tuple[np.ndarray, str]:
     data = joblib.load(str(pickle_path))
     for entry in data.values():
@@ -109,9 +127,10 @@ class OmomoMixedLoader(MotionLoader):
             n = human_joints.shape[0]
             object_poses = np.tile(np.array([[1, 0, 0, 0, 0, 0, 0]]), (n, 1))
 
-        betas, gender = _betas_for_seq(Path(model_path), Path(motion_path).stem)
-        height = omomo_height_from_betas(betas, gender, Path(smpl_model_dir))
-        smpl_scale = float(constants.ROBOT_HEIGHT) / height
+        omomo_dir = Path(model_path).parent.parent
+        smpl_scale = omomo_scale_factor(
+            Path(motion_path).stem, float(constants.ROBOT_HEIGHT),
+            omomo_dir, Path(smpl_model_dir))
         return human_joints, object_poses, smpl_scale
 
     def object_source(self, *, motion_path, obj_path, model_path, task_type,
