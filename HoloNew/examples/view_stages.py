@@ -94,6 +94,25 @@ def _sdf_object_band(mesh_file, l_object, sdf_resolution, cache_dir="assets/cont
     return band_pts.astype(np.float32), signed_distance_colors(band_dist, l_object)
 
 
+def _solve_dataset_key(cfg, dataset):
+    """The dataset key to re-expose to the GMR/TEST solve's object resolution.
+
+    view() clears cfg.dataset to None so holosoma's run_headless->main loads via the
+    normalized legacy fields. But the GMR/TEST from_config object resolver
+    (resolve_object_inputs) then falls onto the legacy OBJECT_MESH_FILE + .pt path, which
+    can only reach a dataset whose object is encoded in the motion .pt (OMOMO). HODome's
+    object lives outside any .pt (scanned tar + a separate poses .npz), so it resolves
+    ONLY via the loader's object_source — which needs cfg.dataset set.
+
+    Re-expose the dataset for the solve precisely when there is NO legacy .pt, so HODome
+    loads its object like OMOMO does while OMOMO (which HAS a .pt) keeps its float32 legacy
+    path untouched — the loader path promotes poses to float64 (omomo.object_source) and
+    would drift tight golden tests. Returns the dataset key, or None to keep legacy."""
+    if dataset is None:
+        return None
+    return None if (cfg.data_path / f"{cfg.task_name}.pt").exists() else dataset
+
+
 def _window_solve_frames(rt, start: int) -> None:
     """Slice every per-frame solve input on a GMR/TEST retargeter to ``[start:]`` so a
     subsequent ``rt.retarget(max_frames=N)`` solves the window ``[start : start+N]`` rather
@@ -438,7 +457,16 @@ def view(cfg: ViewStagesConfig) -> None:
 
     def build_gmr(label: str, key: str, cls) -> MethodViz:
         # GMR v1 / v2: solved qpos + full per-stage mapped-body point clouds.
-        rt = cls.from_config(cfg)
+        # Re-expose the dataset to the solve's object resolver for datasets with no legacy
+        # .pt (HODome), so the object (SDF + surface samples -> object_surface_local and the
+        # 'Object->Floor' overlays) loads via the loader, matching OMOMO. cfg.dataset is None
+        # here (view() cleared it for holosoma's uniform legacy load); restore it afterwards.
+        _saved_dataset = cfg.dataset
+        cfg.dataset = _solve_dataset_key(cfg, dataset)
+        try:
+            rt = cls.from_config(cfg)
+        finally:
+            cfg.dataset = _saved_dataset
         # Offset the per-frame solve inputs by start_frame, so retarget(max_frames=N)
         # solves the window [start : start+N] instead of [0:N] (no-op when start == 0).
         _window_solve_frames(rt, start)
