@@ -55,7 +55,7 @@ def load_smplx_to_smplh_layout(npz_path, mapped_body_names, human_body_to_idx,
 
     The npz (from data_utils/prep_amass_smplx_for_rt) holds:
         global_joint_positions   (T, 22, 3)
-        global_joint_orientations(T, 22, 4) WXYZ
+        global_joint_orientations(T, 55, 4) WXYZ   (body+face+hands; only body 0-21 used here)
     Each mapped body is placed at human_body_to_idx[name] (the SMPLH index the
     smplh-based tables read), so compute_stages/Style consume it unchanged. Slots
     not used by any mapped body stay zero (position) / identity (quaternion).

@@ -120,12 +120,14 @@ class HodomeMeshPoser:
         return verts
 
 
-def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) -> np.ndarray:
-    """Per-joint global orientations (T, 22, 4) WXYZ in Z-up from raw SMPL-X locals.
+def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray,
+                            left_hand_pose=None, right_hand_pose=None,
+                            jaw_pose=None, leye_pose=None, reye_pose=None) -> np.ndarray:
+    """Per-joint global orientations (T, 55, 4) WXYZ in Z-up from raw SMPL-X locals.
 
-    `global_orient` (T,3) is the root axis-angle, `body_pose` (T,63) the 21 body
-    joints. Global orientations are built by FK down the SMPL-X tree (reusing the
-    AMASS-prep helper) in the model's native Y-up frame, then expressed in Z-up.
+    Builds the full 55-joint axis-angle (body + face + both MANO hands), FK down the
+    SMPL-X tree (reusing the AMASS-prep helper) in the model's native Y-up frame, then
+    expresses it in Z-up. Missing optional components default to zero (identity local).
 
     hodome_fk rotates the joint POINTS rigidly by Q=_YUP_TO_ZUP (joints @ Q.T), i.e.
     it physically rotates the whole scene. A frame/orientation in that rotated scene is
@@ -136,12 +138,20 @@ def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) ->
     rotations) unchanged and only re-bases the root, matching the rotated joints exactly.
     """
     from HoloNew.data_utils.prep_amass_smplx_for_rt import (
-        _SMPLX_BODY_PARENTS, compute_global_joint_orientations,
+        _SMPLX_PARENTS_55, compute_global_joint_orientations,
     )
     go = np.asarray(global_orient, np.float64).reshape(-1, 1, 3)
-    bp = np.asarray(body_pose, np.float64).reshape(go.shape[0], 21, 3)
-    aa = np.concatenate([go, bp], axis=1)                       # (T,22,3) axis-angle
-    q_yup = compute_global_joint_orientations(aa, _SMPLX_BODY_PARENTS)  # (T,22,4) wxyz, Y-up
+    T = go.shape[0]
+    bp = np.asarray(body_pose, np.float64).reshape(T, 21, 3)
+
+    def _opt(x, n):  # (T, n, 3) zeros if absent
+        return (np.zeros((T, n, 3)) if x is None
+                else np.asarray(x, np.float64).reshape(T, n, 3))
+
+    jaw = _opt(jaw_pose, 1); leye = _opt(leye_pose, 1); reye = _opt(reye_pose, 1)
+    lh = _opt(left_hand_pose, 15); rh = _opt(right_hand_pose, 15)
+    aa = np.concatenate([go, bp, jaw, leye, reye, lh, rh], axis=1)   # (T,55,3) axis-angle
+    q_yup = compute_global_joint_orientations(aa, _SMPLX_PARENTS_55)  # (T,55,4) wxyz, Y-up
     t, j, _ = q_yup.shape
     Rm = R.from_quat(q_yup[..., [1, 2, 3, 0]].reshape(-1, 4)).as_matrix()  # xyzw -> (N,3,3)
     Rz = _YUP_TO_ZUP @ Rm                                        # Q R (world rotation), Z-up
@@ -151,11 +161,15 @@ def global_orientations_zup(global_orient: np.ndarray, body_pose: np.ndarray) ->
 
 def prep_hodome_processed(npz_path: Path, model_dir: Path) -> dict:
     """Raw HODome SMPL-X .npz -> the processed dict the smplx retargeting path expects:
-    global_joint_positions (T,22,3) Z-up, global_joint_orientations (T,22,4) WXYZ Z-up,
-    height, betas, gender. Mirrors data_utils/prep_amass_smplx_for_rt output keys."""
+    global_joint_positions (T,22,3) Z-up, global_joint_orientations (T,55,4) WXYZ Z-up
+    (body + face + both MANO hands, for the contact probe), height, betas, gender.
+    Mirrors data_utils/prep_amass_smplx_for_rt output keys."""
     d = np.load(str(npz_path), allow_pickle=True)
     joints, height = hodome_fk(Path(npz_path), Path(model_dir))
-    quats = global_orientations_zup(d["global_orient"], d["body_pose"])
+    quats = global_orientations_zup(
+        d["global_orient"], d["body_pose"],
+        left_hand_pose=d["left_hand_pose"], right_hand_pose=d["right_hand_pose"],
+        jaw_pose=d["jaw_pose"], leye_pose=d["leye_pose"], reye_pose=d["reye_pose"])
     return {
         "global_joint_positions": joints.astype(np.float32),
         "global_joint_orientations": quats,

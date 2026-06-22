@@ -47,6 +47,13 @@ _SMPLX_BODY_PARENTS = np.array([
     -1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19
 ], dtype=np.int64)
 
+# Full SMPL-X 55-joint parent tree (fallback when the body model does not expose a
+# kintree). Body 0-21, face 22-24, left hand 25-39, right hand 40-54.
+_SMPLX_PARENTS_55 = np.array([
+    -1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19,
+    15, 15, 15, 20, 25, 26, 20, 28, 29, 20, 31, 32, 20, 34, 35, 20, 37, 38,
+    21, 40, 41, 21, 43, 44, 21, 46, 47, 21, 49, 50, 21, 52, 53], dtype=np.int64)
+
 
 def compute_global_joint_orientations(aa_rot_body: np.ndarray,
                                       parents: np.ndarray) -> np.ndarray:
@@ -320,15 +327,17 @@ def main(cfg: Config):
         # — these are what the TEST-SOCP Style objective needs and the positions-only
         # output dropped. Prefer the body model's own kinematic tree; fall back to the
         # standard SMPL-X body parents if it is not exposed.
+        # Full 55-joint SMPL-X axis-angle (body + face + both MANO hands) so the contact
+        # probe can pose the hands. aa_rot_rep is the raw (T, 165) pose; reshape to 55x3.
         bm_neutral = bm_dict["neutral"]
         kintree = getattr(bm_neutral, "kintree_table", None)
         if kintree is not None:
-            parents = np.asarray(kintree)[0][:num_body_joints].astype(np.int64).copy()
-            parents[0] = -1
+            parents55 = np.asarray(kintree)[0][:55].astype(np.int64).copy()
+            parents55[0] = -1
         else:
-            parents = _SMPLX_BODY_PARENTS
-        aa_body = aa_rot_52.squeeze(0).detach().cpu().numpy()[:, :num_body_joints, :]  # T X 22 X 3
-        global_joint_orientations = compute_global_joint_orientations(aa_body, parents)  # T X 22 X 4 wxyz
+            parents55 = _SMPLX_PARENTS_55
+        aa_full = aa_rot_rep.reshape(-1, 55, 3)  # T X 55 X 3, native SMPL-X order
+        global_joint_orientations = compute_global_joint_orientations(aa_full, parents55)  # T X 55 X 4 wxyz
 
         # Compute height based on min_z and max_z value of all the vertices
         height = compute_height(bm_dict, betas, gender=[gender])
