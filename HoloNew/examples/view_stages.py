@@ -164,6 +164,21 @@ def _window_solve_frames(rt, start: int) -> None:
         _probe.obj_trans = _probe.obj_trans[start:]
 
 
+def save_view_result(*, base_dir, robot, task_type, dataset, task_name, method,
+                     qpos, human_joints, cost, fps=30, save_dir=None) -> Path:
+    """Persist one GMR/TEST solve to a demo_results .npz in the same format
+    robot_retarget/holosoma write (``qpos``, ``human_joints``, ``fps``, ``cost``).
+    Destination is ``save_dir`` verbatim when given (mirrors robot_retarget's --save-dir),
+    else ``<base_dir>/<robot>/<task_type>/<dataset>/``; the file is ``<task_name>_<method>.npz``
+    so the per-method results (and holosoma's own ``<task_name>.npz``) never collide."""
+    dest_dir = Path(save_dir) if save_dir is not None else Path(base_dir) / robot / task_type / (dataset or "misc")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{task_name}_{method}.npz"
+    np.savez(dest, qpos=np.asarray(qpos), human_joints=np.asarray(human_joints),
+             fps=fps, cost=cost)
+    return dest
+
+
 Method = Literal["holosoma", "gmr_socp", "test_socp"]
 
 
@@ -190,6 +205,12 @@ class ViewStagesConfig(RetargetingConfig):
     # robot_retarget.main and does NOT support it, so start_frame > 0 with --methods
     # holosoma is rejected.
     start_frame: int = 0
+    # Persist each GMR-SOCP / TEST-SOCP solve as a demo_results .npz (qpos, human_joints,
+    # fps, cost) — the same format robot_retarget writes — so the run leaves a reusable
+    # result, not just an on-screen render. Saved to <save_dir> if given, else
+    # demo_results/<robot>/<task_type>/<dataset>/<task_name>_<method>.npz. Pass --no-save
+    # to view only. (holosoma always saves via its own run_headless path.)
+    save: bool = True
 
 
 def view(cfg: ViewStagesConfig) -> None:
@@ -494,6 +515,21 @@ def view(cfg: ViewStagesConfig) -> None:
             rt.collect_diagnostics = True
         res = rt.retarget(max_frames=cfg.max_frames)
         T = res.qpos.shape[0]
+        # Persist the solve before building the (display-only) viz, so the result lands on
+        # disk even if the viewer window is closed immediately. human_joints are the raw
+        # input joints for the solved window [start : start+T], frame-aligned with qpos.
+        if cfg.save:
+            # GMR/TEST leave res.cost at 0; the per-frame SQP objective (per_frame_cost)
+            # is the analogous solve-quality scalar, so save its mean when res.cost is unset.
+            _cost = float(res.cost)
+            if not _cost and res.per_frame_cost is not None:
+                _cost = float(np.mean(res.per_frame_cost))
+            _dest = save_view_result(
+                base_dir="demo_results", robot=cfg.robot, task_type=cfg.task_type,
+                dataset=dataset, task_name=cfg.task_name, method=key,
+                qpos=res.qpos, human_joints=raw_joints_win[:T], cost=_cost,
+                save_dir=cfg.save_dir)
+            logger.info("Saved %s result (%d frames, cost=%.4g) -> %s", key, T, _cost, _dest)
         # GMR's own floor correction is labelled "Floor" so the early input-grounding
         # stage can use holosoma's "Grounded" name without collision.
         gmr_labels = {"mapped": "Mapped", "scaled": "Scaled", "offset": "Offset", "ground": "Floor"}
