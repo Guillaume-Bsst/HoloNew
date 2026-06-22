@@ -48,6 +48,36 @@ def test_resolve_hodome_by_name(tmp_path, monkeypatch):
     assert model == models / "smplx"
 
 
+def test_resolve_sfu_by_name(tmp_path, monkeypatch):
+    # SFU motions are nested per subject: <sfu>/<subject>/<subject>_<motion>_stageii.npz,
+    # subject = the token before the first "_". No object; smplx body model is shared.
+    sfu = tmp_path / "SFU"
+    models = tmp_path / "models"
+    _touch(sfu / "0008" / "0008_ChaCha001_stageii.npz")
+    (models / "smplx").mkdir(parents=True)
+    _write_paths(tmp_path, monkeypatch, sfu=sfu, smplx_models=models)
+
+    model, motion, obj, smpl_model_dir = facade.resolve_paths_by_name("sfu", "0008_ChaCha001_stageii")
+    assert motion == sfu / "0008" / "0008_ChaCha001_stageii.npz"
+    assert model == models / "smplx"
+    assert obj is None
+    assert smpl_model_dir is None
+
+
+def test_resolve_lafan_by_name(tmp_path, monkeypatch):
+    # LAFAN loads the preprocessed .npy (extract_global_positions output), flat under the
+    # lafan root, named <name>.npy. No object and no separate body model.
+    lafan = tmp_path / "lafan"
+    _touch(lafan / "dance2_subject1.npy")
+    _write_paths(tmp_path, monkeypatch, lafan=lafan)
+
+    model, motion, obj, smpl_model_dir = facade.resolve_paths_by_name("lafan", "dance2_subject1")
+    assert motion == lafan / "dance2_subject1.npy"
+    assert obj is None
+    assert smpl_model_dir is None
+    assert model is not None   # non-None placeholder so the normalize gate passes
+
+
 def test_resolve_missing_key_raises(tmp_path, monkeypatch):
     _write_paths(tmp_path, monkeypatch, smplx_models=tmp_path / "models")  # no 'hodome'
     with pytest.raises(ValueError, match="hodome"):
@@ -86,10 +116,19 @@ def test_normalize_dataset_is_case_insensitive(tmp_path, monkeypatch):
     assert cfg.data_path == omomo_new
 
 
-def test_smplx_dataset_forces_robot_only(tmp_path):
+def _fake_amass_processed(*a, **k):
+    import numpy as np
+    return {"global_joint_positions": np.zeros((1, 22, 3), "float32"),
+            "global_joint_orientations": np.zeros((1, 55, 4), "float32"),
+            "height": np.float32(1.7), "betas": np.zeros(16, "float32"), "gender": "neutral"}
+
+
+def test_smplx_dataset_forces_robot_only(tmp_path, monkeypatch):
     # smplx datasets have no .pt-based object channel in the solve, so object_interaction
     # (the default task_type) is downgraded to robot_only (object stays a viewer overlay).
     from HoloNew.examples.robot_retarget import RetargetingConfig
+    monkeypatch.setattr(facade, "_SFU_CACHE_DIR", tmp_path / "sfu_cache", raising=False)
+    monkeypatch.setattr(facade, "prep_amass_processed", _fake_amass_processed, raising=False)
     motion = tmp_path / "clip.npz"; motion.write_bytes(b"")
     model = tmp_path / "model"; model.mkdir()
     cfg = RetargetingConfig(dataset="sfu", task_type="object_interaction",
@@ -137,10 +176,38 @@ def test_hodome_with_object_keeps_object_interaction(monkeypatch, tmp_path):
     assert cfg.task_type == "object_interaction"
 
 
-def test_smplx_no_object_forces_robot_only(monkeypatch):
+def test_smplx_no_object_forces_robot_only(monkeypatch, tmp_path):
     monkeypatch.setattr(facade, "_has_object_source", lambda cfg: False)
+    monkeypatch.setattr(facade, "_SFU_CACHE_DIR", tmp_path / "sfu_cache", raising=False)
+    monkeypatch.setattr(facade, "prep_amass_processed", _fake_amass_processed, raising=False)
     cfg = _dataset_cfg(dataset="sfu", obj_path=None, motion_path="sub3.npz")
     facade.normalize_dataset_cfg(cfg)
+    assert cfg.task_type == "robot_only"
+
+
+def test_sfu_preps_amass_into_cache(monkeypatch, tmp_path):
+    # SFU raw is AMASS SMPL-X (poses/betas/trans), not the processed format the smplx
+    # loader reads. --motion-name must FK-prep it (cached) like HODome, then point the
+    # legacy data_path/task_name at the cache so load_motion_data finds the processed npz.
+    monkeypatch.setattr(facade, "_SFU_CACHE_DIR", tmp_path / "cache", raising=False)
+    monkeypatch.setattr(facade, "_has_object_source", lambda cfg: False)
+    monkeypatch.setattr(facade, "prep_amass_processed", _fake_amass_processed, raising=False)
+    cfg = _dataset_cfg(dataset="sfu", obj_path=None,
+                       motion_path="SFU/0008/0008_ChaCha001_stageii.npz")
+    facade.normalize_dataset_cfg(cfg)
+    assert cfg.task_type == "robot_only"
+    assert cfg.data_path == tmp_path / "cache"
+    assert cfg.task_name == "0008_ChaCha001_stageii"
+    assert (tmp_path / "cache" / "0008_ChaCha001_stageii.npz").exists()
+
+
+def test_lafan_no_object_forces_robot_only(monkeypatch):
+    # lafan has no object channel, so the default object_interaction must downgrade to
+    # robot_only (object_interaction also requires smplh/smplx, which lafan is not).
+    monkeypatch.setattr(facade, "_has_object_source", lambda cfg: False)
+    cfg = _dataset_cfg(dataset="lafan", obj_path=None, motion_path="dance2_subject1.npy")
+    facade.normalize_dataset_cfg(cfg)
+    assert cfg.data_format == "lafan"
     assert cfg.task_type == "robot_only"
 
 
