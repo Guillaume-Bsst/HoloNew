@@ -153,6 +153,16 @@ def _window_solve_frames(rt, start: int) -> None:
     if _fss:
         rt.foot_sticking_sequences = list(_fss)[start:]
 
+    # The contact probe keeps its OWN full-clip copy of the object poses (built at
+    # construction), separate from rt._obj_poses_raw sliced above. Window it in lockstep,
+    # else the probe queries the windowed human (frame start+t) against the un-windowed
+    # object (frame t): with a stale floor-object the nearest human probes become the feet,
+    # so the object contact/direction overlays attach to the feet instead of the hands.
+    _probe = getattr(rt, "smplx_ground_probe", None)
+    if _probe is not None and getattr(_probe, "obj_quat", None) is not None:
+        _probe.obj_quat = _probe.obj_quat[start:]
+        _probe.obj_trans = _probe.obj_trans[start:]
+
 
 Method = Literal["holosoma", "gmr_socp", "test_socp"]
 
@@ -384,16 +394,24 @@ def view(cfg: ViewStagesConfig) -> None:
             object_pose_scaled = convert_object_poses_to_mujoco_order(
                 scale_object_poses_to_center(obj_poses, smpl_scale))
             mesh = trimesh.load(str(mesh_path), force="mesh", process=False)
-            object_mesh_verts = np.asarray(mesh.vertices, np.float32)
+            # NeuralDome defines object_R/T relative to the CENTROID-CENTRED mesh: the
+            # toolbox does `obj_verts -= obj_verts.mean(0)` before `verts @ R.T + T`
+            # (scripts/hodome_visualize_pyrender.py). The scanned .obj origin is arbitrary
+            # (e.g. at the bat knob, ~0.30 m off-centroid), so without recentring the object
+            # is offset by its centroid along the pose — it sits off the body / penetrates it.
+            obj_center = np.asarray(mesh.vertices, np.float64).mean(0).astype(np.float32)
+            object_mesh_verts = np.asarray(mesh.vertices, np.float32) - obj_center
             object_mesh_faces = np.asarray(mesh.faces, np.uint32)
             from HoloNew.src.test_socp.movable import sample_object_surface
-            object_points_local = sample_object_surface(str(mesh_path)).astype(np.float32)
+            object_points_local = sample_object_surface(str(mesh_path)).astype(np.float32) - obj_center
             # SDF band shells ("SDF Floor" / "SDF Object" toggles) — same helpers the OMOMO
-            # path uses, so HODome gets the SDF viz too. The scanned mesh is already in the
-            # frame its poses reference, so the object band needs no recenter/scale.
+            # path uses. The band points live in the raw mesh frame, so recentre them by the
+            # same centroid as the mesh/samples above so the shell wraps the placed object.
             object_sdf_floor_pts, object_sdf_floor_cols = _sdf_floor_band(_floor_xy, _L_flr_view)
             object_sdf_pts, object_sdf_cols = _sdf_object_band(
                 mesh_path, _L_view, _sc.sdf_resolution)
+            if object_sdf_pts is not None:
+                object_sdf_pts = np.asarray(object_sdf_pts, np.float32) - obj_center
         except Exception as exc:  # noqa: BLE001
             logger.warning("HODome object unavailable (%s); object disabled.", exc)
 
