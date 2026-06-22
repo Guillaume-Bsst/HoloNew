@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import trimesh
 from HoloNew.src.data_loaders.omomo import OmomoMixedLoader
 
 
@@ -23,28 +22,25 @@ def test_omomo_object_source_robot_only_empty(tmp_path):
     assert srcs == []
 
 
-def test_omomo_object_source_no_bundled_mesh_empty(tmp_path, monkeypatch):
-    p = tmp_path / "sub3_largebox_003.pt"
+def test_omomo_object_source_unknown_object_empty(tmp_path):
+    # An object with no bundled mesh and no omomo_dir -> no source.
+    p = tmp_path / "sub3_nosuchobj_003.pt"
     _fake_pt(p)
-    monkeypatch.chdir(tmp_path)   # no models/largebox/largebox.obj under tmp
     srcs = OmomoMixedLoader().object_source(
         motion_path=p, obj_path=p, model_path=None, task_type="object_interaction",
         constants=None, motion_data_config=None)
     assert srcs == []
 
 
-def test_omomo_object_source_with_bundled_mesh(tmp_path, monkeypatch):
+def test_omomo_object_source_bundled_largebox(tmp_path):
+    # largebox is bundled in the package; resolved regardless of cwd, model_path=None.
     p = tmp_path / "sub3_largebox_003.pt"
     _fake_pt(p, T=5)
-    bundled = tmp_path / "models" / "largebox" / "largebox.obj"
-    bundled.parent.mkdir(parents=True)
-    trimesh.creation.box(extents=(0.3, 0.3, 0.3)).export(bundled)
-    monkeypatch.chdir(tmp_path)
     srcs = OmomoMixedLoader().object_source(
         motion_path=p, obj_path=p, model_path=None, task_type="object_interaction",
         constants=None, motion_data_config=None)
     assert len(srcs) == 1
     assert srcs[0].poses_raw.shape == (5, 7)
-    assert np.allclose(srcs[0].poses_raw[:, 0], 1.0)   # qw
-    assert np.allclose(srcs[0].poses_raw[:, 4], np.arange(5))  # x
-    assert str(srcs[0].mesh_path).endswith("models/largebox/largebox.obj")
+    assert np.allclose(srcs[0].poses_raw[:, 0], 1.0)            # qw
+    assert np.allclose(srcs[0].poses_raw[:, 4], np.arange(5))   # x
+    assert srcs[0].mesh_path.name == "largebox.obj"

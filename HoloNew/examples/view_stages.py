@@ -39,10 +39,7 @@ from HoloNew.src.test_socp.contact.constants import OMOMO_DIR_DEFAULT
 from HoloNew.src.test_socp.contact.viz import signed_distance_colors
 from HoloNew.src.test_socp.correspondence.constants import SMPLX_MODEL_DIR_DEFAULT
 from HoloNew.src.test_socp.correspondence.human_body import HumanBody
-from HoloNew.src.test_socp.correspondence.human_metadata import (
-    load_human_metadata,
-    load_object_scale,
-)
+from HoloNew.src.test_socp.correspondence.human_metadata import load_human_metadata
 from HoloNew.src.gmr_socp.gmr_socp import _BODY_NAME_REMAP, GmrSocpRetargeter
 from HoloNew.src.gmr_socp.tables import HUMAN_BODY_TO_IDX, IK_MATCH_TABLE1
 from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
@@ -57,17 +54,6 @@ from HoloNew.src.data_loaders.hodome import extract_hodome_object_mesh, hodome_o
 from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
-
-
-def resolve_captured_obj_scale(omomo_dir, task_name) -> float:
-    """obj_scale for a non-centred captured mesh; raise if unknown (no silent unit fallback)."""
-    scale = load_object_scale(omomo_dir, task_name) if omomo_dir else None
-    if scale is None:
-        raise ValueError(
-            f"obj_scale missing for {task_name}: captured mesh is off-origin and unscaled, "
-            f"so it would render at the wrong size. Provide a bundled models/<obj>/<obj>.obj "
-            f"or a valid OMOMO .p with obj_scale.")
-    return float(scale)
 
 
 Method = Literal["holosoma", "gmr_socp", "test_socp"]
@@ -219,25 +205,16 @@ def view(cfg: ViewStagesConfig) -> None:
         object_sdf_floor_pts = np.concatenate(_layers).astype(np.float32)
         object_sdf_floor_cols = signed_distance_colors(object_sdf_floor_pts[:, 2], _L_flr_view)
 
-        parts = cfg.task_name.split("_")
-        # The .pt object poses place the object's CENTROID, so the mesh must be centred on
-        # its centroid and at the sequence's real size. Two equivalent sources:
-        #  - bundled models/<obj>/<obj>.obj: already centred + pre-scaled (= captured one
-        #    recentred × obj_scale), and the exact mesh the solver loads. Preferred, but
-        #    only a few objects are bundled.
-        #  - façade captured_objects/<obj>.obj: the canonical UNIT mesh with an off-origin
-        #    frame, covering every object. Recentre it on its centroid and scale by the
-        #    per-sequence obj_scale (same .p as the betas) to reproduce the bundled one.
-        bundled = (Path("models") / parts[1] / f"{parts[1]}.obj") if len(parts) >= 2 else None
-        obj_geom_scale, obj_recenter = 1.0, False
-        if bundled is not None and bundled.exists():
-            obj_file = bundled
-        elif cfg.obj_path is not None and Path(cfg.obj_path).exists():
-            obj_file = Path(cfg.obj_path)
-            obj_recenter = True
-            obj_geom_scale = resolve_captured_obj_scale(cfg.omomo_dir, cfg.task_name)
-        else:
+        # Object mesh via the shared resolver: bundled (centred + pre-scaled) first, else
+        # the captured unit mesh recentred + scaled by obj_scale (same logic the solver
+        # loader uses). It returns an already-transformed mesh, so no further
+        # recenter/scale is applied here (obj_geom_center = 0, obj_geom_scale = 1).
+        from HoloNew.src.data_loaders.omomo import resolve_omomo_object_mesh
+        try:
+            obj_file = resolve_omomo_object_mesh(cfg.task_name, cfg.omomo_dir)
+        except ValueError:
             obj_file = None
+        obj_geom_scale, obj_recenter = 1.0, False
         try:
             _, obj_poses = load_intermimic_data(str(cfg.data_path / f"{cfg.task_name}.pt"))
             if obj_file is not None and obj_file.exists():
