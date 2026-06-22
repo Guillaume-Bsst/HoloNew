@@ -558,6 +558,11 @@ def view(cfg: ViewStagesConfig) -> None:
         # smpl_scale, TEST keeps it raw). Derived from the raw object pose + the method's
         # object knobs, so it is correct even when the solve-only _obj_poses_mj is None.
         mv.object_pose_scaled = _method_object_pose(key)
+        # Ground the displayed object on the scaled/robot stages by the SAME shift the solve
+        # applied (rt._obj_ground_shift = object's own floor -> z=0), so the viewer matches
+        # the result (object on the z=0 floor with the robot). MuJoCo order -> Z is index 2.
+        if mv.object_pose_scaled is not None:
+            mv.object_pose_scaled[:, 2] += getattr(rt, "_obj_ground_shift", 0.0)
         # Solve diagnostics: the method's SOLVED object pose + CoM / momentum / slip.
         mv.solved_object_poses = res.solved_object_poses
         mv.com = res.com

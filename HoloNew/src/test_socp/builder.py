@@ -450,6 +450,23 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
             # interaction and movable terms read these poses.
             obj_poses[:, 4:6] *= _obj_xy   # XY
             obj_poses[:, 6] *= _obj_z      # Z
+            # Ground the object to ITS OWN floor (HODome only): lift so its lowest surface
+            # point over the clip rests on z=0 (the nominal floor the robot stands on). HODome
+            # reconstructs the human (SMPL-X/RGB) and the object (optitrack) in frames whose
+            # floors disagree by a few cm, leaving the object below z=0; OMOMO objects are
+            # already floor-consistent (and golden-locked), so this is gated to HODome. A
+            # floor-resting object (chair, table) then sits on z=0; a held object rests on the
+            # floor at some point too, so its min is the floor. The solve's object-contact keeps
+            # the robot on the object regardless of the few-cm reference offset.
+            rt._obj_ground_shift = 0.0
+            if getattr(cfg, "dataset", None) == "hodome":
+                from scipy.spatial.transform import Rotation as _Rot
+                _osl = np.asarray(rt.object_surface_local, dtype=float)
+                _fsamp = np.unique(np.linspace(0, len(obj_poses) - 1, min(len(obj_poses), 60)).astype(int))
+                _obj_low = min(float((_osl @ _Rot.from_quat(obj_poses[f, [1, 2, 3, 0]]).as_matrix().T
+                                      + obj_poses[f, 4:7])[:, 2].min()) for f in _fsamp)
+                rt._obj_ground_shift = float(-_obj_low)
+                obj_poses[:, 6] += rt._obj_ground_shift
             rt._obj_poses_raw = obj_poses
             _obj_poses_arg = obj_poses
         else:
