@@ -101,7 +101,7 @@ def ground_object_pose(obj_poses_scaled, object_surface_local, dataset):
         (grounded (T, 7), shift float). shift == 0.0 and poses are returned unchanged
         when dataset != "hodome" or object_surface_local is None.
     """
-    poses = np.asarray(obj_poses_scaled, dtype=float).copy()
+    poses = np.asarray(obj_poses_scaled).copy()
     if dataset != "hodome" or object_surface_local is None:
         return poses, 0.0
     from scipy.spatial.transform import Rotation as _Rot

@@ -39,10 +39,22 @@ def test_no_surface_is_noop():
     np.testing.assert_array_equal(grounded, poses)
 
 
-import pytest
-from pathlib import Path
+def test_preserves_input_dtype():
+    surface = np.array([[0, 0, 0], [0, 0, 1]], float)
+    poses32 = np.zeros((2, 7), dtype=np.float32)
+    poses32[:, 0] = 1.0
+    poses32[:, 6] = 0.5
+    # HODome path (shift applied) and no-op path both keep float32
+    grounded_h, _ = ground_object_pose(poses32, surface, "hodome")
+    grounded_n, _ = ground_object_pose(poses32, surface, "omomo")
+    assert grounded_h.dtype == np.float32
+    assert grounded_n.dtype == np.float32
 
-from HoloNew.src.paths import get_path
+
+import pytest  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from HoloNew.src.paths import get_path  # noqa: E402
 
 _HODOME = get_path("hodome") / "smplx" / "subject01_baseball.npz"
 _SMPLX = get_path("smplx_models") / "smplx"
