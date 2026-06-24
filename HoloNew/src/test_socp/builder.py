@@ -337,9 +337,28 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
     rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
 
-    # Raw object poses [qw, qx, qy, qz, x, y, z] used by the smplx_ground_probe
-    # and D/X interaction terms. None until the object SDF block loads them.
+    # Object scene grounding (single source). Scale the raw object poses, sample the
+    # object surface (mesh only — no SDF dependency), and ground the object onto z=0 with
+    # one constant per-clip z-shift (HODome only). The grounded pose lands in the 'ground'
+    # stage and is bound to rt._obj_poses_raw: it is THE object pose every interaction
+    # consumer reads (SDF probe, per-frame obj_pose_ref, movable reference, object<->floor
+    # inertia) and the MuJoCo drive (_obj_poses_mj) derives from below.
+    from pathlib import Path
+    rt._obj_ground_shift = 0.0
+    rt.object_surface_local = None
     rt._obj_poses_raw = None
+    if (_obj_poses_all is not None and _mesh_file is not None
+            and Path(_mesh_file).exists()):
+        from HoloNew.src.test_socp.movable import (
+            ground_object_pose, sample_object_surface)
+        _obj_scaled = _obj_poses_all[:T].copy()        # (T, 7) [qw,qx,qy,qz,x,y,z]
+        _obj_scaled[:, 4:6] *= _obj_xy   # XY
+        _obj_scaled[:, 6] *= _obj_z      # Z
+        rt.object_surface_local = sample_object_surface(_mesh_file)
+        _grounded_obj, rt._obj_ground_shift = ground_object_pose(
+            _obj_scaled, rt.object_surface_local, getattr(cfg, "dataset", None))
+        rt.gmr_stages["ground"]["object_pose"] = _grounded_obj
+        rt._obj_poses_raw = _grounded_obj
 
     # Frame time step for every temporal term, from the config fps (OMOMO is 30 fps).
     rt._dt = 1.0 / sc.fps
@@ -366,14 +385,14 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     # baseline default) loads poses with no free joint and trips the guard below.
     rt._obj_poses_mj = None
     if (sc.activate_obj_non_penetration and sc.load_object_scene
-            and rt.object_name not in (None, "ground") and _obj_poses_all is not None):
+            and rt.object_name not in (None, "ground")
+            and rt._obj_poses_raw is not None):
         from HoloNew.examples.robot_retarget import convert_object_poses_to_mujoco_order
-        obj_poses = _obj_poses_all[:T].copy()           # (T, 7) [qw,qx,qy,qz,x,y,z]
-        # Place the object independently of the robot (no-op at the TEST defaults 1.0).
-        obj_poses[:, 4:6] *= _obj_xy   # XY
-        obj_poses[:, 6] *= _obj_z      # Z
-        # Convert from [qw,qx,qy,qz,x,y,z] to MuJoCo order [x,y,z,qw,qx,qy,qz]
-        rt._obj_poses_mj = convert_object_poses_to_mujoco_order(obj_poses)
+        # Single source: the grounded stage object (already scaled + HODome-grounded).
+        # Converting [qw,qx,qy,qz,x,y,z] -> MuJoCo [x,y,z,qw,qx,qy,qz]. This aligns the
+        # MuJoCo-driven object's z with the interaction object (it previously omitted the
+        # HODome ground shift, so the driven object floated).
+        rt._obj_poses_mj = convert_object_poses_to_mujoco_order(rt._obj_poses_raw[:T])
 
     # Fail loudly on a misconfigured object scene: poses loaded but the model
     # has no object free joint would silently skip the per-frame object drive.
@@ -423,14 +442,6 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
             print(f"[TestSocp] object mesh not found ({_mesh_file}); no object SDF "
                   f"(floor-only). Set OBJECT_MESH_FILE to enable the object channel.")
 
-    # Object surface control points (object-local) for the object<->floor
-    # inertia term. Sampled once from the object mesh; only needed when the
-    # object pose is a variable (movable) on an object task. (_mesh_file computed above.)
-    if (rt.object_sdf is not None and _mesh_file is not None
-            and Path(_mesh_file).exists()):
-        from HoloNew.src.test_socp.movable import sample_object_surface
-        rt.object_surface_local = sample_object_surface(_mesh_file)
-
     # Online SMPL-X -> object-SDF probe (causal, per frame). Built only when the
     # object SDF is available: sample the subject SMPL-X surface once. The human is
     # placed at its Grounded pose in retarget(); the object pose is used as-is (the
@@ -444,34 +455,10 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         from HoloNew.src.test_socp.correspondence.human_body import PointCloudCache
         # When an object SDF is present, use its raw poses so retarget() and
         # build_dx_terms can access them; floor-only mode has no object channel.
-        if rt.object_sdf is not None and _obj_poses_all is not None:
-            obj_poses = _obj_poses_all[:T].copy()           # (T, 7) [qw,qx,qy,qz,x,y,z]
-            # Place the object independently (no-op at the TEST defaults 1.0); the D/X
-            # interaction and movable terms read these poses.
-            obj_poses[:, 4:6] *= _obj_xy   # XY
-            obj_poses[:, 6] *= _obj_z      # Z
-            # Ground the object to ITS OWN floor (HODome only): lift so its lowest surface
-            # point over the clip rests on z=0 (the nominal floor the robot stands on). HODome
-            # reconstructs the human (SMPL-X/RGB) and the object (optitrack) in frames whose
-            # floors disagree by a few cm, leaving the object below z=0; OMOMO objects are
-            # already floor-consistent (and golden-locked), so this is gated to HODome. A
-            # floor-resting object (chair, table) then sits on z=0; a held object rests on the
-            # floor at some point too, so its min is the floor. The solve's object-contact keeps
-            # the robot on the object regardless of the few-cm reference offset.
-            rt._obj_ground_shift = 0.0
-            if getattr(cfg, "dataset", None) == "hodome":
-                from scipy.spatial.transform import Rotation as _Rot
-                _osl = np.asarray(rt.object_surface_local, dtype=float)
-                _fsamp = np.unique(np.linspace(0, len(obj_poses) - 1, min(len(obj_poses), 60)).astype(int))
-                _obj_low = min(float((_osl @ _Rot.from_quat(obj_poses[f, [1, 2, 3, 0]]).as_matrix().T
-                                      + obj_poses[f, 4:7])[:, 2].min()) for f in _fsamp)
-                rt._obj_ground_shift = float(-_obj_low)
-                obj_poses[:, 6] += rt._obj_ground_shift
-            rt._obj_poses_raw = obj_poses
-            _obj_poses_arg = obj_poses
-        else:
-            rt._obj_poses_raw = None
-            _obj_poses_arg = None
+        # The grounded stage object (built above, bound to rt._obj_poses_raw) is the
+        # single source the probe queries for the object-local SDF transform. Pass it
+        # only when an object SDF exists (floor-only mode ignores the object channel).
+        _obj_poses_arg = rt._obj_poses_raw if rt.object_sdf is not None else None
         corr_cache = None
         if rt.correspondence is not None:
             corr_cache = PointCloudCache(tri_idx=rt.correspondence.tri_idx,

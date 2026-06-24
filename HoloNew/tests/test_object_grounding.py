@@ -37,3 +37,47 @@ def test_no_surface_is_noop():
     grounded, shift = ground_object_pose(poses, None, "hodome")
     assert shift == 0.0
     np.testing.assert_array_equal(grounded, poses)
+
+
+import pytest
+from pathlib import Path
+
+from HoloNew.src.paths import get_path
+
+_HODOME = get_path("hodome") / "smplx" / "subject01_baseball.npz"
+_SMPLX = get_path("smplx_models") / "smplx"
+_HAVE = (_HODOME.exists() and _SMPLX.is_dir()
+         and (get_path("hodome") / "object" / "subject01_baseball.npz").exists())
+
+
+@pytest.mark.skipif(not _HAVE, reason="HODome + SMPL-X assets not present")
+def test_object_grounded_in_ground_stage_single_source():
+    from HoloNew.examples.robot_retarget import (
+        RetargetingConfig, convert_object_poses_to_mujoco_order)
+    from HoloNew.src.test_socp.config import TestSocpRetargeterConfig
+    from HoloNew.src.test_socp.test_socp import TestSocpRetargeter
+    from HoloNew.src.data_loaders.facade import normalize_dataset_cfg
+    from scipy.spatial.transform import Rotation as Rot
+
+    cfg = RetargetingConfig(dataset="hodome", motion_name="subject01_baseball",
+                            task_type="object_interaction",
+                            retargeter=TestSocpRetargeterConfig(floor_contact_margin=0.01))
+    normalize_dataset_cfg(cfg)
+    rt = TestSocpRetargeter.from_config(cfg)
+
+    # The grounded object lives in the ground stage AND is the single source object pose.
+    obj = rt.gmr_stages["ground"]["object_pose"]
+    assert obj is rt._obj_poses_raw
+    assert rt._obj_ground_shift > 0.0          # a real downward correction was applied
+
+    # The lowest object surface point over the clip rests on z ~ 0.
+    osl = np.asarray(rt.object_surface_local, float)
+    fsamp = np.unique(np.linspace(0, len(obj) - 1, min(len(obj), 60)).astype(int))
+    zmin = min(float((osl @ Rot.from_quat(obj[f, [1, 2, 3, 0]]).as_matrix().T
+                      + obj[f, 4:7])[:, 2].min()) for f in fsamp)
+    assert abs(zmin) < 1e-6, f"object lowest surface z={zmin:.4f} not grounded"
+
+    # If the MuJoCo drive was built, it derives from the same grounded source.
+    if rt._obj_poses_mj is not None:
+        np.testing.assert_allclose(
+            rt._obj_poses_mj, convert_object_poses_to_mujoco_order(rt._obj_poses_raw))
