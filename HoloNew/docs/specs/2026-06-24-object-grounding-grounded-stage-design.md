@@ -17,12 +17,17 @@ The four current object-pose preparations, all derived from `_obj_poses_all`
 |---|---|---|---|---|
 | `rt._obj_poses_mj` | `builder.py:367-376` | yes | **no** | MuJoCo free-joint drive (`q[-7:]`), non-penetration |
 | `rt._obj_poses_raw` | `builder.py:447-470` | yes | **yes** (`_obj_ground_shift`) | `smplx_ground_probe` (SDF), object surface point cloud, per-frame `obj_pose_ref`, movable reference motion, object↔floor inertia |
-| `view_stages.object_pose_raw` / `object_pose_scaled` | `view_stages.py:380-417` | scaled variant only | **no** | viewer stage display (independent of the solve) |
+| `view_stages.object_pose_raw` / `object_pose_scaled` | `view_stages.py:380-417` | scaled variant only | **partial** | viewer stage display (independent of the solve) |
 | `solved_obj_pose` | in the solve | — | inherited via warm-start from `_obj_poses_raw` | movable output (`_obj_solved_poses`) |
 
-Only `_obj_poses_raw` gets the shift. In HODome this means the **driven/displayed**
-object (MuJoCo + viewer) floats relative to the human and the SDF/interaction object
-by `_obj_ground_shift`.
+Only `_obj_poses_raw` gets the shift in the solve path. The viewer is a mixed case:
+the per-method `mv.object_pose_scaled` **does** add `rt._obj_ground_shift`
+(`view_stages.py:597-602`), so the stage display (Scaled/Offset/Floor) is already
+grounded; but the **global** `object_pose_raw`/`object_pose_scaled` passed to `Viewer3D`
+(used by the Original/Mapped/Grounded stages) are not. The real inconsistency is the
+**MuJoCo-driven** object: `_obj_poses_mj` (which drives `q[-7:]`, shown by the main
+viewer) omits the shift, so in HODome it floats relative to the human and the
+SDF/interaction object by `_obj_ground_shift`.
 
 The grounding shift is **not** in the solved object pose today — it is on the
 *reference* `_obj_poses_raw`, which then warm-starts the movable solve. What is
@@ -81,12 +86,18 @@ keep their existing independent object-pose computation.
 
 ### 3. Consumers rewired onto the single source
 
+One `ground_object_pose(...)` call produces the grounded object pose. Its result is
+stored in `gmr_stages["ground"]["object_pose"]` **and** bound to `rt._obj_poses_raw`
+(same array, one computation — not a property, to avoid breaking tests that assign
+`rt._obj_poses_raw` directly). `rt._obj_ground_shift` is still set, so existing readers
+of the scalar keep working.
+
 | Consumer | Before | After |
 |---|---|---|
-| `rt._obj_poses_raw` (SDF probe, `obj_pose_ref`, movable ref, object↔floor inertia) | ad-hoc, with shift | **alias of** `gmr_stages["ground"]["object_pose"]` |
-| `rt._obj_poses_mj` (MuJoCo drive `q[-7:]`) | scaled, **no** shift | `convert_object_poses_to_mujoco_order(gmr_stages["ground"]["object_pose"])` → **gains the shift** |
-| `smplx_ground_probe` (object-local SDF transform) | `_obj_poses_arg` ad-hoc | same single source |
-| `view_stages` Grounded/Floor stage object | independent copy, no shift | reads `gmr_stages["ground"]["object_pose"]` |
+| `rt._obj_poses_raw` (SDF probe, `obj_pose_ref`, movable ref, object↔floor inertia) | ad-hoc, with shift | bound to the same array stored in `gmr_stages["ground"]["object_pose"]` |
+| `rt._obj_poses_mj` (MuJoCo drive `q[-7:]`) | scaled, **no** shift | `convert_object_poses_to_mujoco_order(rt._obj_poses_raw)` → **gains the shift** |
+| `smplx_ground_probe` (object-local SDF transform) | `_obj_poses_arg` ad-hoc | reads `rt._obj_poses_raw` |
+| `view_stages` Floor stage object | `_method_object_pose(key)` + `rt._obj_ground_shift` (`:602`) | **unchanged** — `rt._obj_ground_shift` is preserved |
 
 ### 4. Gating & behaviour change
 
@@ -97,18 +108,26 @@ keep their existing independent object-pose computation.
 - **HODome changes (accepted)**: `_obj_poses_mj` and the viewer display gain the shift
   → driven/displayed object no longer floats vs. human/floor.
 
-### 5. Viewer + tests
+### 5. Viewer + windowing + tests
 
-- `view_stages.py`: the Grounded/Floor stage object reads the grounded object from the
-  stage instead of its local copy. The raw/scaled stages keep their current object
-  computation.
-- Tests:
-  - HODome: the stage's grounded object rests its lowest surface point at z ≈ 0
-    (object-side mirror of `test_floor_offset`).
-  - `_obj_poses_mj` equals the MuJoCo-order conversion of the grounded stage object.
-  - OMOMO unchanged (regression guard on `_obj_poses_raw` / `_obj_poses_mj`).
-  - Adapt `test_view_stages_grounding` if needed so the displayed object matches the
-    grounded human.
+- **Viewer**: left as-is. `view_stages.py:597-602` already grounds the per-method Floor
+  stage object via `rt._obj_ground_shift`, which the new helper still sets. The main
+  viewer's object (driven from `_obj_poses_mj`) gains the shift via section 3. No
+  view_stages change needed for correctness.
+- **Windowing**: `_window_solve_frames._slice_stage` (`view_stages.py:132-138`) currently
+  slices only `("pos","quat")`. Add `"object_pose"` so the grounded stage object is
+  windowed in lockstep with `_obj_poses_raw` (which is still sliced separately at `:146`).
+- **Tests**:
+  - Unit (`ground_object_pose`): HODome grounds the lowest surface point to z ≈ 0; a
+    non-HODome dataset or missing surface is a no-op (shift 0, poses unchanged).
+  - HODome integration (gated on assets, mirror `test_floor_offset`): `rt._obj_ground_shift
+    > 0`; the stage object's lowest surface z ≈ 0; `rt._obj_poses_raw is
+    rt.gmr_stages["ground"]["object_pose"]`; if `_obj_poses_mj` is built, it equals
+    `convert_object_poses_to_mujoco_order(rt._obj_poses_raw)`.
+  - Windowing: a fake `rt` with `gmr_stages["ground"]["object_pose"]` has it sliced by
+    `_window_solve_frames`.
+  - OMOMO unchanged is covered by the helper unit test (non-HODome → shift 0) plus the
+    existing OMOMO golden tests.
 
 ## Minor decisions (defaults taken)
 
