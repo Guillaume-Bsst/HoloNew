@@ -82,6 +82,41 @@ def sample_object_surface(mesh_file: str, density: float = 200.0,
     return np.asarray(pts, dtype=np.float64)
 
 
+def ground_object_pose(obj_poses_scaled, object_surface_local, dataset):
+    """Ground the object onto z=0 with one constant per-clip z-shift (HODome only).
+
+    Mirrors the human floor correction on the object side: lift the (already XY/Z
+    scaled) object so its lowest surface point over the whole clip rests on z=0 — the
+    nominal floor the robot stands on. HODome reconstructs the human (SMPL-X/RGB) and the
+    object (optitrack) in frames whose floors disagree by a few cm, leaving the object
+    below z=0; OMOMO objects are already floor-consistent (and golden-locked), so the
+    shift is gated to HODome.
+
+    Args:
+        obj_poses_scaled: (T, 7) [qw, qx, qy, qz, x, y, z], XY/Z scaling already applied.
+        object_surface_local: (M, 3) object-local surface samples, or None.
+        dataset: dataset key; the shift is applied only when it equals "hodome".
+
+    Returns:
+        (grounded (T, 7), shift float). shift == 0.0 and poses are returned unchanged
+        when dataset != "hodome" or object_surface_local is None.
+    """
+    poses = np.asarray(obj_poses_scaled, dtype=float).copy()
+    if dataset != "hodome" or object_surface_local is None:
+        return poses, 0.0
+    from scipy.spatial.transform import Rotation as _Rot
+    osl = np.asarray(object_surface_local, dtype=float)
+    fsamp = np.unique(np.linspace(0, len(poses) - 1, min(len(poses), 60)).astype(int))
+    obj_low = min(
+        float((osl @ _Rot.from_quat(poses[f, [1, 2, 3, 0]]).as_matrix().T
+               + poses[f, 4:7])[:, 2].min())
+        for f in fsamp
+    )
+    shift = float(-obj_low)
+    poses[:, 6] += shift
+    return poses, shift
+
+
 # ---------------------------------------------------------------------------
 # ResidualBlock versions (numpy, solver-agnostic)
 # ---------------------------------------------------------------------------
