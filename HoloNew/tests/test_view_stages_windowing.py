@@ -53,3 +53,23 @@ def test_window_no_probe_attr_no_crash():
     del rt.smplx_ground_probe
     _window_solve_frames(rt, start)   # no exception
     assert rt._smplx_orientations.shape[0] == T - start
+
+
+def test_window_slices_stage_object_pose():
+    # The grounded object lives in gmr_stages["ground"]["object_pose"] and must be
+    # windowed in lockstep with _obj_poses_raw (same data the builder binds them to).
+    T, start = 60, 20
+    op = np.arange(T * 7).reshape(T, 7).astype(float)
+    ground = {"pos": np.zeros((T, 5, 3)), "quat": np.zeros((T, 5, 4)), "object_pose": op}
+    rt = types.SimpleNamespace(
+        gmr_stages={"ground": ground}, gmr_ground=ground,
+        gmr_grounded=np.zeros((T, 52, 3)),
+        _obj_poses_raw=op.copy(), _obj_poses_mj=None,
+        _smplx_orientations=np.zeros((T, 22, 4)), human_quat=np.zeros((T, 52, 4)),
+        foot_sticking_sequences=None,
+        smplx_ground_probe=types.SimpleNamespace(obj_quat=None, obj_trans=None))
+    _window_solve_frames(rt, start)
+    assert rt.gmr_stages["ground"]["object_pose"].shape[0] == T - start
+    # local frame 0 maps to global frame `start`
+    np.testing.assert_array_equal(
+        rt.gmr_stages["ground"]["object_pose"][0], np.arange(start * 7, start * 7 + 7))

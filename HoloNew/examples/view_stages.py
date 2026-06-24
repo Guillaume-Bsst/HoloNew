@@ -133,7 +133,7 @@ def _window_solve_frames(rt, start: int) -> None:
         if not isinstance(d, dict) or id(d) in _seen:
             return
         _seen.add(id(d))
-        for _k in ("pos", "quat"):
+        for _k in ("pos", "quat", "object_pose"):
             if d.get(_k) is not None:
                 d[_k] = d[_k][start:]
 
