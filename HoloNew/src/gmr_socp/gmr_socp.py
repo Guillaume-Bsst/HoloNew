@@ -815,7 +815,7 @@ class GmrSocpRetargeter:
     def retarget(self, max_frames: int | None = None):
         """Run the full two-pass GMR solve over all frames.
 
-        Requires from_config to have been called first (sets self.gmr_ground,
+        Requires from_config to have been called first (sets self.gmr_floor,
         self.q_init_full).
 
         Args:
@@ -831,8 +831,8 @@ class GmrSocpRetargeter:
         from .tables import IK_MATCH_TABLE1, IK_MATCH_TABLE2
         from .targets import ground_frame_targets
 
-        gpos = self.gmr_ground["pos"]
-        gquat = self.gmr_ground["quat"]
+        gpos = self.gmr_floor["pos"]
+        gquat = self.gmr_floor["quat"]
         T = gpos.shape[0]
         if max_frames is not None:
             T = min(T, int(max_frames))
@@ -848,7 +848,7 @@ class GmrSocpRetargeter:
             # actually has the trailing 7 object DOFs (flag off → False → skipped).
             if self.has_dynamic_object and getattr(self, "_obj_poses_mj", None) is not None:
                 q[-7:] = self._obj_poses_mj[t]
-            # GMR fidelity: both passes track the SAME table1-offset 'ground' targets;
+            # GMR fidelity: both passes track the SAME table1-offset 'floor' targets;
             # only the cost weights differ (table1 -> pass 1, table2 -> pass 2).
             tg1 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)
             tg2 = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE2)
@@ -872,8 +872,8 @@ class GmrSocpRetargeter:
 
         Loads motion data directly from the .pt file without going through
         holosoma's preprocess_motion_data or initialize_robot_pose, since the
-        GMR retarget uses only compute_stages' 'ground' output and the base
-        init is fully overridden by the ground pelvis position and orientation.
+        GMR retarget uses only compute_stages' 'floor' output and the base
+        init is fully overridden by the floor pelvis position and orientation.
 
         Args:
             cfg: RetargetingConfig instance (task_type must be "robot_only",
@@ -954,7 +954,7 @@ class GmrSocpRetargeter:
         rt.q_init_full = q_init_full  # (nq,) — base will be set from ground below
 
         # Ground the raw input onto the floor first (like holosoma) so every downstream
-        # stage lives in the grounded world. GMR's own floor correction (the 'ground'
+        # stage lives in the grounded world. GMR's own floor correction (the 'floor'
         # stage) re-grounds afterwards — a constant z-shift it cancels out — so the solved
         # targets are unchanged, but the mapped/scaled/offset stages now follow the
         # grounded input and the 'Grounded' display stage is the real chain input.
@@ -975,11 +975,11 @@ class GmrSocpRetargeter:
         rt.gmr_stages = compute_stages(
             rt.gmr_grounded, human_quat, scale_xy=_rob_xy, scale_z=_rob_z
         )
-        rt.gmr_ground = rt.gmr_stages["ground"]
-        ground = rt.gmr_ground
+        rt.gmr_floor = rt.gmr_stages["floor"]
+        floor = rt.gmr_floor
         _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
-        rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
-        rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
+        rt.q_init_full[:3] = floor["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
+        rt.q_init_full[3:7] = floor["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
 
         # Load object poses in MuJoCo qpos order for per-frame object qpos drive.
         # Only when the flag is on and the task has a real object; otherwise leave

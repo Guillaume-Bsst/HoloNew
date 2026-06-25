@@ -3,7 +3,7 @@
 Ultra-simple sibling of dump_test_socp_targets.py. What is actually handed to the
 SOCP objective, per frame t and per tracked robot body, is a target POSE: a position
 ``p_target`` (3,) and an orientation ``q_target`` (wxyz quaternion; ``R_target`` is just
-its matrix form). These come straight from the GMR 'ground' stage and are the INPUTS to
+its matrix form). These come straight from the GMR 'floor' stage and are the INPUTS to
 the solve — so this script stops right after building the retargeter and never calls
 retarget() (fast: seconds, not minutes).
 
@@ -56,12 +56,12 @@ def main(cfg: DumpConfig) -> None:
     normalize_dataset_cfg(vcfg)
     vcfg.dataset = _solve_dataset_key(vcfg, vcfg.dataset)
 
-    # Build the retargeter (preprocessing only) — the 'ground' targets are populated here.
+    # Build the retargeter (preprocessing only) — the 'floor' targets are populated here.
     # We deliberately do NOT call rt.retarget(): these are the SOCP INPUTS, not the solve.
     rt = TestSocpRetargeter.from_config(vcfg)
 
-    gpos = rt.gmr_ground["pos"]        # (T, B, 3) MAPPED_BODY_NAMES order
-    gquat = rt.gmr_ground["quat"]      # (T, B, 4) wxyz
+    gpos = rt.gmr_floor["pos"]        # (T, B, 3) MAPPED_BODY_NAMES order
+    gquat = rt.gmr_floor["quat"]      # (T, B, 4) wxyz
     T = gpos.shape[0]
     if cfg.max_frames is not None:
         T = min(T, int(cfg.max_frames))
@@ -86,7 +86,7 @@ def main(cfg: DumpConfig) -> None:
         "scale_xy_robot": cfg.scale_xy_robot,
         "T": T,
         "robot_frames": robot_frames,        # which robot body each (p,q) target drives
-        "human_bodies": human_bodies,        # the GMR 'ground' body each one tracks
+        "human_bodies": human_bodies,        # the GMR 'floor' body each one tracks
         "p_target": p_target,                # (T, 14, 3) position targets sent to the SOCP
         "q_target": q_target,                # (T, 14, 4) wxyz orientation targets sent to the SOCP
     }

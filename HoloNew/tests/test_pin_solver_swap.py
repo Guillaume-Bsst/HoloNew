@@ -28,9 +28,9 @@ def test_pin_tracking_quality():
         task_type="robot_only", task_name="sub3_largebox_003", data_format="smplh"))
     res = rt.retarget()
 
-    # gmr_ground["pos"] is (T, 14, 3): 14 SMPL-H joints in ground frame.
+    # gmr_floor["pos"] is (T, 14, 3): 14 SMPL-H joints in ground frame.
     # Index 0 is the pelvis — the primary tracking target for the robot base.
-    ref = rt.gmr_ground["pos"][:, 0, :]   # (T, 3) ground pelvis reference
+    ref = rt.gmr_floor["pos"][:, 0, :]   # (T, 3) ground pelvis reference
     solved = res.qpos[:, 0:3]              # (T, 3) solved base position
 
     err = np.linalg.norm(solved - ref, axis=1)

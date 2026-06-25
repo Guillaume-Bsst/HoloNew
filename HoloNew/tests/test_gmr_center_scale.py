@@ -9,7 +9,7 @@ import pytest
 MODS = ["HoloNew.src.gmr_socp.preprocess", "HoloNew.src.test_socp.preprocess"]
 
 # Stages produced by scale() (carry the placement); 'mapped' is the raw pre-scale bodies.
-PLACED_STAGES = ("scaled", "offset", "ground")
+PLACED_STAGES = ("scaled", "offset", "floor")
 
 
 def _synthetic(mod):

@@ -26,6 +26,6 @@ def test_robot_z_matches_gmr_native_scaling(rt):
     from the same stored inputs (scale_xy=1.0 = the robot XACT default) and
     compare the z column of the ground stage."""
     native = compute_stages(rt.gmr_grounded, rt.human_quat, scale_xy=1.0, scale_z=None)
-    z_rt = rt.gmr_ground["pos"][..., 2]
-    z_native = native["ground"]["pos"][..., 2]
+    z_rt = rt.gmr_floor["pos"][..., 2]
+    z_native = native["floor"]["pos"][..., 2]
     np.testing.assert_allclose(z_rt, z_native, atol=1e-9)

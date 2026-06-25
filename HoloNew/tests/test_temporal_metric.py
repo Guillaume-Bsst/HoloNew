@@ -52,7 +52,7 @@ def _solve(lr, sq, sV, K=_K):
     dof = res.qpos.shape[1] - 7
     jerk = compute_smoothness(res.qpos, dof, dt=1.0 / 30.0)["joint_jerk_meanabs"]
     # Mean pelvis (body 0) position error against the GMR ground target.
-    track = float(np.mean(np.linalg.norm(res.qpos[:, 0:3] - rt.gmr_ground["pos"][:K, 0], axis=1)))
+    track = float(np.mean(np.linalg.norm(res.qpos[:, 0:3] - rt.gmr_floor["pos"][:K, 0], axis=1)))
     return jerk, track
 
 

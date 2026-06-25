@@ -20,7 +20,7 @@ def _wxyz_to_R(q_wxyz: np.ndarray) -> np.ndarray:
 
 
 def ground_frame_targets(ground_pos_t: np.ndarray, ground_quat_t: np.ndarray, table: dict):
-    """Build robot-frame targets from a GMR 'ground' stage frame.
+    """Build robot-frame targets from a GMR 'floor' stage frame.
 
     ground_pos_t (B,3) / ground_quat_t (B,4) wxyz are in MAPPED_BODY_NAMES order, with
     the table1 pos/rot offsets, morphological scaling and grounding ALREADY baked in by

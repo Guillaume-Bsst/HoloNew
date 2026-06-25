@@ -30,7 +30,7 @@ N = 30
 
 
 def _ref_pelvis_xy(rt, n):
-    gpos, gquat = rt.gmr_ground["pos"], rt.gmr_ground["quat"]
+    gpos, gquat = rt.gmr_floor["pos"], rt.gmr_floor["quat"]
     out = []
     for t in range(n):
         tg = ground_frame_targets(gpos[t], gquat[t], IK_MATCH_TABLE1)

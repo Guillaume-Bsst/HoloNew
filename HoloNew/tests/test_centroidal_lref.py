@@ -89,7 +89,7 @@ def test_lref_tracking_reproduces_cartwheel_spin():
         data_format="smplx", data_path=clip.parent,
         retargeter=TestSocpRetargeterConfig(activate_wl_track=True, lambda_l_track=5.0)))
     frames, masses = mapped_frame_masses_and_names(rt)
-    Lref = reference_orbital_angular_momentum(rt.gmr_ground["pos"], masses, dt)[:N]
+    Lref = reference_orbital_angular_momentum(rt.gmr_floor["pos"], masses, dt)[:N]
     res = rt.retarget(max_frames=N)
     assert np.all(np.isfinite(res.qpos))
 

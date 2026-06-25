@@ -17,8 +17,8 @@ def _frame_targets(rt, q):
     """Build the frame_targets dict the same way retarget() does, at frame 0."""
     from HoloNew.src.test_socp.tables import IK_MATCH_TABLE_SINGLE
     from HoloNew.src.test_socp.targets import ground_frame_targets
-    gpos = rt.gmr_ground["pos"]    # (T, N_bodies, 3)
-    gquat = rt.gmr_ground["quat"]  # (T, N_bodies, 4) wxyz
+    gpos = rt.gmr_floor["pos"]    # (T, N_bodies, 3)
+    gquat = rt.gmr_floor["quat"]  # (T, N_bodies, 4) wxyz
     return ground_frame_targets(gpos[0], gquat[0], IK_MATCH_TABLE_SINGLE)
 
 

@@ -54,6 +54,14 @@ from HoloNew.src.viewer import MethodViz, Viewer
 
 logger = logging.getLogger(__name__)
 
+# Stages whose human rests on the z=0 floor, so the object reference there is the active
+# method's GROUNDED object pose (the solve's grounded input _obj_poses_raw, scaled +
+# floor-grounded). The floor stage is the single source of truth for the object pose
+# across the entire pipeline (SDF probe, interaction, movable, MuJoCo drive), so the
+# viewer reflects this consistently: all processed stages show the grounded object.
+# Only 'Original' stays raw as a baseline reference of the unprocessed capture.
+OBJECT_GROUNDED_STAGES = ("Mapped", "Scaled", "Offset", "Floor", ROBOT_STAGE, "Grounded")
+
 
 def grounded_smplx_skeleton(raw_joints, toe_indices, n_frames):
     """22-joint SMPL-X skeleton for the viewer's Grounded stage, grounded over the FULL
@@ -116,12 +124,12 @@ def _solve_dataset_key(cfg, dataset):
 def _window_solve_frames(rt, start: int) -> None:
     """Slice every per-frame solve input on a GMR/TEST retargeter to ``[start:]`` so a
     subsequent ``rt.retarget(max_frames=N)`` solves the window ``[start : start+N]`` rather
-    than ``[0:N]``. Mirrors the per-frame arrays the retargeters consume: the GMR ground
-    targets (gmr_ground / gmr_stages), the grounded SMPL-X joints (gmr_grounded), the
+    than ``[0:N]``. Mirrors the per-frame arrays the retargeters consume: the GMR floor
+    targets (gmr_floor / gmr_stages), the grounded SMPL-X joints (gmr_grounded), the
     object reference/qpos poses (_obj_poses_raw / _obj_poses_mj), the probe orientations
     (_smplx_orientations / human_quat) and the foot-sticking sequences.
 
-    ``rt.gmr_ground`` is the SAME dict object as ``rt.gmr_stages['ground']`` (builder.py
+    ``rt.gmr_floor`` is the SAME dict object as ``rt.gmr_stages['floor']`` (builder.py
     aliases them), so stage dicts are sliced once via an id() guard to avoid double
     slicing. Frame-independent state (q_init_full, object_surface_local) is left untouched;
     solve OUTPUTS are produced fresh over the window by retarget()."""
@@ -141,7 +149,7 @@ def _window_solve_frames(rt, start: int) -> None:
     if isinstance(stages, dict):
         for _st in stages.values():
             _slice_stage(_st)
-    _slice_stage(getattr(rt, "gmr_ground", None))   # usually stages['ground'] -> no-op
+    _slice_stage(getattr(rt, "gmr_floor", None))   # usually stages['floor'] -> no-op
 
     for _name in ("gmr_grounded", "_obj_poses_raw", "_obj_poses_mj",
                   "_smplx_orientations", "human_quat"):
@@ -162,6 +170,23 @@ def _window_solve_frames(rt, start: int) -> None:
     if _probe is not None and getattr(_probe, "obj_quat", None) is not None:
         _probe.obj_quat = _probe.obj_quat[start:]
         _probe.obj_trans = _probe.obj_trans[start:]
+
+
+def _displayed_object_pose(rt, T, fallback):
+    """The reference object pose the viewer draws on the scaled/grounded stages.
+
+    Single source: when the method grounded the object into its 'floor' stage (TEST-SOCP
+    binds the scaled + floor-grounded pose to rt._obj_poses_raw), display THAT pose -- the
+    same data the solve consumed -- converted to MuJoCo order [x,y,z,qw,qx,qy,qz] and sliced
+    to the displayed window T. The floor offset is already baked into the ground stage, so it
+    is NOT re-applied here. Methods with no grounded object (GMR-SOCP leaves _obj_poses_raw
+    unset; a floor-only TEST run sets it to None) fall back to ``fallback()`` -- the per-method
+    placement re-derived from the raw pose + the method's own object knobs.
+    """
+    ground_obj = getattr(rt, "_obj_poses_raw", None)
+    if ground_obj is None:
+        return fallback()
+    return convert_object_poses_to_mujoco_order(np.asarray(ground_obj)[:T])
 
 
 def save_view_result(*, base_dir, robot, task_type, dataset, task_name, method,
@@ -533,12 +558,12 @@ def view(cfg: ViewStagesConfig) -> None:
             logger.info("Saved %s result (%d frames, cost=%.4g) -> %s", key, T, _cost, _dest)
         # GMR's own floor correction is labelled "Floor" so the early input-grounding
         # stage can use holosoma's "Grounded" name without collision.
-        gmr_labels = {"mapped": "Mapped", "scaled": "Scaled", "offset": "Offset", "ground": "Floor"}
+        gmr_labels = {"mapped": "Mapped", "scaled": "Scaled", "offset": "Offset", "floor": "Floor"}
         stages = {gmr_labels[name]: rt.gmr_stages[name]["pos"][:T]
-                  for name in ("mapped", "scaled", "offset", "ground")}
+                  for name in ("mapped", "scaled", "offset", "floor")}
         # Per-joint orientations of the mapped bodies, so their joint frames can be drawn.
         sq = {gmr_labels[name]: rt.gmr_stages[name]["quat"][:T]
-              for name in ("mapped", "scaled", "offset", "ground")}
+              for name in ("mapped", "scaled", "offset", "floor")}
         # The raw source skeleton, then the grounded input the GMR chain consumed. For
         # smplh raw_joints is the 52-joint layout and rt.gmr_grounded matches it. For smplx
         # the source is the 22 SMPL-X joints, but rt.gmr_grounded is the SMPLH 52-slot array
@@ -591,15 +616,13 @@ def view(cfg: ViewStagesConfig) -> None:
         # Object-as-carrier surface samples (object<->floor channel); lifted per frame
         # by the solved/reference object pose in the viewer.
         mv.object_surface_local = res.object_surface_local
-        # Object placement for THIS method on its scaled stages (GMR centres it by
-        # smpl_scale, TEST keeps it raw). Derived from the raw object pose + the method's
-        # object knobs, so it is correct even when the solve-only _obj_poses_mj is None.
-        mv.object_pose_scaled = _method_object_pose(key)
-        # Ground the displayed object on the scaled/robot stages by the SAME shift the solve
-        # applied (rt._obj_ground_shift = object's own floor -> z=0), so the viewer matches
-        # the result (object on the z=0 floor with the robot). MuJoCo order -> Z is index 2.
-        if mv.object_pose_scaled is not None:
-            mv.object_pose_scaled[:, 2] += getattr(rt, "_obj_ground_shift", 0.0)
+        # Object placement for THIS method on its scaled stages. Single source: when the
+        # method grounded the object into its 'floor' stage (TEST-SOCP binds the scaled +
+        # floor-grounded pose to rt._obj_poses_raw), the viewer shows THAT -- the same data
+        # the solve consumed -- so the floor offset is read from the ground stage, not re-
+        # applied. GMR-SOCP has no grounded object, so it falls back to the per-method
+        # placement (raw pose + its own knobs, correct even when _obj_poses_mj is None).
+        mv.object_pose_scaled = _displayed_object_pose(rt, T, lambda: _method_object_pose(key))
         # Solve diagnostics: the method's SOLVED object pose + CoM / momentum / slip.
         mv.solved_object_poses = res.solved_object_poses
         mv.com = res.com
@@ -621,11 +644,10 @@ def view(cfg: ViewStagesConfig) -> None:
         m.stages["Original"] = raw_joints_win[:T, :, :]
 
     keys = tuple(m.robot_key for m in methods)
-    # Stages whose skeleton lives in the placed (scaled) world: the object follows the
-    # active method's own placement there, and stays at its raw pose on the unscaled
-    # stages. 'Mapped' is now the raw pre-scale bodies (commit ccadf61), so it is raw
-    # too — only Scaled/Offset/Floor/Robot carry the placement. Native size on every stage.
-    object_scaled_stages = ("Scaled", "Offset", "Floor", ROBOT_STAGE)
+    # Stages whose human rests on the z=0 floor carry the active method's grounded object
+    # (module constant): the placed/scaled stages plus 'Grounded' (floor-corrected input).
+    # 'Original'/'Mapped' show the raw human, so the object stays at its raw pose there.
+    object_scaled_stages = OBJECT_GROUNDED_STAGES
     # Interaction bands for the viewer overlays' active masks + colour scales, from the
     # TEST-SOCP config (per channel), so the viewer matches what the solver activates.
     from HoloNew.src.test_socp.config import TestSocpRetargeterConfig

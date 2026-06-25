@@ -949,7 +949,7 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
     def retarget(self, max_frames: int | None = None):
         """Run the full two-pass GMR solve over all frames.
 
-        Requires from_config to have been called first (sets self.gmr_ground,
+        Requires from_config to have been called first (sets self.gmr_floor,
         self.q_init_full).
 
         Args:
@@ -965,8 +965,8 @@ class TestSocpRetargeter(HolosomaConstraintsMixin):
         from .tables import IK_MATCH_TABLE_SINGLE
         from .targets import ground_frame_targets
 
-        gpos = self.gmr_ground["pos"]
-        gquat = self.gmr_ground["quat"]
+        gpos = self.gmr_floor["pos"]
+        gquat = self.gmr_floor["quat"]
         T = gpos.shape[0]
         if max_frames is not None:
             T = min(T, int(max_frames))

@@ -82,7 +82,7 @@ def _com_accel_error(rt: TestSocpRetargeter, qpos: np.ndarray) -> float:
         rt.pin.com(rt.pin.qpos_mj_to_q_pin(qpos[t, :36]))
         for t in range(T)
     ])
-    gpos = rt.gmr_ground["pos"][:T, 0, :]   # (T, 3) reference pelvis (CoM proxy)
+    gpos = rt.gmr_floor["pos"][:T, 0, :]   # (T, 3) reference pelvis (CoM proxy)
     # Shared scoreboard metric: identical 2nd-difference definition as the old loop.
     return compute_dynamics(coms, gpos, rt._dt)["com_accel_err"]
 
@@ -137,7 +137,7 @@ def test_centroidal_reduces_com_accel_error_and_pelvis_sane():
     # 3. Pelvis xy stays within a sane band (not collapsed/teleported).
     # NOTE: 0.40 m is loose — the drift is ~0.228 m (not at baseline 0.022 m).
     # W^c_pos cannot cure this; centroidal left OFF by default (DONE_WITH_CONCERNS).
-    gpos = rt_B.gmr_ground["pos"][:K, 0, :]
+    gpos = rt_B.gmr_floor["pos"][:K, 0, :]
     xy_drift = np.linalg.norm(res_B.qpos[:K, 0:2] - gpos[:, 0:2], axis=1)
     assert np.all(xy_drift <= 0.40), (
         f"Pelvis xy drift exceeds 0.40 m sane band; max={xy_drift.max():.4f} m "

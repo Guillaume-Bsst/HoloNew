@@ -78,7 +78,7 @@ def test_object_grounded_in_ground_stage_single_source():
     rt = TestSocpRetargeter.from_config(cfg)
 
     # The grounded object lives in the ground stage AND is the single source object pose.
-    obj = rt.gmr_stages["ground"]["object_pose"]
+    obj = rt.gmr_stages["floor"]["object_pose"]
     assert obj is rt._obj_poses_raw
     assert rt._obj_ground_shift > 0.0          # a real downward correction was applied
 

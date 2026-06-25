@@ -1,7 +1,7 @@
 """Reference context for style/contact/root metrics that need GMR-grounded targets.
 
 The style metric scores a motion against per-robot-link reference orientations and
-positions, which live in ``rt.gmr_ground`` (the source motion grounded onto the robot
+positions, which live in ``rt.gmr_floor`` (the source motion grounded onto the robot
 skeleton by GMR) — not in the result npz. This wraps a retargeter ``rt`` and exposes
 the reference arrays plus forward kinematics over an arbitrary qpos trajectory, so any
 method's output (ours or an external one) can be scored against the same source.
@@ -22,8 +22,8 @@ class ReferenceContext:
         self._gft = ground_frame_targets
         self._table = IK_MATCH_TABLE1
         self._root_name = ROBOT_ROOT_NAME
-        self._gpos = rt.gmr_ground["pos"]      # (Tf, B, 3)
-        self._gquat = rt.gmr_ground["quat"]    # (Tf, B, 4) wxyz
+        self._gpos = rt.gmr_floor["pos"]      # (Tf, B, 3)
+        self._gquat = rt.gmr_floor["quat"]    # (Tf, B, 4) wxyz
 
         # Fixed body order + tracked mask + pelvis index, from a frame-0 target build.
         tg0 = ground_frame_targets(self._gpos[0], self._gquat[0], self._table)
@@ -80,7 +80,7 @@ class ReferenceContext:
 
     def score_style(self, method_qpos: np.ndarray,
                     gmr_baseline_qpos: np.ndarray | None = None) -> dict[str, float]:
-        """Style of ``method_qpos`` vs the source (gmr_ground), and vs a GMR baseline.
+        """Style of ``method_qpos`` vs the source (gmr_floor), and vs a GMR baseline.
 
         Returns ``style_{orient,shape}_vs_smpl`` always, plus ``*_vs_gmr`` when a
         GMR-baseline trajectory is given.

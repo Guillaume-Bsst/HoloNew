@@ -14,7 +14,7 @@ src/gmr_socp/gmr_socp.py and ground_frame_targets in src/gmr_socp/targets.py):
   * Per frame t and per tracked robot body, the SOCP objective tracks a target
     POSITION p_target(3,) and a target ORIENTATION (fed as the rotation matrix
     R_target(3,3), built from the wxyz quaternion q_target). These come from the
-    GMR 'ground' stage: gpos[t] / gquat[t]. They are IDENTICAL across the two
+    GMR 'floor' stage: gpos[t] / gquat[t]. They are IDENTICAL across the two
     passes (table1 / table2); only the cost weights differ.
   * q0_warmstart = rt.q_init_full, the full robot qpos used to initialise the
     iterate() loop on the very first frame (its base is set from the frame-0
@@ -76,8 +76,8 @@ def main(cfg: DumpConfig) -> None:
     rt = GmrSocpRetargeter.from_config(vcfg)
 
     # --- The targets handed to the SOCP, per frame --------------------------------
-    gpos = rt.gmr_ground["pos"]        # (T, B, 3)  GMR 'ground' positions, MAPPED_BODY_NAMES order
-    gquat = rt.gmr_ground["quat"]      # (T, B, 4)  wxyz
+    gpos = rt.gmr_floor["pos"]        # (T, B, 3)  GMR 'floor' positions, MAPPED_BODY_NAMES order
+    gquat = rt.gmr_floor["quat"]      # (T, B, 4)  wxyz
     T = gpos.shape[0]
     if cfg.max_frames is not None:
         T = min(T, int(cfg.max_frames))
@@ -98,7 +98,7 @@ def main(cfg: DumpConfig) -> None:
             p_t, R_t, _w_p, _w_r = tg1[frame]
             p_target[t, j] = p_t
             R_target[t, j] = R_t
-            # wxyz quaternion that R_target was built from (the 'ground' body quat).
+            # wxyz quaternion that R_target was built from (the 'floor' body quat).
             q_target[t, j] = gquat[t, MAPPED_BODY_NAMES.index(human_bodies[j])]
 
     # The GMR-SOCP solve result: the qpos trajectory the two-pass solve produces
@@ -120,7 +120,7 @@ def main(cfg: DumpConfig) -> None:
         "scale_xy_robot": cfg.scale_xy_robot,
         "T": T,
         "robot_frames": robot_frames,        # SOCP target keys, in iteration order
-        "human_bodies": human_bodies,        # GMR 'ground' body each frame tracks
+        "human_bodies": human_bodies,        # GMR 'floor' body each frame tracks
         # --- targets sent to the SOCP (per frame, per body) ---
         "p_target": p_target,                # (T, B, 3) position target
         "q_target": q_target,                # (T, B, 4) wxyz orientation target
@@ -133,9 +133,9 @@ def main(cfg: DumpConfig) -> None:
         # --- GMR-SOCP solve output: the solved qpos trajectory ---
         "q_result": q_result,                # (T, nq) solved qpos per frame
         "q_result_layout": "qpos: base_xyz(3), base_quat_wxyz(4), joint_dofs(nq-7)",
-        # raw 'ground' stage source (MAPPED_BODY_NAMES order), for cross-checking
-        "ground_pos": np.asarray(gpos[:T], dtype=np.float64),   # (T, B, 3)
-        "ground_quat": np.asarray(gquat[:T], dtype=np.float64),  # (T, B, 4) wxyz
+        # raw 'floor' stage source (MAPPED_BODY_NAMES order), for cross-checking
+        "floor_pos": np.asarray(gpos[:T], dtype=np.float64),   # (T, B, 3)
+        "floor_quat": np.asarray(gquat[:T], dtype=np.float64),  # (T, B, 4) wxyz
     }
 
     cfg.out.parent.mkdir(parents=True, exist_ok=True)

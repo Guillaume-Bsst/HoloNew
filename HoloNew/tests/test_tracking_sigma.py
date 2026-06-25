@@ -21,7 +21,7 @@ def rt():
 def _frame_targets(rt):
     from HoloNew.src.test_socp.tables import IK_MATCH_TABLE_SINGLE
     from HoloNew.src.test_socp.targets import ground_frame_targets
-    gpos, gquat = rt.gmr_ground["pos"], rt.gmr_ground["quat"]
+    gpos, gquat = rt.gmr_floor["pos"], rt.gmr_floor["quat"]
     return ground_frame_targets(gpos[0], gquat[0], IK_MATCH_TABLE_SINGLE)
 
 

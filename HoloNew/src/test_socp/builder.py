@@ -42,8 +42,8 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
 
     Loads motion data directly from the .pt file without going through
     holosoma's preprocess_motion_data or initialize_robot_pose, since the
-    GMR retarget uses only compute_stages' 'ground' output and the base
-    init is fully overridden by the ground pelvis position and orientation.
+    GMR retarget uses only compute_stages' 'floor' output and the base
+    init is fully overridden by the floor pelvis position and orientation.
 
     Args:
         cfg: RetargetingConfig instance (task_type must be "robot_only",
@@ -233,7 +233,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     rt.q_init_full = q_init_full  # (nq,) — base will be set from ground below
 
     # Ground the raw input onto the floor first (like holosoma) so every downstream
-    # stage lives in the grounded world. GMR's own floor correction (the 'ground'
+    # stage lives in the grounded world. GMR's own floor correction (the 'floor'
     # stage) re-grounds afterwards — a constant z-shift it cancels out — so the solved
     # targets are unchanged, but the mapped/scaled/offset stages now follow the
     # grounded input and the 'Grounded' display stage is the real chain input.
@@ -331,15 +331,15 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
     rt.gmr_stages = compute_stages(
         rt.gmr_grounded, human_quat, scale_xy=_rob_xy, scale_z=_rob_z,
     )
-    rt.gmr_ground = rt.gmr_stages["ground"]
-    ground = rt.gmr_ground
+    rt.gmr_floor = rt.gmr_stages["floor"]
+    floor = rt.gmr_floor
     _pelvis_bi = MAPPED_BODY_NAMES.index(HUMAN_ROOT_NAME)
-    rt.q_init_full[:3] = ground["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
-    rt.q_init_full[3:7] = ground["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
+    rt.q_init_full[:3] = floor["pos"][0, _pelvis_bi]    # base at frame-0 pelvis target
+    rt.q_init_full[3:7] = floor["quat"][0, _pelvis_bi]  # base orientation at frame-0 target
 
     # Object scene grounding (single source). Scale the raw object poses, sample the
     # object surface (mesh only — no SDF dependency), and ground the object onto z=0 with
-    # one constant per-clip z-shift (HODome only). The grounded pose lands in the 'ground'
+    # one constant per-clip z-shift (HODome only). The grounded pose lands in the 'floor'
     # stage and is bound to rt._obj_poses_raw: it is THE object pose every interaction
     # consumer reads (SDF probe, per-frame obj_pose_ref, movable reference, object<->floor
     # inertia) and the MuJoCo drive (_obj_poses_mj) derives from below.
@@ -357,7 +357,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
         rt.object_surface_local = sample_object_surface(_mesh_file)
         _grounded_obj, rt._obj_ground_shift = ground_object_pose(
             _obj_scaled, rt.object_surface_local, getattr(cfg, "dataset", None))
-        rt.gmr_stages["ground"]["object_pose"] = _grounded_obj
+        rt.gmr_stages["floor"]["object_pose"] = _grounded_obj
         rt._obj_poses_raw = _grounded_obj
 
     # Frame time step for every temporal term, from the config fps (OMOMO is 30 fps).
@@ -374,7 +374,7 @@ def build_from_config(cls, cfg) -> "TestSocpRetargeter":
             mapped_frame_masses_and_names, reference_orbital_angular_momentum)
         rt._lumped_frames, rt._lumped_masses = mapped_frame_masses_and_names(rt)
         rt._L_ref_all = reference_orbital_angular_momentum(
-            rt.gmr_ground["pos"], rt._lumped_masses, rt._dt)
+            rt.gmr_floor["pos"], rt._lumped_masses, rt._dt)
 
     # Load object poses in MuJoCo qpos order for per-frame object qpos drive.
     # Requires the object SCENE (load_object_scene) — that is what swaps in the xml

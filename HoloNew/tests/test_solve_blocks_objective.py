@@ -17,7 +17,7 @@ def test_tracking_blocks_valid(rt):
     from HoloNew.src.test_socp.targets import ground_frame_targets
     from HoloNew.src.test_socp.tables import IK_MATCH_TABLE1
     q = rt.q_init_full.copy()
-    tg = ground_frame_targets(rt.gmr_ground["pos"][0], rt.gmr_ground["quat"][0], IK_MATCH_TABLE1)
+    tg = ground_frame_targets(rt.gmr_floor["pos"][0], rt.gmr_floor["quat"][0], IK_MATCH_TABLE1)
     blocks = build_tracking_blocks(rt, tg, q, lambda_pos=rt.lambda_pos, sigma_p=rt.sigma_p,
                                    lambda_rot=rt.lambda_rot, sigma_rot=rt.sigma_rot)
     assert blocks and all(isinstance(b, ResidualBlock) for b in blocks)
@@ -32,7 +32,7 @@ def test_style_blocks_valid(rt):
     from HoloNew.src.test_socp.targets import ground_frame_targets
     from HoloNew.src.test_socp.tables import IK_MATCH_TABLE1
     q = rt.q_init_full.copy()
-    tg = ground_frame_targets(rt.gmr_ground["pos"][0], rt.gmr_ground["quat"][0], IK_MATCH_TABLE1)
+    tg = ground_frame_targets(rt.gmr_floor["pos"][0], rt.gmr_floor["quat"][0], IK_MATCH_TABLE1)
     blocks = build_style_blocks(rt, q, tg, lambda_ws=1.0, sigma_R=rt.sigma_R)
     assert blocks, (
         "build_style_blocks returned an empty list with lambda_ws=1.0 — "

@@ -99,23 +99,23 @@ def compute_stages(
     scale_z: float | None = None,
 ) -> dict[str, dict[str, np.ndarray]]:
     """positions (T,52,3), quats_wxyz (T,52,4) ->
-    {stage: {'pos': (T,B,3), 'quat': (T,B,4)}} for stages mapped/scaled/offset/ground.
+    {stage: {'pos': (T,B,3), 'quat': (T,B,4)}} for stages mapped/scaled/offset/floor.
     Mirrors GMR.update_targets order: scale -> offset -> apply_ground_offset.
 
-    The 'ground' stage applies GMR's offline floor correction: a single ground offset
+    The 'floor' stage applies GMR's offline floor correction: a single floor drop
     (the lowest mapped-body z over the WHOLE sequence, on the offset-stage targets) is
     subtracted from every frame so the sequence's lowest body rests on the floor.
 
     ``scale_xy`` / ``scale_z`` set the targets' world frame inside ``scale`` (per axis
     group; None = native morphological scaling, float = raw_root_axis * value). The
-    scaled / offset / ground stages carry the placement; the 'mapped' stage is the raw
+    scaled / offset / floor stages carry the placement; the 'mapped' stage is the raw
     mapped bodies (pre-scale), so it is not re-placed.
     """
     T = positions.shape[0]
     ratio = human_height / HUMAN_HEIGHT_ASSUMPTION
     names = MAPPED_BODY_NAMES
     B = len(names)
-    stage_names = ("mapped", "scaled", "offset", "ground")
+    stage_names = ("mapped", "scaled", "offset", "floor")
     out = {
         s: {"pos": np.empty((T, B, 3), np.float32), "quat": np.empty((T, B, 4), np.float32)}
         for s in stage_names
@@ -135,8 +135,8 @@ def compute_stages(
                 out[stage]["pos"][t, bi] = p
                 out[stage]["quat"][t, bi] = q
 
-    ground_offset = float(out["offset"]["pos"][:, :, 2].min())
-    out["ground"]["pos"][:] = out["offset"]["pos"]
-    out["ground"]["pos"][:, :, 2] -= ground_offset
-    out["ground"]["quat"][:] = out["offset"]["quat"]
+    floor_drop = float(out["offset"]["pos"][:, :, 2].min())
+    out["floor"]["pos"][:] = out["offset"]["pos"]
+    out["floor"]["pos"][:, :, 2] -= floor_drop
+    out["floor"]["quat"][:] = out["offset"]["quat"]
     return out

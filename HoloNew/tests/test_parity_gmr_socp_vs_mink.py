@@ -21,7 +21,7 @@ Reference: tests/golden/gmr_mink_qpos.npz -> qpos from test_pipe's
     from test_pipe_retargeting.solver.gmr.stage import compute_gmr_stage
     from test_pipe_retargeting.constants import G1_29DOF_MJCF
     j,_,q = load_pt('<sub3.pt>'); s = compute_stages(j,q)
-    g = compute_gmr_stage(s['ground'], mjcf_path=str(G1_29DOF_MJCF))
+    g = compute_gmr_stage(s['floor'], mjcf_path=str(G1_29DOF_MJCF))
     np.savez('<HoloNew>/tests/golden/gmr_mink_qpos.npz', qpos=np.asarray(g['qpos']))"
 """
 from pathlib import Path

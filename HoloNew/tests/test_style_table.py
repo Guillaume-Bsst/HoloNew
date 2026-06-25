@@ -27,7 +27,7 @@ def test_style_table_keys_match_bodies(rt):
     from HoloNew.src.test_socp.style import build_style_blocks
     from HoloNew.src.test_socp.tables import IK_MATCH_TABLE_SINGLE
     from HoloNew.src.test_socp.targets import ground_frame_targets
-    gpos, gquat = rt.gmr_ground["pos"], rt.gmr_ground["quat"]
+    gpos, gquat = rt.gmr_floor["pos"], rt.gmr_floor["quat"]
     ft = ground_frame_targets(gpos[0], gquat[0], IK_MATCH_TABLE_SINGLE)
     q = rt.q_init_full[:36]
     legacy = build_style_blocks(rt, q, ft, lambda_ws=1.0, sigma_R=1.0, style_weights=None)

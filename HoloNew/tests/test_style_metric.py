@@ -139,8 +139,8 @@ def test_style_base_drift_bounded():
     rt = TestSocpRetargeter.from_config(cfg)
     res = rt.retarget(max_frames=MAX_FRAMES)
 
-    gpos = rt.gmr_ground["pos"]   # (T_full, B, 3)
-    gquat = rt.gmr_ground["quat"]  # (T_full, B, 4) wxyz
+    gpos = rt.gmr_floor["pos"]   # (T_full, B, 3)
+    gquat = rt.gmr_floor["quat"]  # (T_full, B, 4) wxyz
 
     T = min(res.qpos.shape[0], MAX_FRAMES)
     ref_xy = []
