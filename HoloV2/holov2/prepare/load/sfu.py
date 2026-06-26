@@ -13,20 +13,10 @@ import numpy as np
 
 from ...contracts import RawMotion, SceneSpec, SmplParams
 from .base import register_loader
-from .smpl import SMPLX_BODY_JOINTS, build_body_model, local_params_from_global
+from .smpl import SMPLX_BODY_JOINTS, local_rotvecs_from_global, rest_body_model
 
 # Layout of SFU's global_joint_orientations quaternions (validated against positions in tests).
 _QUAT_ORDER = "wxyz"
-
-
-def _rest_body(betas: np.ndarray, gender: str, model_dir: Path):
-    """A BodyModel built for (betas, gender) only — for its rest joints + parent tree."""
-    z1 = np.zeros((1, 3), np.float32)
-    dummy = SmplParams(betas=betas, global_orient=z1, body_pose=np.zeros((1, 63), np.float32),
-                       left_hand_pose=np.zeros((1, 45), np.float32),
-                       right_hand_pose=np.zeros((1, 45), np.float32), transl=z1,
-                       gender=gender, model_type="smplx")
-    return build_body_model(dummy, model_dir)
 
 
 @register_loader("sfu")
@@ -43,11 +33,12 @@ class SfuLoader:
         pos = np.asarray(d["global_joint_positions"], np.float32)        # (T, 22, 3) Z-up
         T, J = pos.shape[0], pos.shape[1]
 
-        rest = _rest_body(betas, gender, Path(spec.smpl_model_dir))
-        go, bp, transl = local_params_from_global(
+        rest = rest_body_model(betas, gender, Path(spec.smpl_model_dir))
+        local, transl = local_rotvecs_from_global(
             quats, pos[:, 0], rest.parents[:J], rest.rest_joints[0], order=_QUAT_ORDER)
         z = np.zeros((T, 45), np.float32)
-        params = SmplParams(betas=betas, global_orient=go, body_pose=bp, left_hand_pose=z,
+        params = SmplParams(betas=betas, global_orient=local[:, 0],
+                            body_pose=local[:, 1:J].reshape(T, -1), left_hand_pose=z,
                             right_hand_pose=z, transl=transl, gender=gender, model_type="smplx")
         return RawMotion(joint_pos=pos, joint_names=SMPLX_BODY_JOINTS, fps=30.0, source_format="sfu",
                          object_poses_raw=(), object_mesh_paths=(), smpl_params=params)

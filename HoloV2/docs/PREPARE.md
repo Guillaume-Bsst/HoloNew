@@ -98,7 +98,7 @@ holov2/
       mesh.py              chemin -> ObjectMesh (trimesh)
       robot.py             RobotSpec -> RobotModel (FK / surface rest G1)
     # --- les 3 LIVRABLES (build-once) ---
-    calibration/         grounding SCÈNE (humain + objet) : scale, floor (sole SMPL), root
+    calibration/         grounding SCÈNE (humain + objet) ROBOT-FREE : human_stature, floor (sole SMPL), root
     sdf/                 meshes objets/terrain -> SDF ; clé géométrie  (sol plat = analytique, sans SDF)
     point_cloud/         NUAGES + correspondance
       human.py             surface SMPL -> PointCloud (skinning creux, sampling_id)
@@ -161,7 +161,9 @@ Inventaire :
 
 ## 6. Décisions encore ouvertes
 
-1. Convention de normalisation/scale dans `calibration` (couplée à l'objectif du
-   solve, à trancher quand on fera l'étape solve).
+1. ~~Convention de scale dans `calibration`~~ TRANCHÉ : `calibration` est ROBOT-FREE et n'expose
+   que `human_stature` (sujet réel, betas-FK) ; la scale humain→robot = `robot_height / human_stature`
+   est une grandeur de la PAIRE (humain, robot), possédée et appliquée par la couche
+   `correspondence`/`transport` (là où les deux surfaces se rencontrent), jamais bakée dans la scène.
 2. Datasets concrets pris en charge par `load/` (plusieurs d'emblée).
 3. Contenu réel de l'objectif de `style` (à reconcevoir).

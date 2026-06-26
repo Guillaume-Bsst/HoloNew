@@ -115,6 +115,8 @@ class SceneSpec:
     object_mesh_paths: tuple[Path, ...] = ()  # optional override; else resolved by the loader
     ground_mesh_path: Path | None = None      # None => flat ground (no SDF); else terrain -> SDF
     cache_dir: Path | None = None             # default: HoloV2/cache/
+    dataset_root: Path | None = None          # release root for auxiliary metadata kept apart from
+                                              # motion_path (OMOMO betas/scales + captured meshes)
 
 
 # =============================================================================
@@ -125,7 +127,6 @@ class SceneSpec:
 @dataclass(frozen=True)
 class CalibrationConfig:
     mat_height: float = 0.1          # tolerated mat height when grounding feet
-    scale_strategy: str = "betas"    # "betas" (FK stature) | "height" | "fixed"
 
 
 @dataclass(frozen=True)
@@ -228,10 +229,13 @@ class ObjectMesh:
 
 @dataclass(frozen=True)
 class Calibration:
-    """Per-subject / per-take params placing the WHOLE scene (human + objects) on the ground.
-    Offline asset, but NOT a geometry cache: scoped to (subject, take)."""
+    """Per-subject / per-take params: grounds the WHOLE scene (human + objects) on the floor and
+    characterises the subject. ROBOT-FREE, so it caches per subject independently of the target
+    robot. The human->robot scale is deliberately NOT here: it is a (human, robot) quantity owned
+    and applied by the correspondence + transport layer (where both bodies meet), composed from
+    ``human_stature`` and the robot height. Offline asset, but NOT a geometry cache: (subject, take)."""
 
-    scale: float            # human -> robot size
+    human_stature: float    # subject rest stature (m), betas-FK — feeds scale = robot_height / stature
     floor_offset: float     # z shift grounding the scene
     root_frame: np.ndarray  # (4, 4) world transform framing the root
 

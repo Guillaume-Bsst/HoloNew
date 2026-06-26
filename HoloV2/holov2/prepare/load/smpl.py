@@ -46,26 +46,27 @@ def _quat_to_R(quats: np.ndarray, order: str = "wxyz") -> np.ndarray:
     return flat.reshape(q.shape[:-1] + (3, 3))
 
 
-def local_params_from_global(quats_zup: np.ndarray, root_pos_zup: np.ndarray, parents: np.ndarray,
-                             j_rest0: np.ndarray, order: str = "wxyz"):
-    """Turn per-joint GLOBAL orientations (Z-up) into the local SMPL params a ``BodyModel``
-    expects. Local relative rotations are world-frame-invariant, so only the ROOT is rebased to
-    the model's native Y-up frame (Q^-1); body joints stay as parent-relative locals. ``transl``
-    places the native rest pelvis at the world root after the body model's Q (Y->Z).
+def local_rotvecs_from_global(quats_zup: np.ndarray, root_pos_zup: np.ndarray, parents: np.ndarray,
+                              j_rest0: np.ndarray, order: str = "wxyz"):
+    """Turn per-joint GLOBAL orientations (Z-up) into the per-joint LOCAL axis-angles + translation
+    a ``BodyModel`` expects. Parent-relative rotations are world-frame-invariant, so only the ROOT
+    is rebased to the model's native Y-up frame (Q^-1); the rest stay as parent-relative locals.
+    ``transl`` places the native rest root at the world root after the body model's Q (Y->Z).
 
-    Returns ``(global_orient (T,3), body_pose (T,(J-1)*3), transl (T,3))`` (axis-angle, float32).
+    Datasets that store globals slice the returned ``local`` per their layout: SFU keeps body only
+    (``[1:22]`` -> body_pose, hands zero); OMOMO also slices the SMPL-H hand chains into
+    left/right_hand_pose. Returns ``(local (T, J, 3), transl (T, 3))`` (axis-angle, float32).
     """
     rg = _quat_to_R(quats_zup, order)                                  # (T, J, 3, 3) Z-up global
-    qt = _YUP_TO_ZUP.T
-    go_native = np.einsum("ij,tjk->tik", qt, rg[:, 0])                 # Q^-1 @ R_root
-    global_orient = R.from_matrix(go_native).as_rotvec().astype(np.float32)
-    locals_ = []
-    for j in range(1, len(parents)):
+    n = rg.shape[1]
+    local = np.empty((rg.shape[0], n, 3), np.float64)
+    local[:, 0] = R.from_matrix(                                       # Q^-1 @ R_root (rebase root)
+        np.einsum("ij,tjk->tik", _YUP_TO_ZUP.T, rg[:, 0])).as_rotvec()
+    for j in range(1, n):
         rl = np.einsum("tij,tjk->tik", rg[:, parents[j]].transpose(0, 2, 1), rg[:, j])
-        locals_.append(R.from_matrix(rl).as_rotvec())
-    body_pose = np.concatenate(locals_, axis=1).astype(np.float32)     # (T, (J-1)*3)
-    transl = (np.asarray(root_pos_zup, np.float64) @ _YUP_TO_ZUP - j_rest0).astype(np.float32)
-    return global_orient, body_pose, transl
+        local[:, j] = R.from_matrix(rl).as_rotvec()                    # parent-relative (invariant)
+    transl = np.asarray(root_pos_zup, np.float64) @ _YUP_TO_ZUP - j_rest0
+    return local.astype(np.float32), transl.astype(np.float32)
 
 
 def _axis_angle_55(p: SmplParams, t: int) -> np.ndarray:
@@ -79,6 +80,17 @@ def _axis_angle_55(p: SmplParams, t: int) -> np.ndarray:
         else:
             out.append(np.asarray(v[t], np.float64).reshape(n, 3))
     return np.concatenate(out, axis=0)
+
+
+def _axis_angle_seq(p: SmplParams) -> np.ndarray:
+    """(T, 55, 3) local axis-angle for ALL frames (face/eye default to zero if absent)."""
+    T = p.n_frames
+    out = []
+    for key in _SMPLX_AA:
+        n = _SMPLX_AA_N[key]
+        v = getattr(p, key)
+        out.append(np.zeros((T, n, 3)) if v is None else np.asarray(v, np.float64).reshape(T, n, 3))
+    return np.concatenate(out, axis=1)
 
 
 def _global_rotations(aa: np.ndarray, parents: np.ndarray) -> np.ndarray:
@@ -147,6 +159,28 @@ class SmplBody:
         pos_world = j_posed @ _YUP_TO_ZUP.T                      # Y-up -> Z-up
         return rot_world, pos_world
 
+    def bone_positions(self, params: SmplParams) -> np.ndarray:
+        """(T, J, 3) world bone positions (Z-up) for ALL frames at once — batched pure FK.
+
+        Same propagation as ``bone_transforms`` but vectorised over time (the 55-joint loop runs
+        once, each step broadcasting over T): for long sequences (HOI-M3 ~19k frames) this avoids
+        a Python call per frame. Loaders take ``[:, :n]`` for the demo joints."""
+        aa = _axis_angle_seq(params)                                       # (T, 55, 3)
+        T = aa.shape[0]
+        local = R.from_rotvec(aa.reshape(-1, 3)).as_matrix().reshape(T, _N_BONES, 3, 3)
+        transl = np.asarray(params.transl, np.float64)                     # (T, 3)
+        g = np.empty((T, _N_BONES, 3, 3))
+        jp = np.empty((T, _N_BONES, 3))
+        for j in range(_N_BONES):
+            par = int(self.parents[j])
+            if par < 0:
+                g[:, j] = local[:, j]
+                jp[:, j] = self._j_rest[j] + transl
+            else:
+                g[:, j] = g[:, par] @ local[:, j]
+                jp[:, j] = jp[:, par] + np.einsum("tij,j->ti", g[:, par], self._j_rest[j] - self._j_rest[par])
+        return jp @ _YUP_TO_ZUP.T                                          # (T, 55, 3) Z-up
+
     def posed_vertices(self, params: SmplParams, t: int) -> np.ndarray:
         """(V, 3) world mesh vertices at frame ``t`` (Z-up), via a real SMPL-X forward."""
         torch = self._torch
@@ -164,3 +198,15 @@ class SmplBody:
 def build_body_model(params: SmplParams, model_dir: Path) -> SmplBody:
     """Build the ``BodyModel`` for ``params`` (one subject) using the SMPL model at ``model_dir``."""
     return SmplBody(params, Path(model_dir))
+
+
+def rest_body_model(betas: np.ndarray, gender: str, model_dir: Path) -> SmplBody:
+    """A ``BodyModel`` for ``(betas, gender)`` at zero pose — for its rest joints + parent tree
+    (shared by the global-orientation loaders, which need ``rest_joints[0]`` for ``transl``)."""
+    z1 = np.zeros((1, 3), np.float32)
+    dummy = SmplParams(betas=np.asarray(betas, np.float32).reshape(-1), global_orient=z1,
+                       body_pose=np.zeros((1, 63), np.float32),
+                       left_hand_pose=np.zeros((1, 45), np.float32),
+                       right_hand_pose=np.zeros((1, 45), np.float32), transl=z1,
+                       gender=gender, model_type="smplx")
+    return build_body_model(dummy, Path(model_dir))
