@@ -55,7 +55,8 @@ redupliquer ici**). En bref : `SceneSpec`+`Config` → **prepare/** (offline, bu
 
 ## Tests & vérification (obligatoire)
 
-Tests dans `HoloV2/tests/`, lancés avec le python de l'env `holonew` (voir plus bas).
+Tests dans `HoloV2/tests/` (pytest ; `pip install pytest` dans l'env si absent), lancés avec
+le python de l'env `holonew` : `…/envs/holonew/bin/python -m pytest tests/ -q` (depuis `HoloV2/`).
 - **Op pure** → un test unitaire (petit cas synthétique : formes + une valeur connue).
 - **Builder** → test de **déterminisme** (build ×2 ⇒ identique) **+ round-trip cache**
   (`save`→`load` == `build`). Sinon le cache est faux.
