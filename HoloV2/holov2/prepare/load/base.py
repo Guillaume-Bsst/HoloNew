@@ -7,6 +7,7 @@ come from the spec).
 """
 from __future__ import annotations
 
+import importlib
 from typing import Protocol, runtime_checkable
 
 from ...contracts import RawMotion, SceneSpec
@@ -36,7 +37,16 @@ def register_loader(name: str):
 
 
 def get_loader(dataset: str) -> MotionLoader:
-    """Instantiate the loader registered for ``dataset`` (raises ValueError if unknown)."""
+    """Instantiate the loader registered for ``dataset`` (raises ValueError if unknown).
+
+    Loaders register themselves on import. By convention the module for ``dataset`` is
+    ``holov2.prepare.load.<dataset>``, so it is imported lazily on first use — keeping this
+    package light (no torch/smplx pulled until a parametric dataset is actually requested)."""
+    if dataset not in _LOADERS:
+        try:
+            importlib.import_module(f"{__package__}.{dataset}")
+        except ModuleNotFoundError:
+            pass
     try:
         cls = _LOADERS[dataset]
     except KeyError:
