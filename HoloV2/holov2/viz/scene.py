@@ -51,14 +51,14 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
             verts[i] = body.posed_vertices(raw.smpl_params, t)
             bones[i] = body.bone_transforms(raw.smpl_params, t)[1]
 
-    # objects are rigid: keep local geometry + per-frame world pose; update the transform per
-    # frame (not the vertices) so even a dense mesh stays cheap to play back.
-    obj_meshes = []  # (verts_local, faces, poses_frames (F, 7))
+    # objects are rigid: keep local vertices + per-frame world pose; render as POINTS (no mesh
+    # winding/normals/holes to confuse the debug) and update the transform per frame.
+    obj_pts = []  # (verts_local, poses_frames (F, 7))
     for k in range(len(raw.object_poses_raw)):
         m = trimesh.load(str(raw.object_mesh_paths[k]), force="mesh", process=False)
-        vl, fo = np.asarray(m.vertices, np.float32), np.asarray(m.faces, np.int64)
+        vl = np.asarray(m.vertices, np.float32)
         poses = np.asarray(raw.object_poses_raw[k], np.float32)[frames]
-        obj_meshes.append((vl, fo, poses))
+        obj_pts.append((vl, poses))
 
     # skeleton segments (parent -> child)
     bone_pairs = [(int(parents[j]), j) for j in range(body.n_bones) if parents[j] >= 0] if body else []
@@ -79,8 +79,9 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
 
     hj = srv.scene.add_point_cloud("/joints", demo_j[0], np.tile([[40, 200, 60]], (n_demo, 1)).astype(np.uint8),
                                    point_size=0.025)
-    hobj = [srv.scene.add_mesh_simple(f"/obj{k}", vl, fo, color=(255, 140, 0), opacity=1.0, side="double")
-            for k, (vl, fo, _) in enumerate(obj_meshes)]
+    hobj = [srv.scene.add_point_cloud(f"/obj{k}", vl,
+                                      np.tile([[255, 140, 0]], (len(vl), 1)).astype(np.uint8), point_size=0.006)
+            for k, (vl, _) in enumerate(obj_pts)]
 
     def render(_=None):
         f = int(sld.value)
@@ -99,7 +100,7 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
         else:
             srv.scene.add_line_segments("/skeleton", np.zeros((1, 2, 3), np.float32),
                                         np.zeros((1, 2, 3), np.uint8), line_width=0.1)
-        for k, (_, _, poses) in enumerate(obj_meshes):
+        for k, (_, poses) in enumerate(obj_pts):
             h = hobj[k]
             h.position = poses[f][:3]
             h.wxyz = poses[f][3:]
