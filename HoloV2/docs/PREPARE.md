@@ -35,7 +35,7 @@ rapidement). Deux phases, seam explicite :
 
 **Phase calibration (offline, une fois)** — coûteux et stable :
 scale · floor offset · cadrage root · table de correspondance SMPL→G1 ·
-**GridSDF des objets (frame local — rigide ⇒ calculés 1 fois ; le sol = PlaneField analytique)** ·
+**SDF des objets/terrain (frame local — rigide ⇒ calculés 1 fois ; le sol plat = analytique, sans SDF)** ·
 échantillonnage des nuages · BVH/KD-trees. Tout ça est **cacheable sur disque**,
 clé = géométrie ; deux séquences partageant un objet partagent l'asset.
 Stockage : **`HoloV2/cache/`** (hors du package python, géré par `prepare/` via un
@@ -67,11 +67,11 @@ donc être évalué **online que contre un SDF rigide** (sol + objets).
 
 ---
 
-## 3. L'évaluation = matrice homogène (clouds × SDFs)
+## 3. L'évaluation = matrice homogène (clouds × canaux)
 
-- SDFs   = sol + N objets = **N+1 champs rigides**
+- Canaux = sol + N objets = **N+1** (sol : plan analytique par défaut, ou SDF terrain ; objets : SDF)
 - Clouds = SMPL + N objets = **N+1 nuages**
-- Chaque cloud est évalué contre **tous** les SDFs → chaque point porte **N+1
+- Chaque cloud est évalué contre **tous** les canaux → chaque point porte **N+1
   canaux**. Sortie homogène, zéro cas particulier. Le canal « self » (cloud objet
   *i* vs son SDF *i*) ≈ 0 — gardé pour l'homogénéité, masqué à l'usage si besoin.
 
@@ -88,8 +88,7 @@ de **`Config`** (knobs d'algo). Le loader transforme `SceneSpec` -> `RawMotion`.
 
 ```
 holov2/
-  contracts.py          contrats partagés (assets, cibles, SceneSpec, RobotSpec, Config…)
-  fields.py             impls de Field : GridSDF (grille) + PlaneField (sol ANALYTIQUE, infini)
+  contracts.py          contrats partagés (assets, cibles, SceneSpec, RobotSpec, Config, SDF…)
 
   prepare/             ÉTAPE 1 — TOUT l'offline (seul endroit qui instancie SMPL/meshes/robot)
     load/                loaders OFFLINE (sous-package)
@@ -100,14 +99,14 @@ holov2/
       robot.py             RobotSpec -> RobotModel (FK / surface rest G1)
     # --- les 3 LIVRABLES (build-once) ---
     calibration/         grounding SCÈNE (humain + objet) : scale, floor (sole SMPL), root
-    sdf/                 meshes objets -> GridSDF ; clé géométrie  (le sol = PlaneField, pas caché)
+    sdf/                 meshes objets/terrain -> SDF ; clé géométrie  (sol plat = analytique, sans SDF)
     point_cloud/         NUAGES + correspondance
       human.py             surface SMPL -> PointCloud (skinning creux, sampling_id)
       objects.py           surfaces objets -> PointCloud par objet
       correspondence/      surfaces SMPL + G1 -> nuage/mapping G1 (smpl_sampling_id) ; clé robot/forme
     scene.py             applique la calibration -> GroundedScene
     runner.py            prepare(scene_spec, config) : load-or-build + assemble ; build_all()
-    # sorties : Calibration + Channels(SDF/Plane) + PointClouds(+corr) -> GroundedScene + InteractionContext
+    # sorties : Calibration + SDF(objets/terrain) + PointClouds(+corr) -> GroundedScene + InteractionContext
 
   targets/             ÉTAPE 2 — construction ONLINE des 2 canaux de cibles
     style/               demo joints -> StyleTargets (mapping articulaire, provisoire)
@@ -142,15 +141,15 @@ class AssetBuilder(Protocol):
 
 ## 5. Les classes (contrats)
 
-**Source de vérité unique : `holov2/contracts.py`** (+ `holov2/fields.py` pour les impls de
-champ) — pas de duplication ici (zéro drift). Inventaire :
+**Source de vérité unique : `holov2/contracts.py`** — pas de duplication ici (zéro drift).
+Inventaire :
 
-- **Protocols** : `BodyModel`, `RobotModel`, `Field`, `AssetBuilder`
+- **Protocols** : `BodyModel`, `RobotModel`, `AssetBuilder`
 - **entrée / config** : `RobotSpec`, `SceneSpec` (data identity) · `Config` (+ sous-configs)
 - **load** : `SmplParams` (avec MAINS), `RawMotion` (J_demo)
 - **scène / calib** : `ObjectMesh` (+ `static`), `Calibration`, `GroundedScene` (LÉGER)
-- **champs** : `Field` (protocol) ; impls `GridSDF` / `PlaneField` dans `fields.py` · `ContactField`
-  · `MultiChannelField` (per-frame `(C,P)`) · `Channel` (field + `object_idx` = liaison pose explicite)
+- **champs** : `SDF` (grille, objets/terrain) · `ContactField` · `MultiChannelField` (per-frame
+  `(C,P)`) · `Channel` (`object_idx` + `sdf` ; `sdf=None` ⇒ sol plat analytique)
 - **prepare** : `PointCloud` (skinning creux + `sampling_id`), `CorrespondenceTable`
   (`smpl_idx`/`link_idx`/`offset_local` + `smpl_sampling_id` qui doit matcher `sampling_id`)
 - **contexte** : `InteractionContext` (`channels` = ground + objets ; invariants documentés)

@@ -9,7 +9,7 @@ la LOGIQUE algorithmique, jamais la structure** (voir la carte de portage plus b
 
 1. **Dépendances à sens unique, zéro cycle.** Une responsabilité par module. Pas de classe-dieu.
 2. **`contracts.py` = source de vérité unique des types** (dataclasses `frozen`). On NE duplique
-   JAMAIS une définition ailleurs (docs incluses : on y pointe). Impls de champ dans `fields.py`.
+   JAMAIS une définition ailleurs (docs incluses : on y pointe).
 3. **Cœur pur, effets de bord aux extrémités.** Les ops de calcul ne font ni I/O, ni log, ni
    mutation de leurs inputs ; elles prennent des données et rendent un artefact `frozen`. Disque
    dans `prepare/load`, écran dans `viz/`.
@@ -35,7 +35,7 @@ redupliquer ici**). En bref : `SceneSpec`+`Config` → **prepare/** (offline, bu
 
 ## Conventions de code
 
-- **Poids des imports** : `contracts.py`, `fields.py`, `obs.py` = **numpy-only** (légers,
+- **Poids des imports** : `contracts.py`, `obs.py` = **numpy-only** (légers,
   importables partout). torch/smplx/trimesh/coal/pinocchio **uniquement** dans `prepare/load/` et
   les builders `prepare/`. `targets`/`solve`/`viz` ne dépendent jamais de torch.
 - **Imports relatifs** dans le package (`from ..contracts import X`).
@@ -48,7 +48,8 @@ redupliquer ici**). En bref : `SceneSpec`+`Config` → **prepare/** (offline, bu
 - **`J_demo`** (joints dataset, `style`) ≠ **`J_bones`** (squelette SMPL, nuages) — jamais confondus.
 - **Per-frame = unité canonique** ; séquence = `list[FrameTargets]`.
 - Nuages = **skinning creux** `(parts, weights, offsets)`, posés mesh-free (`K=1` rigide / `K~4` humain).
-- Sol = canal `ground` **polymorphe** (`PlaneField` plat par défaut, `GridSDF` terrain).
+- Sol = canal `ground` : **plat par défaut** (pas de SDF, distance `z` analytique dans l'eval)
+  OU **terrain** (escalier/pente/climbing) via une `SDF` (`Channel.sdf`).
 - SMPL/meshes/robot instanciés **uniquement dans `prepare/`**.
 - **Commentaires autonomes** (pas de réf. à une discussion ; acronymes locaux définis).
 
@@ -64,7 +65,7 @@ Tests dans `HoloV2/tests/`, lancés avec le python de l'env `holonew` (voir plus
 
 ## Workflow par module (« definition of done »)
 
-1. Le type est dans `contracts.py` (ou impl de `Field` dans `fields.py`).
+1. Le type est dans `contracts.py`.
 2. Logique = fonction(s) pure(s), sans effet de bord, sans muter les inputs.
 3. Câblée dans l'orchestrateur (`runner`/`pipeline`) avec un `prof.span(...)`.
 4. Test unitaire (+ déterminisme/parité si pertinent).
@@ -78,14 +79,14 @@ Tests dans `HoloV2/tests/`, lancés avec le python de l'env `holonew` (voir plus
 | `prepare/load/smpl.py` (BodyModel) | `src/test_socp/correspondence/human_body.py`, `src/data_loaders/hodome.py` |
 | `prepare/load/robot.py` (RobotModel) | `src/robot_fk.py`, `src/test_socp/pin_model.py`, correspondence `g1_surface.py` |
 | `prepare/calibration/` | `src/holosoma/preprocess.py` (ground/scale), `contact/smplx_field.robust_floor_offset`, omomo betas-FK |
-| `prepare/sdf/` (GridSDF) | `src/test_socp/contact/backends/sdf.py` + `backends/coal.py` |
+| `prepare/sdf/` (SDF objets/terrain) | `src/test_socp/contact/backends/sdf.py` + `backends/coal.py` |
 | `prepare/point_cloud/human|objects` | `human_body.build_point_cloud_cache`, `utils.weighted_surface_sampling`, `movable.sample_object_surface` |
 | `prepare/point_cloud/correspondence/` | `src/test_socp/correspondence/*` (build, ot_couple, transport, segments) |
 | `targets/interaction/eval` | `contact/contact_field.py`, `contact/combined.py`, `backends/floor.py` |
 | `targets/interaction/transport` | `correspondence/transport.py` |
 | `targets/style/` | `src/gmr_socp/*`, mappings `config_types/data_type.py` |
 | `viz/` | `src/viewer.py`, `viser_player.py`, `correspondence/viz.py`, `contact/viz.py` |
-| `fields.py` PlaneField | `contact/backends/floor.py` (floor analytique) |
+| sol plat (analytique, dans `interaction/eval`) | `contact/backends/floor.py` |
 
 ## Cache (`HoloV2/cache/`, hors package, gitignoré sauf `corr_neutral.npz`)
 
@@ -107,7 +108,7 @@ Détails : `docs/CACHE.md`.
 
 ## État & feuille de route
 
-Contrats + squelette posés (`contracts.py`/`fields.py`/`obs.py` complets ; modules = stubs).
+Contrats + squelette posés (`contracts.py`/`obs.py` complets ; modules = stubs).
 Ordre d'implémentation (dépendances) : **`prepare/load/base.py`** → un loader concret (OMOMO/SFU)
 → `calibration/` → `sdf/` + `point_cloud/` (+ `correspondence`) → `targets/interaction` →
 `targets/style` → `viz/` → `solve/`. À chaque étape : tests + parité V1.

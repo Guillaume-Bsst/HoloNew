@@ -31,7 +31,7 @@ C'est le SEUL endroit qui connaît viser (effets confinés).
 
 ### Couches (toggles), groupées
 - **Playback** : slider frame · play · fps
-- **Statique** : sol (PlaneField) · mesh SMPL (ghost) · meshes objets · GridSDF (iso ≈ surface) ·
+- **Statique** : sol (plan analytique) · mesh SMPL (ghost) · meshes objets · SDF (iso ≈ surface) ·
   correspondance (lignes SMPL↔G1) · nuages-rest
 - **Style** : points cibles par lien · poids
 - **Interaction – humain** : nuage humain posé · witnesses · normales · masque actif

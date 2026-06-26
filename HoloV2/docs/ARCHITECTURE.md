@@ -41,17 +41,16 @@ fichiers bruts ─► PREPARE ─► {GroundedScene, InteractionContext, Calibra
 
 ## Arborescence
 Entrée = `SceneSpec` (data identity) + `Config` (knobs). Source de vérité des types :
-`contracts.py` (+ `fields.py` pour les impls de champ).
+`contracts.py`.
 
 ```
 holov2/
-  contracts.py     TOUS les contrats (SceneSpec, RobotSpec, Config, assets, cibles, …) — ne dépend de rien
-  fields.py        impls de Field : GridSDF (grille) + PlaneField (sol analytique)
+  contracts.py     TOUS les contrats (SceneSpec, RobotSpec, Config, SDF, assets, cibles, …) — ne dépend de rien
 
   prepare/         ÉTAPE 1 — offline ; SEUL endroit qui instancie SMPL/meshes/robot     [PREPARE.md]
     load/            base + 1/dataset (-> RawMotion) · smpl (-> BodyModel) · mesh (-> ObjectMesh) · robot (-> RobotModel)
     calibration/     LIVRABLE : grounding scène (humain + objet)
-    sdf/             LIVRABLE : GridSDF objets (sol = PlaneField, non caché)
+    sdf/             LIVRABLE : SDF objets/terrain (sol plat = analytique, sans SDF)
     point_cloud/     LIVRABLE : nuages (human, objects) + correspondence (SMPL<->G1)
     scene.py · runner.py   (prepare(scene_spec, config) : load-or-build + assemble)
 

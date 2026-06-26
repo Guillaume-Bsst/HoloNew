@@ -73,19 +73,6 @@ class RobotModel(Protocol):
 
 
 @runtime_checkable
-class Field(Protocol):
-    """A samplable distance field in its OWN local frame. Impls in ``holov2/fields.py``:
-    ``GridSDF`` (trilinear on a cached grid — objects AND terrain ground) and ``PlaneField``
-    (analytic flat ground, default — infinite, no grid). The protocol keeps the eval
-    homogeneous AND lets the ground be flat OR arbitrary terrain (stairs/slope/climbing)."""
-
-    name: str
-
-    def sample_local(self, points_local: np.ndarray, margin: float) -> "ContactField":
-        """Sample at ``points_local`` (already in this field's frame) -> ContactField."""
-
-
-@runtime_checkable
 class AssetBuilder(Protocol):
     """Common interface of the offline deliverable builders (``prepare/``): calibration,
     sdf, point_cloud. Each hashes ONLY its relevant ``Config`` subset (+ inputs + upstream
@@ -125,14 +112,14 @@ class SceneSpec:
     robot: RobotSpec
     smpl_model_dir: Path | None = None        # parametric body model dir (None ok => style-only)
     object_mesh_paths: tuple[Path, ...] = ()  # optional override; else resolved by the loader
-    ground_mesh_path: Path | None = None      # None => flat PlaneField ground; else terrain -> GridSDF
+    ground_mesh_path: Path | None = None      # None => flat ground (no SDF); else terrain -> SDF
     cache_dir: Path | None = None             # default: HoloV2/cache/
 
 
 # =============================================================================
 # Configuration — drives BOTH prepare and targets; cache keys derive from it
 # =============================================================================
-# Field VALUES are illustrative defaults (from the previous HoloNew implementation);
+# The default VALUES below are illustrative (from the previous HoloNew implementation);
 # finalised when each builder lands.
 @dataclass(frozen=True)
 class CalibrationConfig:
@@ -144,7 +131,7 @@ class CalibrationConfig:
 class SdfConfig:
     spacing: float = 0.01            # isotropic voxel size (m)
     margin: float = 0.05             # band beyond the surface that is stored
-    # (the default flat ground is an analytic PlaneField — no grid, no size here)
+    # (the default flat ground has no SDF — handled analytically in the eval; no size here)
 
 
 @dataclass(frozen=True)
@@ -320,22 +307,39 @@ class MultiChannelField:
 
 @dataclass(frozen=True)
 class Channel:
-    """One evaluation channel = a field + its per-frame pose binding. Makes the ground/object
-    alignment EXPLICIT (no implicit N vs N+1 offset).
+    """One evaluation channel = a signed-distance source + its per-frame pose binding. Makes the
+    ground/object alignment EXPLICIT (no implicit N vs N+1 offset). The three cases:
 
-    ``object_idx is None`` => static field in the world frame (the GROUND). The ground field is
-    a ``PlaneField`` (flat z, default) OR a ``GridSDF`` (terrain: stairs/slope/climbing) — NOT a
-    hard-coded plane. Otherwise the field is bound to object ``object_idx`` and posed by
-    ``object_poses[object_idx][f]``."""
+    - ``sdf is None`` & ``object_idx is None`` => the default FLAT ground (analytic z-distance;
+      the eval samples it without a grid).
+    - ``sdf`` set & ``object_idx is None``     => a TERRAIN ground (stairs/slope/climbing) as an SDF.
+    - ``sdf`` set & ``object_idx`` set         => object ``object_idx``, posed by
+      ``object_poses[object_idx][f]``.
+
+    The flat ground is the only channel WITHOUT an SDF — handled analytically in the eval."""
 
     name: str
-    field: Field                 # GridSDF | PlaneField (holov2/fields.py)
-    object_idx: int | None       # None = static ground (world) ; else index into object_poses/clouds
+    object_idx: int | None        # None = static ground (world) ; else index into object_poses/clouds
+    sdf: "SDF | None" = None       # None = flat analytic ground ; else the object/terrain SDF grid
 
 
 # =============================================================================
 # prepare/ — geometry assets (build-once, cached)
 # =============================================================================
+@dataclass(frozen=True)
+class SDF:
+    """Signed-distance grid of a rigid surface, in its local frame — for objects AND terrain
+    ground. The flat default ground has NO SDF (``Channel.sdf is None``, handled analytically).
+
+    Sampled by trilinear interpolation in the eval (``targets/interaction/eval.py``); pure data
+    here (no method) so ``contracts`` stays logic-free."""
+
+    grid: np.ndarray     # (Nx, Ny, Nz) signed distance (negative = inside)
+    origin: np.ndarray   # (3,) local coords of node (0, 0, 0)
+    spacing: float       # isotropic voxel size (m)
+    name: str            # channel name, e.g. "obj0" / "ground"
+
+
 @dataclass(frozen=True)
 class PointCloud:
     """Surface samples carrying their own SPARSE SKINNING, posed from part transforms alone
@@ -388,7 +392,7 @@ class InteractionContext:
     """All build-once assets for the interaction treatment, passed explicitly (no globals).
 
     Invariants (checked at assembly):
-    - ``channels[0]`` is the GROUND (static; flat PlaneField by default, or a GridSDF terrain);
+    - ``channels[0]`` is the GROUND (static; flat by default = no SDF, or a terrain SDF);
       the rest are object channels with ``object_idx`` aligned to ``object_clouds`` and the
       scene's object order.
     - ``human_cloud.sampling_id == correspondence.smpl_sampling_id``."""
