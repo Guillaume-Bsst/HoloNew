@@ -18,7 +18,8 @@ Conventions
 - Per-frame is the canonical unit. The current target is OFFLINE replay: ``process_frame``
   indexes a loaded ``GroundedScene`` at frame ``f``. Live teleoperation (a single ``RawFrame``
   fed per tick) is a future variant on the same pure ops — not yet a contract.
-- Field arrays are channel-first ``(C, P)`` = C channels over P points (per-channel ops
+- Field-eval result arrays (``ContactField`` / ``MultiChannelField``) are channel-first
+  ``(C, P)`` = C channels over P points (per-channel ops
   contiguous). C = number of ``Channel`` (ground + N objects).
 - Two joint sets, kept distinct: ``J_demo`` (the dataset's joints, used by ``style``) and
   ``J_bones`` (the SMPL skeleton, used to pose clouds). Never conflate them.
