@@ -1,0 +1,8 @@
+# Regenerable build-once cache (SDF grids, per-subject/geometry correspondence, calibration).
+# Managed by prepare/. Keep only the committed neutral-correspondence default.
+cache/**
+!cache/correspondence/
+!cache/correspondence/corr_neutral.npz
+
+__pycache__/
+*.pyc
