@@ -90,7 +90,8 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
     def render(_=None):
         f = int(sld.value)
         if body is not None and show_mesh.value:
-            srv.scene.add_mesh_simple("/body", verts[f], faces, color=(200, 200, 210), opacity=0.55)
+            srv.scene.add_mesh_simple("/body", verts[f], faces, color=(200, 200, 210),
+                                      opacity=0.55, side="double")
         else:
             srv.scene.add_mesh_simple("/body", np.zeros((3, 3), np.float32), np.array([[0, 1, 2]]), opacity=0.0)
         hj.points = demo_j[f]
@@ -105,7 +106,8 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
                                         np.zeros((1, 2, 3), np.uint8), line_width=0.1)
         for k, (fo, wv) in enumerate(obj_meshes):
             if show_obj.value:
-                srv.scene.add_mesh_simple(f"/obj{k}", wv[f], fo, color=(255, 140, 0), opacity=0.8)
+                srv.scene.add_mesh_simple(f"/obj{k}", wv[f], fo, color=(255, 140, 0),
+                                          opacity=1.0, side="double")
             else:
                 srv.scene.add_mesh_simple(f"/obj{k}", np.zeros((3, 3), np.float32),
                                           np.array([[0, 1, 2]]), opacity=0.0)
