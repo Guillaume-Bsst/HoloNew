@@ -72,33 +72,36 @@ def _object_poses_zup(obj_npz: Path) -> np.ndarray:
 
 
 def _object_mesh(token: str, scaned_dir: Path, cache_dir: Path) -> Path:
-    """Extract scaned_object/<token>.tar and return a centroid-centred mesh path (cached).
+    """Extract scaned_object/<token>.tar and return a clean, centroid-centred mesh (cached).
 
-    Prefers the decimated ``<token>_face1000.obj`` (what object_R/T were calibrated against).
-    object_R/T are defined w.r.t. the centroid-centred mesh, so we centre it once."""
+    The supplied decimated ``<token>_face1000.obj`` is a fragmented soup (hundreds of disjoint
+    patches -> visible holes), so we use the dense scan ``<token>.obj`` instead (geometry only,
+    no texture). object_R/T are calibrated against the decimated mesh's centroid, so we centre
+    the dense mesh on THAT centroid to keep the poses aligned."""
     import trimesh
 
     base = cache_dir / token
-    raw = base / f"{token}_face1000.obj"
-    if not raw.exists():
-        raw = base / f"{token}.obj"
-    if not raw.exists():
+    out = base / f"{token}_clean.obj"
+    if out.exists():
+        return out
+    full, face = base / f"{token}.obj", base / f"{token}_face1000.obj"
+    if not full.exists():
         tar = Path(scaned_dir) / f"{token}.tar"
         if not tar.exists():
             raise FileNotFoundError(f"HODome object archive not found: {tar}")
         cache_dir.mkdir(parents=True, exist_ok=True)
         with tarfile.open(tar) as t:
             t.extractall(cache_dir)
-        raw = base / f"{token}_face1000.obj"
-        if not raw.exists():
-            raw = base / f"{token}.obj"
-    centred = raw.with_name(raw.stem + "_centered.obj")
-    if not centred.exists():
-        m = trimesh.load(str(raw), force="mesh", process=False)
-        v = np.asarray(m.vertices, np.float64)
-        m.vertices = v - v.mean(0)
-        m.export(str(centred))
-    return centred
+    src = full if full.exists() else face                       # dense scan preferred
+    ref = face if face.exists() else full                       # pose-calibration centroid
+    centroid = np.asarray(trimesh.load(str(ref), force="mesh", process=False).vertices,
+                          np.float64).mean(0)
+    m = trimesh.load(str(src), force="mesh", process=True, skip_materials=True)
+    m.merge_vertices()
+    m.vertices = np.asarray(m.vertices, np.float64) - centroid
+    base.mkdir(parents=True, exist_ok=True)
+    m.export(str(out))
+    return out
 
 
 @register_loader("hodome")

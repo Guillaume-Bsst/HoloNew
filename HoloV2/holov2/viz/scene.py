@@ -16,18 +16,10 @@ import time
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 
 from ..contracts import RobotSpec, SceneSpec
 from ..prepare.load import load
 from ..prepare.load.smpl import build_body_model
-
-
-def _pose_object(verts_local: np.ndarray, pose: np.ndarray) -> np.ndarray:
-    """Rigid-transform object verts by a (7,) world pose [x,y,z,qw,qx,qy,qz]."""
-    pos, quat_wxyz = pose[:3], pose[3:]
-    rot = R.from_quat(quat_wxyz[[1, 2, 3, 0]]).as_matrix()
-    return verts_local @ rot.T + pos
 
 
 def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_frames: int = 200) -> None:
@@ -59,13 +51,14 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
             verts[i] = body.posed_vertices(raw.smpl_params, t)
             bones[i] = body.bone_transforms(raw.smpl_params, t)[1]
 
-    # object meshes (local) + posed world verts per shown frame
-    obj_meshes = []  # (faces, world_verts (F, Vo, 3))
+    # objects are rigid: keep local geometry + per-frame world pose; update the transform per
+    # frame (not the vertices) so even a dense mesh stays cheap to play back.
+    obj_meshes = []  # (verts_local, faces, poses_frames (F, 7))
     for k in range(len(raw.object_poses_raw)):
         m = trimesh.load(str(raw.object_mesh_paths[k]), force="mesh", process=False)
         vl, fo = np.asarray(m.vertices, np.float32), np.asarray(m.faces, np.int64)
-        wv = np.stack([_pose_object(vl, raw.object_poses_raw[k][t]) for t in frames]).astype(np.float32)
-        obj_meshes.append((fo, wv))
+        poses = np.asarray(raw.object_poses_raw[k], np.float32)[frames]
+        obj_meshes.append((vl, fo, poses))
 
     # skeleton segments (parent -> child)
     bone_pairs = [(int(parents[j]), j) for j in range(body.n_bones) if parents[j] >= 0] if body else []
@@ -86,6 +79,8 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
 
     hj = srv.scene.add_point_cloud("/joints", demo_j[0], np.tile([[40, 200, 60]], (n_demo, 1)).astype(np.uint8),
                                    point_size=0.025)
+    hobj = [srv.scene.add_mesh_simple(f"/obj{k}", vl, fo, color=(255, 140, 0), opacity=1.0, side="double")
+            for k, (vl, fo, _) in enumerate(obj_meshes)]
 
     def render(_=None):
         f = int(sld.value)
@@ -104,13 +99,11 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
         else:
             srv.scene.add_line_segments("/skeleton", np.zeros((1, 2, 3), np.float32),
                                         np.zeros((1, 2, 3), np.uint8), line_width=0.1)
-        for k, (fo, wv) in enumerate(obj_meshes):
-            if show_obj.value:
-                srv.scene.add_mesh_simple(f"/obj{k}", wv[f], fo, color=(255, 140, 0),
-                                          opacity=1.0, side="double")
-            else:
-                srv.scene.add_mesh_simple(f"/obj{k}", np.zeros((3, 3), np.float32),
-                                          np.array([[0, 1, 2]]), opacity=0.0)
+        for k, (_, _, poses) in enumerate(obj_meshes):
+            h = hobj[k]
+            h.position = poses[f][:3]
+            h.wxyz = poses[f][3:]
+            h.visible = show_obj.value
         info.content = f"**frame {frames[f]}** ({f + 1}/{F})"
 
     for h in (sld, show_mesh, show_joints, show_bones, show_obj):
