@@ -21,6 +21,7 @@ from scipy.spatial.transform import Rotation as R
 
 from ...contracts import RawMotion, SceneSpec, SmplParams
 from .base import register_loader
+from .smpl import build_body_model
 
 # SMPL-X body joints 0..21 (the "demo joints" used by the style treatment).
 SMPLX_BODY_JOINTS: tuple[str, ...] = (
@@ -33,40 +34,12 @@ SMPLX_BODY_JOINTS: tuple[str, ...] = (
 # a reflection (det -1) that mirrors the body and flips face winding; the rotation preserves it.
 _YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 _MESH_CACHE = Path(tempfile.gettempdir()) / "holov2_hodome_meshes"
-
-_SMPLX_COMPONENTS = ("global_orient", "body_pose", "transl", "left_hand_pose", "right_hand_pose",
-                     "jaw_pose", "leye_pose", "reye_pose", "expression")
-
-
-def _to_zup(points: np.ndarray) -> np.ndarray:
-    """Rotate (..., 3) points from Y-up to Z-up (row-vector convention)."""
-    return points @ _YUP_TO_ZUP.T
+_N_BODY = 22  # SMPL-X body joints used as the demo joints
 
 
 def _betas(d) -> np.ndarray:
     b = np.asarray(d["betas"], np.float32)
     return b[0] if b.ndim > 1 else b
-
-
-def _fk_joints_zup(d, model_dir: Path, chunk: int = 256) -> np.ndarray:
-    """SMPL-X forward -> (T, 22, 3) body joints in the Z-up world (chunked to bound memory)."""
-    import smplx
-    import torch
-
-    comps = {k: np.asarray(d[k], np.float32) for k in _SMPLX_COMPONENTS}
-    T = comps["body_pose"].shape[0]
-    betas = _betas(d)[None].astype(np.float32)
-    model = smplx.SMPLX(model_path=str(model_dir), gender=str(d["gender"]), ext="npz",
-                        num_betas=betas.shape[1],
-                        num_expression_coeffs=comps["expression"].shape[-1], use_pca=False)
-    joints = np.empty((T, 22, 3), np.float32)
-    for s in range(0, T, chunk):
-        e = min(s + chunk, T)
-        kw = {k: torch.from_numpy(comps[k][s:e]) for k in _SMPLX_COMPONENTS}
-        with torch.no_grad():
-            out = model(betas=torch.from_numpy(np.repeat(betas, e - s, 0)), **kw)
-        joints[s:e] = out.joints.detach().numpy()[:, :22, :]
-    return _to_zup(joints).astype(np.float32)
 
 
 def _smpl_params(d) -> SmplParams:
@@ -138,9 +111,11 @@ class HodomeLoader:
         npz = Path(spec.motion_path)
         d = np.load(str(npz), allow_pickle=True)
 
-        joints = _fk_joints_zup(d, Path(spec.smpl_model_dir))       # (T,22,3) Z-up
         params = _smpl_params(d)
-        T = joints.shape[0]
+        body = build_body_model(params, Path(spec.smpl_model_dir))
+        T = params.n_frames
+        # Demo joints = the first 22 SMPL-X bone positions (Z-up), via the body model's FK.
+        joints = np.stack([body.bone_transforms(params, t)[1][:_N_BODY] for t in range(T)]).astype(np.float32)
 
         root = npz.parent.parent                                    # HODome release root
         obj_npz = root / "object" / f"{npz.stem}.npz"
