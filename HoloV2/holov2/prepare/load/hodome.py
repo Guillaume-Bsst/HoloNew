@@ -21,14 +21,7 @@ from scipy.spatial.transform import Rotation as R
 
 from ...contracts import RawMotion, SceneSpec, SmplParams
 from .base import register_loader
-from .smpl import build_body_model
-
-# SMPL-X body joints 0..21 (the "demo joints" used by the style treatment).
-SMPLX_BODY_JOINTS: tuple[str, ...] = (
-    "Pelvis", "L_Hip", "R_Hip", "Spine1", "L_Knee", "R_Knee", "Spine2", "L_Ankle", "R_Ankle",
-    "Spine3", "L_Foot", "R_Foot", "Neck", "L_Collar", "R_Collar", "Head", "L_Shoulder",
-    "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist",
-)
+from .smpl import SMPLX_BODY_JOINTS, build_body_model
 
 # Y-up -> Z-up as a proper rotation Rx(+90deg): (x,y,z) -> (x,-z,y). A bare y<->z axis swap is
 # a reflection (det -1) that mirrors the body and flips face winding; the rotation preserves it.

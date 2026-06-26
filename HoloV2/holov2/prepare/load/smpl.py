@@ -29,6 +29,44 @@ _SMPLX_AA_N = {"global_orient": 1, "body_pose": 21, "jaw_pose": 1, "leye_pose": 
                "reye_pose": 1, "left_hand_pose": 15, "right_hand_pose": 15}
 _N_BONES = 55
 
+# SMPL-X body joints 0..21 — the "demo joints" used by the style treatment (shared by loaders).
+SMPLX_BODY_JOINTS: tuple[str, ...] = (
+    "Pelvis", "L_Hip", "R_Hip", "Spine1", "L_Knee", "R_Knee", "Spine2", "L_Ankle", "R_Ankle",
+    "Spine3", "L_Foot", "R_Foot", "Neck", "L_Collar", "R_Collar", "Head", "L_Shoulder",
+    "R_Shoulder", "L_Elbow", "R_Elbow", "L_Wrist", "R_Wrist",
+)
+
+
+def _quat_to_R(quats: np.ndarray, order: str = "wxyz") -> np.ndarray:
+    """(..., 4) quaternions -> (..., 3, 3) rotation matrices."""
+    q = np.asarray(quats, np.float64)
+    if order == "wxyz":
+        q = q[..., [1, 2, 3, 0]]
+    flat = R.from_quat(q.reshape(-1, 4)).as_matrix()
+    return flat.reshape(q.shape[:-1] + (3, 3))
+
+
+def local_params_from_global(quats_zup: np.ndarray, root_pos_zup: np.ndarray, parents: np.ndarray,
+                             j_rest0: np.ndarray, order: str = "wxyz"):
+    """Turn per-joint GLOBAL orientations (Z-up) into the local SMPL params a ``BodyModel``
+    expects. Local relative rotations are world-frame-invariant, so only the ROOT is rebased to
+    the model's native Y-up frame (Q^-1); body joints stay as parent-relative locals. ``transl``
+    places the native rest pelvis at the world root after the body model's Q (Y->Z).
+
+    Returns ``(global_orient (T,3), body_pose (T,(J-1)*3), transl (T,3))`` (axis-angle, float32).
+    """
+    rg = _quat_to_R(quats_zup, order)                                  # (T, J, 3, 3) Z-up global
+    qt = _YUP_TO_ZUP.T
+    go_native = np.einsum("ij,tjk->tik", qt, rg[:, 0])                 # Q^-1 @ R_root
+    global_orient = R.from_matrix(go_native).as_rotvec().astype(np.float32)
+    locals_ = []
+    for j in range(1, len(parents)):
+        rl = np.einsum("tij,tjk->tik", rg[:, parents[j]].transpose(0, 2, 1), rg[:, j])
+        locals_.append(R.from_matrix(rl).as_rotvec())
+    body_pose = np.concatenate(locals_, axis=1).astype(np.float32)     # (T, (J-1)*3)
+    transl = (np.asarray(root_pos_zup, np.float64) @ _YUP_TO_ZUP - j_rest0).astype(np.float32)
+    return global_orient, body_pose, transl
+
 
 def _axis_angle_55(p: SmplParams, t: int) -> np.ndarray:
     """(55, 3) local axis-angle for frame ``t`` (face/eye default to zero if absent)."""
@@ -89,6 +127,11 @@ class SmplBody:
     @property
     def n_bones(self) -> int:
         return _N_BONES
+
+    @property
+    def rest_joints(self) -> np.ndarray:
+        """(J_bones, 3) rest joint positions in the model's NATIVE frame (for reconstruction)."""
+        return self._j_rest
 
     def rest_vertices(self, params: SmplParams) -> np.ndarray:
         """(V, 3) rest-pose vertices in the model's NATIVE frame (for cloud sampling)."""
