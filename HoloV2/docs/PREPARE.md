@@ -98,7 +98,7 @@ holov2/
       mesh.py              chemin -> (verts, faces) local (trimesh ; poses ajoutées à l'assemblage scène)
       robot.py             RobotSpec -> RobotModel (FK / surface rest G1)
     # --- les 3 LIVRABLES (build-once) ---
-    calibration/         grounding ROBOT-FREE per-entity : human_stature + human_offset (foot-joint percentile) + 1 offset/objet, root
+    calibration/         grounding ROBOT-FREE : human_stature + human_offset (foot-joint pct) + object_offset (objets partagé), root
     sdf/                 meshes objets/terrain -> SDF (caché) ; sol plat -> SDF de plan (build_plane_sdf, non caché)
     point_cloud/         NUAGES + correspondance
       sampling.py          SurfaceSampling (tri_idx,bary,sampling_id) — échantillonnage canonique PARTAGÉ

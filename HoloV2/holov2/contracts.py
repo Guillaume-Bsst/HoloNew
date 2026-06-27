@@ -130,7 +130,9 @@ class SceneSpec:
 # finalised when each builder lands.
 @dataclass(frozen=True)
 class CalibrationConfig:
-    mat_height: float = 0.1          # tolerated mat height when grounding feet
+    foot_percentile: float = 50.0    # human floor = this percentile of the lower foot-joint height
+                                     # over the clip (50 = median; targets the resting foot, robust
+                                     # to the SMPL toe penetration a min/low-percentile would chase)
 
 
 @dataclass(frozen=True)
@@ -238,15 +240,18 @@ class Calibration:
     is a (human, robot) quantity owned and applied by the correspondence + transport layer (where
     both bodies meet), composed from ``human_stature`` and the robot height.
 
-    Single-human, multi-object: ONE ``human_stature`` + a SEPARATE floor offset per entity. The
-    human sole and each object can sit at different heights / be placed independently in the raw
-    capture (e.g. the human floats while the object already rests on the floor), so each entity is
-    grounded by its OWN z-shift rather than one shared scene shift. Offline asset, NOT a geometry
-    cache: scoped to (subject, take)."""
+    Single-human, multi-object: ONE ``human_stature`` + the human and the objects each grounded by
+    their OWN z-shift (the human may float while the objects already rest on the floor, so one shared
+    scene shift would push them through it). ``human_offset`` grounds the human (its feet);
+    ``object_offset`` is a SINGLE shift shared by ALL objects (grounds the lowest-reaching object just
+    above the floor, keeping inter-object geometry). Offline asset, NOT a geometry cache: (subject, take).
+
+    TODO: a finer per-object / inter-object calibration could ground each object and jointly optimise
+    the object<->object & object<->floor contacts (then ``object_offset`` -> per-object offsets)."""
 
     human_stature: float                 # subject rest stature (m), betas-FK — feeds scale = robot_h / stature
-    human_offset: float                  # z-shift grounding the human (sole -> floor)
-    object_offsets: tuple[float, ...]    # z-shift grounding each object, aligned with the object order
+    human_offset: float                  # z-shift grounding the human (feet -> floor)
+    object_offset: float                 # z-shift shared by ALL objects (lowest-reaching object -> ~floor)
     root_frame: np.ndarray               # (4, 4) world transform framing the root
 
 

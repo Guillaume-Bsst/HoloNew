@@ -1,7 +1,8 @@
 """prepare/calibration — grounds the whole scene (human + objects) and characterises the subject.
 
-Produces the per-(subject, take) ``Calibration`` (``contracts.Calibration``): three scene-level
-parameters, computed offline once and cached. ROBOT-FREE by design — the human->robot scale is a
+Produces the per-(subject, take) ``Calibration`` (``contracts.Calibration``): a subject stature, a
+human grounding offset, a shared object grounding offset and a root frame — computed offline once
+and cached. ROBOT-FREE by design — the human->robot scale is a
 (human, robot) quantity, owned and applied by the correspondence + transport layer (the module
 whose job IS the human<->robot pairing, where both surfaces meet); calibration only supplies the
 robot-free subject ``human_stature`` it composes with the robot height.
@@ -10,13 +11,18 @@ robot-free subject ``human_stature`` it composes with the robot height.
                         rest mesh). The REAL subject's size — feeds ``scale = robot_height / stature``
                         downstream. Uniform across datasets: every parametric source has a SMPL-X
                         ``BodyModel``, so there is no per-dataset stature path.
-  - ``human_offset``  = world z-shift resting the human SOLE on z=0 (median over sampled frames of
-                        the lowest posed vertex, robust to crouch / airborne outliers).
-  - ``object_offsets``= world z-shift PER object, grounding each one independently of the human
-                        (single-human / multi-object): an object may already rest on the floor while
-                        the human floats, so a shared scene shift would push it through the floor.
-                        PROVISIONAL: 0 = keep the captured pose (correct where objects are already
-                        grounded, e.g. OMOMO); the per-object computation is still being designed.
+  - ``human_offset``  = world z-shift grounding the human. The ``CalibrationConfig.foot_percentile``
+                        percentile (default 50 = median) of the lower mocap FOOT-JOINT height over
+                        the clip. The foot joint (not the SMPL sole) is used on purpose: the SMPL
+                        foot frequently penetrates BELOW the rest level during toe articulation, so
+                        chasing the lowest surface point over-lifts the human; the percentile of the
+                        joint targets the RESTING/contact level. Mocap demo joints => no SMPL forward
+                        and one path for parametric AND positions-only sources.
+  - ``object_offset`` = ONE world z-shift shared by ALL objects: grounds the lowest-reaching object
+                        (the one that touches the floor) just above z=0, via a low percentile of the
+                        posed object points. Shared (not per-object) so inter-object geometry is kept.
+                        TODO: a finer per-object / inter-object calibration could optimise the
+                        object<->object & object<->floor contacts jointly.
   - ``root_frame``    = a (4,4) framing of the root. Identity for now (provisional hook; the V1
                         kept XY raw). Generalise only when a non-trivial framing is actually needed.
 
@@ -24,15 +30,15 @@ Decisions (confirmed): the human->robot scale is NOT computed here (calibration 
 cacheable per subject); the scene stays at HUMAN scale, where the interaction pipeline lives (human
 cloud + object are size-consistent, and the SMPL->robot transport absorbs the size difference).
 Grounding is ALWAYS recomputed (uniform): an already-grounded clip (SFU) simply yields
-``floor_offset ~= 0``.
+``human_offset ~= 0``.
 
 Dataset-agnostic by construction: every difference between datasets lives in the DATA the loader
-already produced (``smpl_params`` present -> surface refinement, else toe-joint fallback;
-``betas`` -> stature; ``joint_names`` -> toe indices; empty object list -> nothing to ground),
+already produced (``smpl_params`` present -> betas-FK stature, else the default; ``joint_names`` ->
+foot-joint indices for the human offset; object meshes -> shared object offset, empty list -> 0),
 never in a branch here.
 
-Ported from HoloNew: ``holosoma/preprocess.ground_to_floor``,
-``contact/smplx_field.robust_floor_offset``, ``data_loaders/omomo.omomo_height_from_betas``.
+Ported from HoloNew: ``holosoma/preprocess.ground_to_floor`` (foot-joint grounding),
+``data_loaders/omomo.omomo_height_from_betas`` (betas-FK stature).
 """
 from __future__ import annotations
 
@@ -40,6 +46,7 @@ import hashlib
 from pathlib import Path
 
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 from ...contracts import BodyModel, Calibration, CalibrationConfig, RawMotion, SmplParams
 
@@ -47,9 +54,10 @@ from ...contracts import BodyModel, Calibration, CalibrationConfig, RawMotion, S
 # default human height.
 DEFAULT_HUMAN_HEIGHT = 1.78
 
-# How many frames to sample for the robust floor offset. The lowest posed VERTEX per frame needs a
-# full SMPL-X forward, so we subsample the clip; 40 is plenty for a robust median (V1 used the same).
-_FLOOR_N_SAMPLES = 40
+# Percentile of the lowest posed object point used as the shared object floor offset: ~the "lowest
+# reach" (when the floor-resting object is set down), robust to a stray low vertex / frame. Not a
+# config knob (unlike the foot): the spec is simply "the floor-touching object just above the floor".
+_OBJECT_FLOOR_PCT = 1.0
 
 
 # =============================================================================
@@ -64,39 +72,48 @@ def human_stature(body: BodyModel, params: SmplParams) -> float:
     return float(rv[:, 1].max() - rv[:, 1].min())
 
 
-def toe_ground_offset(joint_pos: np.ndarray, toe_idx: list[int], mat_height: float) -> float:
-    """Coarse z-drop from the demo TOE joints (the non-parametric fallback — no body mesh to pose).
+def foot_floor_offset(joint_pos: np.ndarray, foot_idx: list[int], percentile: float) -> float:
+    """Human floor offset = ``percentile`` of the lower mocap FOOT-JOINT height over the clip.
 
-    Lowest toe z over the whole clip rests on z=0; if it already sits a full ``mat_height`` above
-    the floor the subject is standing on a mat, so we keep them on the mat top instead of shoving
-    them ``mat_height`` into a phantom sub-mat floor. Returns the value to SUBTRACT from world z.
-    Mirrors ``holosoma/preprocess.ground_to_floor``."""
-    z_min = float(np.asarray(joint_pos)[:, toe_idx, 2].min())
-    if z_min >= mat_height:
-        z_min -= mat_height
-    return z_min
-
-
-def sole_floor_offset(body: BodyModel, params: SmplParams, mat_height: float,
-                      contact_margin: float = 0.0, n_samples: int = _FLOOR_N_SAMPLES) -> float:
-    """Robust z-drop resting the human SOLE on z=0, from the posed SMPL surface (deterministic FK).
-
-    Each sampled frame contributes the lowest posed VERTEX z (the skin sole, a few cm below the toe
-    JOINT); the median over frames centres the nearly-stationary planted feet while staying robust
-    to a deep-crouch / airborne frame. ``contact_margin`` biases the result so the foot ends a hair
-    BELOW z=0 (a small penetration reads as solid contact, preferable to floating). The ``mat_height``
-    rule matches ``toe_ground_offset``. Returns the value to SUBTRACT from world z.
-    Mirrors ``contact/smplx_field.robust_floor_offset`` (applied to the raw posed surface)."""
-    T = params.n_frames
-    idx = np.unique(np.linspace(0, T - 1, min(T, n_samples)).astype(int))
-    mins = np.array([float(np.asarray(body.posed_vertices(params, t))[:, 2].min()) for t in idx])
-    sole = float(np.median(mins))
-    if sole >= mat_height:
-        sole -= mat_height
-    return sole + float(contact_margin)
+    Per frame, the lower of the foot joints gives the foot height; the percentile over frames targets
+    the RESTING/contact level. The mocap foot joint is used (not the SMPL sole): the SMPL foot
+    frequently penetrates below the rest level during toe articulation, so the lowest surface point
+    sits below the floor and chasing it (a min / low percentile) over-lifts the human. ``percentile``
+    = 50 is the median; higher pushes the human down (toward the planted level), lower lifts it.
+    Validated visually on HODome / OMOMO / SFU. Returns the value to SUBTRACT from world z."""
+    z = np.asarray(joint_pos)[:, foot_idx, 2].min(axis=1)     # (T,) lower foot per frame
+    return float(np.percentile(z, percentile))
 
 
-def _toe_indices(joint_names: tuple[str, ...]) -> list[int]:
+def object_floor_offset(object_verts: list[np.ndarray], object_poses: list[np.ndarray],
+                        percentile: float, vert_cap: int = 4000, frame_cap: int = 150) -> float:
+    """ONE shared floor offset for ALL objects = ``percentile`` of the lowest posed object point over
+    the clip, pooled across objects. Grounds the object that touches the floor to ~z=0 (a low
+    percentile = its "lowest reach", i.e. when it is set down); the SAME offset is then applied to
+    every object so inter-object geometry is preserved. Returns the value to SUBTRACT from world z,
+    or 0.0 if there are no objects.
+
+    TODO: a finer per-object / inter-object calibration could ground each object and jointly optimise
+    the object<->object and object<->floor contacts; for now one shared offset (floor-touching object
+    just above the floor) is enough. ``object_verts``: list of (V,3) local; ``object_poses``: list of
+    (T,7) pos-first wxyz. Verts/frames are subsampled (caps) to bound cost on dense scans."""
+    if not object_verts:
+        return 0.0
+    rng = np.random.default_rng(0)
+    lows = []
+    for verts, poses in zip(object_verts, object_poses):
+        v = np.asarray(verts, np.float64)
+        if v.shape[0] > vert_cap:
+            v = v[rng.choice(v.shape[0], vert_cap, replace=False)]
+        poses = np.asarray(poses, np.float64)
+        fidx = np.unique(np.linspace(0, poses.shape[0] - 1, min(poses.shape[0], frame_cap)).astype(int))
+        rz = R.from_quat(poses[fidx][:, [4, 5, 6, 3]]).as_matrix()[:, 2, :]   # (F,3) world-z row, wxyz->xyzw
+        world_z = np.einsum("fj,vj->fv", rz, v) + poses[fidx, 2][:, None]     # (F, V) world z of each vertex
+        lows.append(world_z.min(axis=1))                                      # (F,) lowest object point/frame
+    return float(np.percentile(np.concatenate(lows), percentile))
+
+
+def _foot_indices(joint_names: tuple[str, ...]) -> list[int]:
     """Indices of the foot joints (case-insensitive 'foot', else 'ankle'). Raises if neither."""
     feet = [i for i, n in enumerate(joint_names) if "foot" in n.lower()]
     if not feet:
@@ -116,64 +133,64 @@ class CalibrationBuilder:
     in a ``prof.span("calibration")``."""
 
     def cache_key(self, config: CalibrationConfig, raw: RawMotion) -> str:
-        """Stable hash of everything the calibration depends on: the calibration config and the
-        subject + motion (the params that drive the stature and the floor offset; the demo joints
-        for the non-parametric fallback). No robot term — calibration is robot-free."""
+        """Stable hash of everything the calibration depends on: ``foot_percentile`` + the demo
+        joints (foot-joint floor offset), the subject shape (betas/gender -> stature), and the object
+        meshes + poses (the shared object floor offset). No robot term — calibration is robot-free."""
         h = hashlib.sha1()
-        h.update(f"{config.mat_height}".encode())
+        h.update(f"{config.foot_percentile}".encode())
+        h.update(np.ascontiguousarray(raw.joint_pos, np.float32).tobytes())   # drives the foot offset
         p = raw.smpl_params
-        if p is not None:
+        if p is not None:                                                     # drives the stature
             h.update(str(p.gender).encode())
-            for arr in (p.betas, p.global_orient, p.body_pose, p.left_hand_pose,
-                        p.right_hand_pose, p.transl):
-                h.update(np.ascontiguousarray(arr, np.float32).tobytes())
-        else:
-            h.update("|".join(raw.joint_names).encode())
-            h.update(np.ascontiguousarray(raw.joint_pos, np.float32).tobytes())
+            h.update(np.ascontiguousarray(p.betas, np.float32).tobytes())
+        for path, pose in zip(raw.object_mesh_paths, raw.object_poses_raw):   # drive the object offset
+            h.update(str(path).encode())
+            h.update(np.ascontiguousarray(pose, np.float32).tobytes())
         return h.hexdigest()
 
     def build(self, config: CalibrationConfig, raw: RawMotion,
               body: BodyModel | None = None, smpl_model_dir: Path | None = None) -> Calibration:
-        """Compute the ``Calibration``. For a parametric source, reuse ``body`` if supplied, else
-        build it from ``raw.smpl_params`` + ``smpl_model_dir`` (one of the two is required — the
-        model dir lives on ``SceneSpec``, not ``RawMotion``). A positions-only clip needs neither:
-        it falls back to toe-joint grounding and the default stature."""
+        """Compute the ``Calibration``. The floor offset is mocap-joint based (no body needed); the
+        ``body`` is used only for the betas-FK STATURE of a parametric source — reuse it if supplied,
+        else build it from ``raw.smpl_params`` + ``smpl_model_dir`` (one is required; the model dir
+        lives on ``SceneSpec``, not ``RawMotion``). A positions-only clip uses the default stature."""
         if raw.is_parametric and body is None:
             if smpl_model_dir is None:
                 raise ValueError("a parametric scene needs a BodyModel or smpl_model_dir to "
-                                 "compute the stature and the surface floor offset")
+                                 "compute the betas-FK stature")
             from ..load.smpl import build_body_model
             body = build_body_model(raw.smpl_params, smpl_model_dir)
 
         # Stature: betas-FK from the real subject when parametric; the default otherwise.
         stature = human_stature(body, raw.smpl_params) if body is not None else DEFAULT_HUMAN_HEIGHT
 
-        # Human floor offset: robust surface sole when parametric, else the coarse toe-joint drop.
-        if body is not None:
-            human = sole_floor_offset(body, raw.smpl_params, config.mat_height)
-        else:
-            human = toe_ground_offset(raw.joint_pos, _toe_indices(raw.joint_names), config.mat_height)
+        # Human floor offset: a percentile of the lower foot-joint height (mocap demo joints).
+        human = foot_floor_offset(raw.joint_pos, _foot_indices(raw.joint_names), config.foot_percentile)
 
-        # One floor offset PER object, grounded independently of the human. PROVISIONAL: 0 keeps the
-        # object's captured pose (correct where it already rests on the floor, e.g. OMOMO); the real
-        # per-object computation is still being designed (see Calibration docstring).
-        object_offsets = (0.0,) * len(raw.object_poses_raw)
+        # Shared object floor offset: ground the lowest-reaching object just above z=0 (the floor it
+        # touches), applied to ALL objects so inter-object geometry is preserved. Needs the meshes.
+        if raw.object_mesh_paths:
+            from ..load.mesh import load_mesh
+            obj_verts = [load_mesh(p)[0] for p in raw.object_mesh_paths]
+            object_offset = object_floor_offset(obj_verts, list(raw.object_poses_raw), _OBJECT_FLOOR_PCT)
+        else:
+            object_offset = 0.0
 
         return Calibration(human_stature=stature, human_offset=human,
-                           object_offsets=object_offsets, root_frame=np.eye(4))
+                           object_offset=object_offset, root_frame=np.eye(4))
 
     def save(self, calib: Calibration, path: Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         np.savez(str(path), human_stature=np.float64(calib.human_stature),
                  human_offset=np.float64(calib.human_offset),
-                 object_offsets=np.asarray(calib.object_offsets, np.float64),
+                 object_offset=np.float64(calib.object_offset),
                  root_frame=np.asarray(calib.root_frame, np.float64))
 
     def load(self, path: Path) -> Calibration:
         d = np.load(str(path))
         return Calibration(human_stature=float(d["human_stature"]), human_offset=float(d["human_offset"]),
-                           object_offsets=tuple(np.asarray(d["object_offsets"], np.float64).tolist()),
+                           object_offset=float(d["object_offset"]),
                            root_frame=np.asarray(d["root_frame"], np.float64))
 
 

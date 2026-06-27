@@ -1,10 +1,11 @@
 """Assembles a GroundedScene by applying the Calibration to the loaded motion and object poses.
 
 Grounding is PER ENTITY (single-human / multi-object): the human (demo joints + SMPL params) drops
-by ``Calibration.human_offset``, and each object drops by ITS OWN ``Calibration.object_offsets[i]``
-— the human sole and an object can sit at different heights in the raw capture (e.g. the human
-floats while the object already rests on the floor), so one shared scene shift would push the object
-through the floor. The scene stays at HUMAN scale: the human->robot scale is NOT applied here — it is
+by ``Calibration.human_offset``, and ALL objects drop together by the single ``Calibration.object_offset``
+— the human and the objects can sit at different heights in the raw capture (e.g. the human floats
+while the objects already rest on the floor), so one shared scene shift would push the objects through
+the floor; the objects share one offset so their inter-object geometry is kept. The scene stays at
+HUMAN scale: the human->robot scale is NOT applied here — it is
 a (human, robot) quantity composed downstream by the correspondence/transport layer from
 ``Calibration.human_stature`` and the robot height.
 
@@ -42,14 +43,11 @@ def _ground_params(params: SmplParams, dz: float) -> SmplParams:
 def assemble(raw: RawMotion, calib: Calibration) -> GroundedScene:
     """Apply ``calib`` to a loaded ``RawMotion`` -> ``GroundedScene`` (grounded, human-scale).
 
-    Each object uses its own ``object_offsets`` entry; the count must match the loaded objects."""
-    if len(calib.object_offsets) != len(raw.object_poses_raw):
-        raise ValueError(f"calibration has {len(calib.object_offsets)} object offsets, "
-                         f"motion has {len(raw.object_poses_raw)} objects")
+    The human drops by ``human_offset``; all objects drop together by the shared ``object_offset``."""
     dz = float(calib.human_offset)
     joints = np.asarray(raw.joint_pos, np.float32).copy()
     joints[:, :, 2] -= dz
-    objects = tuple(_drop_object_z(p, off) for p, off in zip(raw.object_poses_raw, calib.object_offsets))
+    objects = tuple(_drop_object_z(p, calib.object_offset) for p in raw.object_poses_raw)
     params = _ground_params(raw.smpl_params, dz) if raw.is_parametric else None
     return GroundedScene(
         joint_pos=joints, joint_names=raw.joint_names, object_poses=objects,
