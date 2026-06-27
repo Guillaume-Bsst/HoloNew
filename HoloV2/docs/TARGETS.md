@@ -26,9 +26,11 @@ GroundedScene[f] ─► FramePose(f) = bone (R,t)  +  object (R,t)   [calculé U
 ```
 
 ## 3 fonctions pures, réutilisées partout (homogénéité = anti-spaghetti)
-- `pose_cloud(PointCloud, part_transforms) -> (P,3)` :
-  `Σ_k w_k (R[parts_k] @ offsets_k + t[parts_k])`. MÊME fonction pour humain (K~4, parts=os)
-  et objets (K=1, parts=corps).
+- `pose_cloud(PointCloud, part_rot, part_pos) -> (P,3)` :
+  `Σ_k w_k (R[parts_k] @ offsets_k + t[parts_k])`. `part_rot (J,3,3)` / `part_pos (J,3)` = la transfo
+  monde de chaque part (humain : `BodyModel.bone_transforms` ; objet : sa pose `(R[None],t[None])` ;
+  robot : FK des liens). MÊME fonction pour humain (K~4, parts=os) et objets (K=1, parts=corps).
+  **Implémentée** (`targets/interaction/pointclouds.py`), vectorisée einsum, torch-free.
 - `eval_fields(points, channels, object_poses, margin) -> MultiChannelField` : pour chaque
   `Channel`, transforme les points dans le frame du champ (identité si `object_idx is None`
   = sol, sinon `object_poses[object_idx]`), puis `channel.field.sample_local(...)` -> empile.
@@ -56,7 +58,7 @@ targets/
                        À revoir proprement (quoi/comment) ; placeholder pour l'instant.
                        FramePose -> StyleTargets (mapping articulaire / GMR)
   interaction/
-    pointclouds.py     skeleton FK -> bone transforms ; pose_cloud
+    pointclouds.py     pose_cloud — pose tout nuage (humain K~4 / objet·robot K=1) [FAIT]
     eval.py            eval_fields (sample chaque Channel : SDF trilinéaire — chemin unique, sol plat inclus)
     transport.py       transport (gather via correspondence)
     targets.py         assemble RobotInteractionTargets + EnvironmentInteractionTargets

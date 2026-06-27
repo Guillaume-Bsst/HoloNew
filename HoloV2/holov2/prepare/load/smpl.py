@@ -152,7 +152,9 @@ class SmplBody:
         return self._lbs_weights
 
     def rest_vertices(self, params: SmplParams) -> np.ndarray:
-        """(V, 3) rest-pose vertices in the model's NATIVE frame (for cloud sampling)."""
+        """(V, 3) rest-pose vertices in the model's NATIVE frame (for cloud sampling). Subject-fixed
+        (betas are set at construction), so ``params`` is ignored — kept for ``BodyModel`` conformance
+        (callers may pass ``None``)."""
         return self._rest_verts
 
     def bone_transforms(self, params: SmplParams, t: int) -> tuple[np.ndarray, np.ndarray]:

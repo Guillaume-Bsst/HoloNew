@@ -44,6 +44,18 @@ C'est le SEUL endroit qui connaît viser (effets confinés).
 - statique : ajouté UNE fois (handles gardés).
 - dynamique : mis à jour au slider depuis `FrameTrace` (handles `.points/.colors/.visible`).
 
+## Visualiseurs de debug incrémentaux (par étape)
+
+Avant le gros `viewer.py` (FrameTrace), des viewers viser **focalisés** valident chaque étape tôt —
+mêmes règles (consommateurs purs, viser confiné, toggles par couche) :
+- `viz/scene.py` : étape **load/grounding** (mesh SMPL posé, squelette, objets, sol, debug grounding).
+- `viz/cloud.py` : bake **`point_cloud`** — nuage humain posé par `pose_cloud` (coloré par l'écart de
+  parité vs la surface SMPL pleine) + nuages objets posés en monde (rigides). Runnable
+  `python -m holov2.viz.cloud --motion-path … --model-dir …`.
+
+Ils ne remplacent pas le viewer `FrameTrace` (qui viendra avec `targets/`) ; ce sont des outils de
+debug **par étape**, livrés au fil de l'implémentation.
+
 ## Anti-spaghetti
 - viewer = 1 responsabilité (afficher), 1 méthode par couche, effets confinés ici.
 - lit `FrameTrace` + assets `prepare` via `contracts.py` ; n'appelle aucune logique de calcul

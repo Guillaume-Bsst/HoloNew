@@ -36,6 +36,12 @@ correspondance invalidés.
 `CorrespondenceTable.smpl_sampling_id` — `runner.prepare` l'assert à l'assemblage (sinon
 transport silencieusement faux).
 
+**État actuel** : la correspondance n'est pas reconstruite — elle est **réutilisée** depuis
+`correspondence/corr_neutral.npz` (rebuild OT différé). Ce cache **embarque** l'échantillonnage
+`(tri_idx, bary)` ; `correspondence/load.py` en extrait le `SurfaceSampling`, que le nuage humain
+relit pour rester aligné. La dépendance est donc, pour l'instant, **inversée** (nuage ←
+correspondance) — le garde-fou `sampling_id`↔`smpl_sampling_id` reste identique.
+
 **Déterminisme** : les builders DOIVENT être déterministes (seed fixe partout, OT
 déterministe) — sinon un cache-hit diffère d'un rebuild. Invariant à tester.
 

@@ -98,12 +98,15 @@ holov2/
       mesh.py              chemin -> (verts, faces) local (trimesh ; poses ajoutées à l'assemblage scène)
       robot.py             RobotSpec -> RobotModel (FK / surface rest G1)
     # --- les 3 LIVRABLES (build-once) ---
-    calibration/         grounding ROBOT-FREE per-entity : human_stature + human_offset (sole SMPL) + 1 offset/objet, root
+    calibration/         grounding ROBOT-FREE per-entity : human_stature + human_offset (foot-joint percentile) + 1 offset/objet, root
     sdf/                 meshes objets/terrain -> SDF (caché) ; sol plat -> SDF de plan (build_plane_sdf, non caché)
     point_cloud/         NUAGES + correspondance
-      human.py             surface SMPL -> PointCloud (skinning creux, sampling_id)
-      objects.py           surfaces objets -> PointCloud par objet
-      correspondence/      surfaces SMPL + G1 -> nuage/mapping G1 (smpl_sampling_id) ; clé robot/forme
+      sampling.py          SurfaceSampling (tri_idx,bary,sampling_id) — échantillonnage canonique PARTAGÉ
+      human.py             surface SMPL -> PointCloud (skinning creux K~4) ; HumanCloudBuilder (par sujet)
+      objects.py           surface objet -> PointCloud rigide K=1 ; ObjectCloudBuilder (par géométrie)
+      store.py             (dé)sérialisation .npz du PointCloud (partagée par les 2 builders)
+      correspondence/load.py  corr_neutral.npz -> CorrespondenceTable + SurfaceSampling
+                              (cache RÉUTILISÉ ; rebuild OT humain↔G1 différé)
     scene.py             applique la calibration -> GroundedScene
     runner.py            prepare(scene_spec, config) : load-or-build + assemble ; build_all()
     # sorties : Calibration + SDF(objets/terrain) + PointClouds(+corr) -> GroundedScene + InteractionContext
@@ -127,6 +130,16 @@ les consomme **via leur type** (jamais le code de `prepare/`) et produit `FrameT
 `prepare/`, séparés de la logique online (`interaction/eval`, `transport`) restée
 dans `targets/`. Lien = uniquement le type d'asset (dans `contracts.py`), pas de
 couplage de code.
+
+**Binding nuage humain ↔ correspondance** (subtilité clé). `CorrespondenceTable.smpl_idx`
+indexe l'**ordre des points** du nuage humain. La correspondance est bâtie sur un humain **neutre**
+(template) alors que le nuage runtime est celui du **sujet** ⇒ les deux doivent partager le **même
+échantillonnage** `(tri_idx, bary)` (= `SurfaceSampling`, identité portée par `sampling_id`). Le nuage
+sujet **ne ré-échantillonne donc pas** : il reprend ce `SurfaceSampling` et recalcule seulement son
+skinning (offsets `= rest_point − rest_joint[os]` dans le frame natif — la rotation de repos des os,
+pur `Q`, s'annule). Périmètre actuel : la correspondance est **réutilisée** depuis `corr_neutral.npz`,
+qui **embarque** cet échantillonnage ; `correspondence/load.py` en extrait le `SurfaceSampling`, lu par
+`human.py`. Garde-fou `sampling_id == smpl_sampling_id` asserté au runner (cf. `CACHE.md`).
 
 **Contrat commun des 3 modules offline** :
 ```python
