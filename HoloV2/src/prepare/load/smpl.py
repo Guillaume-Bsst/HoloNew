@@ -35,17 +35,16 @@ SMPLX_BODY_JOINTS: tuple[str, ...] = (
 )
 
 
-def _quat_to_R(quats: np.ndarray, order: str = "wxyz") -> np.ndarray:
-    """(..., 4) quaternions -> (..., 3, 3) rotation matrices."""
+def _quat_to_R(quats: np.ndarray) -> np.ndarray:
+    """(..., 4) wxyz quaternions -> (..., 3, 3) rotation matrices."""
     q = np.asarray(quats, np.float64)
-    if order == "wxyz":
-        q = q[..., [1, 2, 3, 0]]
+    q = q[..., [1, 2, 3, 0]]                                           # wxyz -> xyzw
     flat = R.from_quat(q.reshape(-1, 4)).as_matrix()
     return flat.reshape(q.shape[:-1] + (3, 3))
 
 
 def local_rotvecs_from_global(quats_zup: np.ndarray, root_pos_zup: np.ndarray, parents: np.ndarray,
-                              j_rest0: np.ndarray, order: str = "wxyz"):
+                              j_rest0: np.ndarray):
     """Turn per-joint GLOBAL orientations (Z-up) into the per-joint LOCAL axis-angles + translation
     a ``BodyModel`` expects. Parent-relative rotations are world-frame-invariant, so only the ROOT
     is rebased to the model's native Y-up frame (Q^-1); the rest stay as parent-relative locals.
@@ -55,7 +54,7 @@ def local_rotvecs_from_global(quats_zup: np.ndarray, root_pos_zup: np.ndarray, p
     (``[1:22]`` -> body_pose, hands zero); OMOMO also slices the SMPL-H hand chains into
     left/right_hand_pose. Returns ``(local (T, J, 3), transl (T, 3))`` (axis-angle, float32).
     """
-    rg = _quat_to_R(quats_zup, order)                                  # (T, J, 3, 3) Z-up global
+    rg = _quat_to_R(quats_zup)                                         # (T, J, 3, 3) Z-up global
     n = rg.shape[1]
     local = np.empty((rg.shape[0], n, 3), np.float64)
     local[:, 0] = R.from_matrix(                                       # Q^-1 @ R_root (rebase root)

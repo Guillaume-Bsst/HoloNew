@@ -8,11 +8,13 @@ la LOGIQUE algorithmique, jamais la structure** (voir la carte de portage plus b
 ## Règles d'or (NON négociables)
 
 1. **Dépendances à sens unique, zéro cycle.** Une responsabilité par module. Pas de classe-dieu.
-2. **`src/contracts.py` = source de vérité unique des types de DONNÉES** (artefacts `frozen` qui
-   transitent dans le pipe). On NE duplique JAMAIS une définition ailleurs (docs incluses : on y
-   pointe). Les **knobs de config n'y sont PAS** : ils vivent au TOP du repo, séparés du code, en
-   deux dossiers — `config_types/` (SCHÉMAS, 1 module/étape : `prepare.py` → `PrepareConfig` +
-   sous-configs) et `config_values/` (PRESETS nommés : `prepare_config("default")`).
+2. **`src/contracts/` = source de vérité unique des types de DONNÉES** (package rangé par domaine —
+   protocols/inputs/motion/scene/fields/assets/targets ; `__init__.py` ré-exporte tout, les call-sites
+   `from ..contracts import X` restent inchangés). Artefacts `frozen` qui transitent dans le pipe ; on
+   NE duplique JAMAIS une définition ailleurs (docs incluses : on y pointe). Les **knobs de config n'y
+   sont PAS** : ils vivent au TOP du repo, séparés du code, en deux dossiers — `config_types/`
+   (SCHÉMAS, 1 module/étape : `prepare.py` → `PrepareConfig` + sous-configs) et `config_values/`
+   (FACTORY `default_prepare_config()` — point d'entrée unique où des presets/CLI s'attacheront).
 3. **Cœur pur, effets de bord aux extrémités.** Les ops de calcul ne font ni I/O, ni log, ni
    mutation de leurs inputs ; elles prennent des données et rendent un artefact `frozen`. Disque
    dans `prepare/load`, écran dans `viz/`.
@@ -38,7 +40,7 @@ redupliquer ici**). En bref : `SceneSpec`+`PrepareConfig` → **prepare/** (offl
 
 ## Conventions de code
 
-- **Poids des imports** : `src/contracts.py`, `src/obs.py` = **numpy-only** ; `config_types/` =
+- **Poids des imports** : `src/contracts/`, `src/obs.py` = **numpy-only** ; `config_types/` =
   stdlib-only (dataclasses) — tous légers, importables partout. torch/smplx/trimesh/coal/pinocchio
   **uniquement** dans `src/prepare/load/` et les builders `src/prepare/`. `targets`/`solve`/`viz` ne
   dépendent jamais de torch.
@@ -67,11 +69,11 @@ le python de l'env `holonew` : `…/envs/holonew/bin/python -m pytest tests/ -q`
   (`save`→`load` == `build`). Sinon le cache est faux.
 - **Portage V1** → test de **parité** vs sortie V1 sur une séquence démo (tolérance documentée).
 - **Perf** → pour un chemin chaud, vérifier le timing via `obs.Profile.render()`.
-- Après tout changement de `contracts.py` : `python -m py_compile` **+** un import dans l'env.
+- Après tout changement du package `src/contracts/` : `python -m py_compile` **+** un import dans l'env.
 
 ## Workflow par module (« definition of done »)
 
-1. Le type est dans `contracts.py`.
+1. Le type est dans le package `contracts/`.
 2. Logique = fonction(s) pure(s), sans effet de bord, sans muter les inputs.
 3. Câblée dans l'orchestrateur (`runner`/`pipeline`) avec un `prof.span(...)`.
 4. Test unitaire (+ déterminisme/parité si pertinent).
@@ -114,7 +116,7 @@ Détails : `docs/CACHE.md`.
 
 ## État & feuille de route
 
-Contrats + squelette posés (`contracts.py`/`obs.py` complets ; modules = stubs).
+Contrats + squelette posés (package `contracts/` + `obs.py` complets ; modules = stubs).
 Ordre d'implémentation (dépendances) : **`prepare/load/base.py`** → un loader concret (OMOMO/SFU)
 → `calibration/` → `sdf/` + `point_cloud/` (+ `correspondence`) → `targets/interaction` →
 `targets/style` → `viz/` → `solve/`. À chaque étape : tests + parité V1.

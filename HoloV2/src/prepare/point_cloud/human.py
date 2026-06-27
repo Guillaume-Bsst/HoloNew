@@ -22,7 +22,7 @@ from ...contracts import PointCloud, SmplParams
 from config_types import CloudConfig
 from ..load.smpl import SmplBody
 from .sampling import SurfaceSampling
-from .store import load_cloud, save_cloud
+from .cache import load_cloud, save_cloud
 
 
 # =============================================================================

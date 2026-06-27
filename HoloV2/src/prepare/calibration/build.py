@@ -137,8 +137,8 @@ class CalibrationBuilder:
             h.update(str(p.gender).encode())
             h.update(np.ascontiguousarray(p.betas, np.float32).tobytes())
         for path, pose in zip(raw.object_mesh_paths, raw.object_poses_raw):   # drive the object offset
-            h.update(str(path).encode())
-            h.update(np.ascontiguousarray(pose, np.float32).tobytes())
+            h.update(Path(path).read_bytes())   # mesh BYTES: a mesh that changes at a constant path
+            h.update(np.ascontiguousarray(pose, np.float32).tobytes())        # must change the key
         return h.hexdigest()
 
     def build(self, config: CalibrationConfig, raw: RawMotion,
@@ -173,18 +173,31 @@ class CalibrationBuilder:
                            object_offset=object_offset, root_frame=np.eye(4))
 
     def save(self, calib: Calibration, path: Path) -> None:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez(str(path), human_stature=np.float64(calib.human_stature),
-                 human_offset=np.float64(calib.human_offset),
-                 object_offset=np.float64(calib.object_offset),
-                 root_frame=np.asarray(calib.root_frame, np.float64))
+        return save_calibration(calib, path)
 
     def load(self, path: Path) -> Calibration:
-        d = np.load(str(path))
-        return Calibration(human_stature=float(d["human_stature"]), human_offset=float(d["human_offset"]),
-                           object_offset=float(d["object_offset"]),
-                           root_frame=np.asarray(d["root_frame"], np.float64))
+        return load_calibration(path)
+
+
+# =============================================================================
+# Persistence — save/load co-located (the builder delegates here in one line)
+# =============================================================================
+def save_calibration(calib: Calibration, path: Path) -> None:
+    """Serialise a ``Calibration`` to ``path`` (``np.savez``), creating parent dirs as needed."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(str(path), human_stature=np.float64(calib.human_stature),
+             human_offset=np.float64(calib.human_offset),
+             object_offset=np.float64(calib.object_offset),
+             root_frame=np.asarray(calib.root_frame, np.float64))
+
+
+def load_calibration(path: Path) -> Calibration:
+    """Inverse of ``save_calibration``: load a ``Calibration`` from ``path``."""
+    d = np.load(str(path), allow_pickle=False)
+    return Calibration(human_stature=float(d["human_stature"]), human_offset=float(d["human_offset"]),
+                       object_offset=float(d["object_offset"]),
+                       root_frame=np.asarray(d["root_frame"], np.float64))
 
 
 def build_calibration(raw: RawMotion, config: CalibrationConfig, body: BodyModel | None = None,

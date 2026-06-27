@@ -7,7 +7,7 @@ canonical identity: the correspondence carries it (embedded in ``corr_neutral.np
 cloud REUSES it rather than resampling — it only recomputes the per-subject skinning on top.
 
 ``SurfaceSampling`` is a build-only intermediate (it never reaches ``targets``/``solve``), so it
-lives here, local to ``point_cloud/``, not in ``contracts.py``. ``sampling_id`` is the stable hash
+lives here, local to ``point_cloud/``, not in the ``contracts/`` package. ``sampling_id`` is the stable hash
 stamped onto both the cloud (``PointCloud.sampling_id``) and the table
 (``CorrespondenceTable.smpl_sampling_id``); the runner asserts they match.
 """

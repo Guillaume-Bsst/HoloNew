@@ -87,7 +87,7 @@ def _person_series(smpl_params: np.ndarray, target_id: int):
 
 
 def _objects(object_npz: Path, scanned_dir: Path, cache_dir: Path, override: tuple[Path, ...],
-             keep: tuple[str, ...] | None = None):
+             keep: tuple[str, ...] | None):
     """Objects -> (poses tuple of (T,7), mesh-path tuple). ``keep`` selects a subset by name
     (None => all). Meshes are centred (the frame the poses expect); objects whose mesh is absent
     are dropped; the last seen pose is held on a per-frame dropout."""
@@ -164,7 +164,7 @@ class HoiM3Loader:
         if target_id not in ids:
             raise ValueError(f"person_id {target_id} not among frame-0 people {ids}")
         params, body = build_person_params(smpl_params, target_id, gender, Path(spec.smpl_model_dir))
-        joints = body.bone_positions(params)[:, :22].astype(np.float32)   # demo joints, Z-up
+        joints = body.bone_positions(params)[:, :len(SMPLX_BODY_JOINTS)].astype(np.float32)   # demo joints, Z-up
 
         object_npz = human_npz.with_name(human_npz.name.replace("_human.npz", "_object.npz"))
         scanned_dir = human_npz.parent.parent / "scanned_object"

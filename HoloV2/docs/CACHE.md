@@ -2,8 +2,8 @@
 
 Les sorties de `prepare/` sont **régénérables mais coûteuses** → cachées. Principe central :
 **rien n'est caché « par scène » ; chaque item est caché à la granularité de SES
-dépendances**, et tout dépend d'une **`PrepareConfig`** (schéma `config_types/prepare.py`, presets
-`config_values/prepare.py`). Une scène est
+dépendances**, et tout dépend d'une **`PrepareConfig`** (schéma `config_types/prepare.py`, valeurs via
+la factory `default_prepare_config()` de `config_values/prepare.py`). Une scène est
 **assemblée** à partir d'items cachés individuellement.
 
 ## Ce qui est caché, et de quoi ça dépend (la clé)
@@ -40,7 +40,7 @@ transport silencieusement faux).
 **État** : la correspondance est **reconstruite en V2** par `correspondence/build.py` (OT
 par-segment ; `prepare/load/robot.py` échantillonne la surface robot). Son builder **génère**
 l'échantillonnage `(tri_idx, bary)` sur l'humain neutre et l'**embarque** dans `corr_neutral.npz`
-(régénérable : `python -m src.prepare.point_cloud.correspondence.build`) ; `load.py` le relit et
+(régénérable : `python -m src.prepare.point_cloud.correspondence.build`) ; `cache.py` le relit et
 le nuage humain (sujet) le réutilise. Conforme à la chaîne ci-dessus (correspondance bâtie SUR le
 nuage/sampling) ; garde-fou `sampling_id`↔`smpl_sampling_id` inchangé.
 
@@ -56,7 +56,7 @@ cache_key(item) = hash( sous-config pertinente  +  inputs pertinents  +  clés d
   genre ; robot → nom/urdf.
 - chaque builder ne hashe **que ses dépendances** → changer un param n'invalide **que** les
   items touchés (et leur aval). `PrepareConfig` et ses sous-configs sont `frozen` + hashables.
-- `AssetBuilder.cache_key(config, *inputs) -> str` (protocol dans `contracts.py`).
+- `AssetBuilder.cache_key(config, *inputs) -> str` (protocol dans le package `contracts/`).
 
 ## Layout
 
@@ -68,8 +68,9 @@ HoloV2/cache/
     human/        <subject>_<cfg>.npz
     object/       <geom_hash>_<cfg>.npz
   correspondence/ <robot>_<template>_<cfg>.npz
-  # sidecar <name>.json par item : provenance lisible (config + inputs résolus) pour debug
 ```
+(Un sidecar `<name>.json` de provenance — config + inputs résolus — pourra éventuellement être ajouté
+par le runner plus tard ; rien ne l'écrit aujourd'hui.)
 Gitignore : `cache/**` ignoré sauf le défaut `correspondence/corr_neutral.npz` (committé).
 
 ## Assemblage d'une scène

@@ -45,8 +45,9 @@ def get_loader(dataset: str) -> MotionLoader:
     if dataset not in _LOADERS:
         try:
             importlib.import_module(f"{__package__}.datasets.{dataset}")
-        except ModuleNotFoundError:
-            pass
+        except ModuleNotFoundError as e:
+            if e.name != f"{__package__}.datasets.{dataset}":
+                raise                  # a real dependency is missing inside the loader — surface it
     try:
         cls = _LOADERS[dataset]
     except KeyError:

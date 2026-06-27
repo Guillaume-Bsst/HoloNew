@@ -1,20 +1,20 @@
 # HoloV2 — Architecture (vue d'ensemble)
 
 Carte globale. Détails par étape : `PREPARE.md`, `TARGETS.md`, `VIZ.md`, `CACHE.md`,
-`OBS.md` (et `SOLVE.md`, à venir). Source de vérité des types : `src/contracts.py`.
+`OBS.md` (et `SOLVE.md`, à venir). Source de vérité des types : le package `src/contracts/`.
 
 La **config** est séparée du code ET des données, en deux dossiers au TOP du repo :
 **`config_types/`** = les SCHÉMAS (dataclasses `frozen` ; `prepare.py` → `PrepareConfig` + sous-configs
-`calibration/sdf/cloud/correspondence`) et **`config_values/`** = les PRESETS nommés (valeurs prêtes,
-ex. `prepare_config("default")`). `src/contracts.py` ne porte QUE les données qui transitent ;
-`targets`/`solve` ajouteront leur module dans ces deux dossiers. Les clés du cache build-once
-dérivent de la config (voir `CACHE.md`).
+`calibration/sdf/cloud/correspondence`) et **`config_values/`** = la FACTORY qui en instancie les valeurs
+(`default_prepare_config() -> PrepareConfig` — point d'entrée unique où des presets/CLI s'attacheront
+plus tard). `src/contracts/` ne porte QUE les données qui transitent ; `targets`/`solve` ajouteront
+leur module dans ces deux dossiers. Les clés du cache build-once dérivent de la config (voir `CACHE.md`).
 
 ## Règle d'or : zéro spaghetti
 1. **Dépendances à sens unique**, jamais de cycle.
 2. **Une responsabilité par module.** Pas de classe-dieu (le retargeter V1 fait ~7 métiers
    dans une classe — on explose).
-3. **Contrats typés aux frontières** (dataclasses frozen dans `contracts.py`), pas de
+3. **Contrats typés aux frontières** (dataclasses frozen dans le package `contracts/`), pas de
    `SimpleNamespace`.
 4. **Effets de bord aux extrémités** (`viz/`, futur `app/`). Le cœur est pur, testable sans
    disque ni écran.
@@ -43,19 +43,20 @@ fichiers bruts ─► PREPARE ─► {GroundedScene, InteractionContext, Calibra
 ```
 
 ## Arborescence
-Entrée = `SceneSpec` (data identity) + `PrepareConfig` (knobs ; schéma dans `config_types/`, presets
-dans `config_values/`). Source de vérité des types de DONNÉES : `src/contracts.py`.
+Entrée = `SceneSpec` (data identity) + `PrepareConfig` (knobs ; schéma dans `config_types/`, valeurs
+via la factory de `config_values/`). Source de vérité des types de DONNÉES : le package `src/contracts/`.
 
 ```
 HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · models/ · tests/
   config_types/    SCHÉMAS de config (dataclasses frozen), 1 module/étape : prepare.py (targets/solve à venir)
-  config_values/   PRESETS nommés (valeurs prêtes), 1 module/étape : prepare.py -> prepare_config("default")
+  config_values/   FACTORY des valeurs, 1 module/étape : prepare.py -> default_prepare_config() -> PrepareConfig
   src/             TOUT le code (importé `src.…` ; imports relatifs en interne)
-    contracts.py     contrats de DONNÉES (SceneSpec, RobotSpec, SDF, assets, cibles, …) — pas la config — ne dépend de rien
+    contracts/       contrats de DONNÉES (package par domaine : protocols/inputs/motion/scene/fields/assets/targets ;
+                     __init__ ré-exporte tout) — pas la config — ne dépend de rien
     obs.py           observabilité (Profile/spans), no-op quand off
 
     prepare/         ÉTAPE 1 — offline ; SEUL endroit qui instancie SMPL/meshes/robot     [PREPARE.md]
-      load/            base + 1/dataset (-> RawMotion) · smpl (-> BodyModel) · mesh (-> verts/faces) · robot (-> RobotModel)
+      load/            base · datasets/ (1/dataset -> RawMotion) · smpl (-> BodyModel) · smpl2smplx · mesh (-> verts/faces) · robot (-> RobotModel) · frames
       calibration/     LIVRABLE : grounding scène (humain + objet)
       sdf/             LIVRABLE : SDF objets/terrain/sol (sol plat = SDF de plan exact, non caché)
       point_cloud/     LIVRABLE : nuages (human, objects) + correspondence (SMPL<->G1)
@@ -74,7 +75,7 @@ HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · 
 
 ## Graphe de dépendances (acyclique)
 ```
-contracts.py ◄── prepare/ , targets/ , viz/ , solve/
+contracts/   ◄── prepare/ , targets/ , viz/ , solve/
 prepare/  ──► {GroundedScene, InteractionContext, Calibration}
 targets/  ──► FrameTargets        (consomme les sorties prepare via leur TYPE, jamais le code)
 viz/      ──► (lit FrameTrace + assets prepare)

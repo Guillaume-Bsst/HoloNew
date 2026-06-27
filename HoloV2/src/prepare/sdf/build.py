@@ -114,13 +114,27 @@ class SdfBuilder:
         return build_sdf(vertices, faces, config.spacing, config.margin, name=name)
 
     def save(self, sdf: SDF, path: Path) -> None:
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(str(path), grid=sdf.grid, witness=sdf.witness,
-                            origin=sdf.origin, spacing=np.float64(sdf.spacing),
-                            name=np.array(sdf.name))
+        return save_sdf(sdf, path)
 
     def load(self, path: Path) -> SDF:
-        d = np.load(str(path))
-        return SDF(grid=d["grid"], witness=d["witness"], origin=d["origin"],
-                   spacing=float(d["spacing"]), name=str(d["name"]))
+        return load_sdf(path)
+
+
+# =============================================================================
+# Persistence — save/load co-located (the builder delegates here in one line)
+# =============================================================================
+def save_sdf(sdf: SDF, path: Path) -> None:
+    """Serialise an ``SDF`` to ``path`` (``np.savez_compressed`` — the grids are large), creating
+    parent dirs as needed."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(str(path), grid=sdf.grid, witness=sdf.witness,
+                        origin=sdf.origin, spacing=np.float64(sdf.spacing),
+                        name=np.array(sdf.name))
+
+
+def load_sdf(path: Path) -> SDF:
+    """Inverse of ``save_sdf``: load an ``SDF`` from ``path``."""
+    d = np.load(str(path), allow_pickle=False)
+    return SDF(grid=d["grid"], witness=d["witness"], origin=d["origin"],
+               spacing=float(d["spacing"]), name=str(d["name"]))

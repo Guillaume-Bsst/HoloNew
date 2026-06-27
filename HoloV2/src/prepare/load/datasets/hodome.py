@@ -24,7 +24,6 @@ from ..frames import object_pose_zup
 from ..smpl import SMPLX_BODY_JOINTS, build_body_model
 
 _MESH_CACHE = Path(tempfile.gettempdir()) / "holov2_hodome_meshes"
-_N_BODY = 22  # SMPL-X body joints used as the demo joints
 
 
 def _betas(d) -> np.ndarray:
@@ -92,8 +91,8 @@ class HodomeLoader:
         params = _smpl_params(d)
         body = build_body_model(params, Path(spec.smpl_model_dir))
         T = params.n_frames
-        # Demo joints = the first 22 SMPL-X bone positions (Z-up), via the body model's batched FK.
-        joints = body.bone_positions(params)[:, :_N_BODY].astype(np.float32)
+        # Demo joints = the first SMPL-X body bone positions (Z-up), via the body model's batched FK.
+        joints = body.bone_positions(params)[:, :len(SMPLX_BODY_JOINTS)].astype(np.float32)
 
         root = npz.parent.parent                                    # HODome release root
         obj_npz = root / "object" / f"{npz.stem}.npz"

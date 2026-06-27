@@ -80,39 +80,44 @@ donc être évalué **online que contre un SDF rigide** (sol + objets).
 ## 4. Arborescence
 
 Trois étapes top-level : `prepare/` (offline) → `targets/` (online) → `solve/`.
-Au-dessus, `contracts.py` (types partagés). SMPL/meshes ne sont chargés/instanciés
+Au-dessus, le package `contracts/` (types partagés). SMPL/meshes ne sont chargés/instanciés
 QUE dans `prepare/`.
 
 Entrée : **`SceneSpec`** (data identity : dataset, séquence, `RobotSpec`, model dirs) — distinct
-de **`PrepareConfig`** (knobs d'algo ; schéma dans `config_types/`, presets dans `config_values/`).
-Le loader transforme `SceneSpec` -> `RawMotion`.
+de **`PrepareConfig`** (knobs d'algo ; schéma dans `config_types/`, valeurs via la factory
+`default_prepare_config()` de `config_values/`). Le loader transforme `SceneSpec` -> `RawMotion`.
 
 ```
 src/                    (sous `HoloV2/` ; la config est aux dossiers TOP `config_types/` + `config_values/`)
-  contracts.py          contrats de DONNÉES (assets, cibles, SceneSpec, RobotSpec, SDF…) — pas la config
+  contracts/            contrats de DONNÉES — package par domaine (protocols/inputs/motion/scene/fields/
+                        assets/targets ; __init__ ré-exporte tout) ; assets, cibles, SceneSpec, RobotSpec, SDF… — pas la config
 
   prepare/             ÉTAPE 1 — TOUT l'offline (seul endroit qui instancie SMPL/meshes/robot)
     load/                loaders OFFLINE (sous-package)
       base.py              protocol MotionLoader + registre
-      omomo.py hodome.py …  un loader par dataset -> RawMotion (params + chemins)
+      datasets/            un loader par dataset (omomo, hodome, sfu, hoim3) -> RawMotion (params + chemins)
       smpl.py              SmplParams -> BodyModel (instancie SMPL, FK os)
+      smpl2smplx.py        transfert de paramètres SMPL -> SMPL-X
       mesh.py              chemin -> (verts, faces) local (trimesh ; poses ajoutées à l'assemblage scène)
       robot.py             RobotSpec -> RobotModel (FK yourdfpy, AGNOSTIQUE) + pose de repos correspondance (keyée par robot)
-    # --- les 3 LIVRABLES (build-once) ---
+      frames.py            conventions de frame partagées
+    # --- les 3 LIVRABLES (build-once) ; persistance UNIFORME : save_<asset>/load_<asset> co-localisés, le builder délègue ---
     calibration/         grounding ROBOT-FREE : human_stature + human_offset (foot-joint pct) + object_offset (objets partagé), root
+                         ; expose save_calibration/load_calibration (CalibrationBuilder délègue)
     sdf/                 meshes objets/terrain -> SDF (caché) ; sol plat -> SDF de plan (build_plane_sdf, non caché)
+                         ; expose save_sdf/load_sdf (SdfBuilder délègue)
     point_cloud/         NUAGES + correspondance
       sampling.py          SurfaceSampling (tri_idx,bary,sampling_id) — échantillonnage canonique PARTAGÉ
       human.py             surface SMPL -> PointCloud (skinning creux K~4) ; HumanCloudBuilder (par sujet)
       objects.py           surface objet -> PointCloud rigide K=1 ; ObjectCloudBuilder (par géométrie)
-      store.py             (dé)sérialisation .npz du PointCloud (partagée par les 2 builders)
+      cache.py             save+load .npz du PointCloud (partagé par les 2 builders, qui délèguent)
       correspondence/      humain↔robot par OT par-segment (ROBOT-AGNOSTIQUE)
         segments.py          15 segments + mapping joint/lien->segment + label des samples humains
         robot_surface.py     échantillonne la surface robot (shell watertight) par lien -> RobotSurface
         ot_couple.py         OT entropique par segment (POT) -> smpl_idx (main↔main, pied↔pied)
         build.py             CorrespondenceBuilder : génère sampling + source humaine neutre + OT
-                             -> (CorrespondenceTable, SurfaceSampling) ; main() régénère corr_neutral.npz
-        load.py              relit le .npz -> (CorrespondenceTable, SurfaceSampling)
+                             -> (CorrespondenceTable, SurfaceSampling) ; regenerate() régénère corr_neutral.npz
+        cache.py             save+load .npz de la correspondance, ensemble -> (CorrespondenceTable, SurfaceSampling)
     scene.py             applique la calibration -> GroundedScene
     runner.py            prepare(scene_spec, config) : load-or-build + assemble ; build_all()
     # sorties : Calibration + SDF(objets/terrain) + PointClouds(+corr) -> GroundedScene + InteractionContext
@@ -127,14 +132,14 @@ src/                    (sous `HoloV2/` ; la config est aux dossiers TOP `config
   solve/               ÉTAPE 3 (plus tard)
 ```
 
-**Dépendances (acyclique)** : `contracts.py` ◄ tout le monde · `prepare/` instancie
+**Dépendances (acyclique)** : `contracts/` ◄ tout le monde · `prepare/` instancie
 SMPL/meshes et produit {GroundedScene, InteractionContext, Calibration} · `targets/`
 les consomme **via leur type** (jamais le code de `prepare/`) et produit `FrameTargets` ·
 `solve/` consomme `FrameTargets`. Aucun cycle ; SMPL/meshes jamais touchés hors `prepare/`.
 
 **Note** : les builders d'assets d'interaction (`sdf`, `correspondence`) vivent dans
 `prepare/`, séparés de la logique online (`interaction/eval`, `transport`) restée
-dans `targets/`. Lien = uniquement le type d'asset (dans `contracts.py`), pas de
+dans `targets/`. Lien = uniquement le type d'asset (dans `contracts/`), pas de
 couplage de code.
 
 **Binding nuage humain ↔ correspondance** (subtilité clé). `CorrespondenceTable.smpl_idx`
@@ -145,10 +150,13 @@ sujet **ne ré-échantillonne donc pas** : il reprend ce `SurfaceSampling` et re
 skinning (offsets `= rest_point − rest_joint[os]` dans le frame natif — la rotation de repos des os,
 pur `Q`, s'annule). La correspondance est **construite** par `correspondence/build.py` (OT par-segment
 sur un humain NEUTRE) qui **génère** le `SurfaceSampling` et l'**embarque** dans `corr_neutral.npz` ;
-`correspondence/load.py` le relit, et `human.py` le réutilise sur le mesh du SUJET. Garde-fou
+`correspondence/cache.py` le relit, et `human.py` le réutilise sur le mesh du SUJET. Garde-fou
 `sampling_id == smpl_sampling_id` asserté au runner (cf. `CACHE.md`).
 
-**Contrat commun des 3 modules offline** :
+**Contrat commun des builders offline** — **3 livrables** (calibration, sdf, point_cloud) produits par
+**5 builders** : `CalibrationBuilder`, `SdfBuilder`, `HumanCloudBuilder`, `ObjectCloudBuilder`,
+`CorrespondenceBuilder` (le livrable point_cloud en regroupe 3). Tous suivent le même protocol ; la
+persistance est co-localisée (`save_<asset>`/`load_<asset>` module-level, le builder délègue) :
 ```python
 class AssetBuilder(Protocol):
     def cache_key(self, config, *inputs) -> str: ...  # hash(sous-config pertinente + inputs)
@@ -161,12 +169,13 @@ class AssetBuilder(Protocol):
 
 ## 5. Les classes (contrats)
 
-**Source de vérité unique : `src/contracts.py`** — pas de duplication ici (zéro drift).
+**Source de vérité unique : le package `src/contracts/`** — pas de duplication ici (zéro drift).
 Inventaire :
 
 - **Protocols** : `BodyModel`, `RobotModel`, `AssetBuilder`
 - **entrée (data identity)** : `RobotSpec`, `SceneSpec`. La **config** (`PrepareConfig` + sous-configs)
-  n'est PAS un contrat de données : schémas dans `config_types/`, presets dans `config_values/` (top du repo).
+  n'est PAS un contrat de données : schémas dans `config_types/`, valeurs via la factory
+  `default_prepare_config()` de `config_values/` (top du repo).
 - **load** : `SmplParams` (avec MAINS), `RawMotion` (J_demo)
 - **scène / calib** : `ObjectMesh` (+ `static`), `Calibration`, `GroundedScene` (LÉGER)
 - **champs** : `SDF` (grille, objets/terrain) · `ContactField` · `MultiChannelField` (per-frame

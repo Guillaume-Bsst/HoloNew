@@ -17,7 +17,7 @@ import numpy as np
 
 from ...contracts import PointCloud
 from config_types import CloudConfig
-from .store import load_cloud, save_cloud
+from .cache import load_cloud, save_cloud
 
 
 # =============================================================================
@@ -35,14 +35,14 @@ def sample_object_surface(vertices: np.ndarray, faces: np.ndarray, density: floa
     return np.asarray(pts, np.float64)
 
 
-def assemble_rigid_cloud(points_local: np.ndarray, sampling_id: str = "") -> PointCloud:
+def assemble_rigid_cloud(points_local: np.ndarray) -> PointCloud:
     """Wrap object-local surface points into a K=1 ``PointCloud``: one part (index 0), weight 1, the
-    point itself as the rest-local offset. (Objects carry no correspondence, so ``sampling_id`` is
-    unused for them and left empty.)"""
+    point itself as the rest-local offset. Objects carry no correspondence, so ``sampling_id`` is
+    empty (it only binds the human cloud to its sampling)."""
     pts = np.asarray(points_local, np.float64)
     p = pts.shape[0]
     return PointCloud(parts=np.zeros((p, 1), np.int64), weights=np.ones((p, 1), np.float32),
-                      offsets=pts[:, None, :].astype(np.float32), sampling_id=sampling_id)
+                      offsets=pts[:, None, :].astype(np.float32), sampling_id="")
 
 
 def build_object_cloud(vertices: np.ndarray, faces: np.ndarray, config: CloudConfig) -> PointCloud:

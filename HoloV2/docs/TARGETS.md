@@ -4,7 +4,7 @@ Consomme les sorties de `prepare/` et produit, par frame, le `FrameTargets` que 
 consomme. Per-frame : **seules les transfos changent** ; SDF, nuages-rest et correspondance
 sont statiques (prepare) → coût minimal.
 
-## Seam prepare → targets (via les types de `contracts.py`, jamais le code)
+## Seam prepare → targets (via les types du package `contracts/`, jamais le code)
 - `GroundedScene` : motion calibrée (joints + params + poses objets / frame)
 - `InteractionContext` : assets statiques (channels, human_cloud, object_clouds, correspondence)
 - `Calibration`
@@ -70,12 +70,12 @@ targets/
 - `pipeline` orchestre et calcule l'état partagé (`FramePose`).
 - `style` et `interaction` NE SE CONNAISSENT PAS.
 - flux interaction à sens unique : pose → eval → transport → assemble.
-- tout passe par les types de `contracts.py`.
+- tout passe par les types du package `contracts/`.
 
 ## Seam visualisation
 `pipeline` expose aussi `trace_frame(prepared, f) -> FrameTrace` (mêmes ops pures que
 `process_frame`, intermédiaires gardés) pour `viz/`. `FramePose` et `FrameTrace` sont
-définis dans `contracts.py`. Détail : `docs/VIZ.md`.
+définis dans le package `contracts/`. Détail : `docs/VIZ.md`.
 
 ## À fixer quand on code `targets/`
 - contenu réel de `style/` (l'objectif de style — à concevoir).

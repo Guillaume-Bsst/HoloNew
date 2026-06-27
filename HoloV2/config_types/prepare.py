@@ -1,14 +1,18 @@
 """Config TYPES for the ``prepare`` step — the dataclass SCHEMAS (what knobs exist).
 
-The defaults are sensible inline values; named presets live in ``config_values.prepare``,
-and the data artifacts that flow through the pipeline live in ``src.contracts`` (config is
-kept apart from data on purpose). The sub-configs are grouped by deliverable; ``PrepareConfig``
-composes them and is what ``runner.prepare`` receives. Each builder reads (and hashes into its cache
-key) ONLY its relevant sub-config, so a knob change invalidates only the affected asset.
+The defaults are sensible inline values; the named entry point lives in ``config_values.prepare``
+(``default_prepare_config``), and the data artifacts that flow through the pipeline live in
+``src.contracts`` (config is kept apart from data on purpose). The sub-configs are grouped by
+deliverable; ``PrepareConfig`` composes them and is what ``runner.prepare`` receives. Each builder
+reads (and hashes into its cache key) ONLY its relevant sub-config, so a knob change invalidates
+only the affected asset.
 
 Knob vs constant: a field here is something a user legitimately tunes. Fixed FACTS (frame
 conventions, SMPL joint orders, segment taxonomy, dataset formats, robot rest poses) and internal
 perf caps are NOT knobs — they stay as constants local to the module that owns them.
+
+Each sub-config validates its own ranges in ``__post_init__`` (frozen, so the checks only raise —
+they never mutate), catching a nonsensical knob at construction rather than deep in a builder.
 """
 from __future__ import annotations
 
@@ -27,6 +31,14 @@ class CalibrationConfig:
                                      # to a stray low vertex/frame
     fallback_stature: float = 1.78   # human stature (m) used for a non-parametric source (no betas to FK)
 
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.foot_percentile <= 100.0:
+            raise ValueError(f"foot_percentile must be in [0, 100], got {self.foot_percentile}")
+        if not 0.0 <= self.object_floor_pct <= 100.0:
+            raise ValueError(f"object_floor_pct must be in [0, 100], got {self.object_floor_pct}")
+        if self.fallback_stature <= 0.0:
+            raise ValueError(f"fallback_stature must be > 0, got {self.fallback_stature}")
+
 
 @dataclass(frozen=True)
 class SdfConfig:
@@ -35,6 +47,12 @@ class SdfConfig:
     spacing: float = 0.01            # isotropic voxel size (m) for object/terrain grids
     margin: float = 0.05             # band beyond the surface that is stored
     # (the flat ground is a coarse but EXACT plane SDF — built analytically, no mesh; see build_plane_sdf)
+
+    def __post_init__(self) -> None:
+        if self.spacing <= 0.0:
+            raise ValueError(f"spacing must be > 0, got {self.spacing}")
+        if self.margin <= 0.0:
+            raise ValueError(f"margin must be > 0, got {self.margin}")
 
 
 @dataclass(frozen=True)
@@ -47,14 +65,27 @@ class CloudConfig:
                                      # cloud AND the correspondence; they MUST agree)
     k_influences: int = 4            # K of the sparse LBS-on-cloud skinning
 
+    def __post_init__(self) -> None:
+        if self.human_density <= 0.0:
+            raise ValueError(f"human_density must be > 0, got {self.human_density}")
+        if self.object_density <= 0.0:
+            raise ValueError(f"object_density must be > 0, got {self.object_density}")
+        if self.k_influences < 1:
+            raise ValueError(f"k_influences must be >= 1, got {self.k_influences}")
+
 
 @dataclass(frozen=True)
 class CorrespondenceConfig:
     """Human<->robot surface correspondence by optimal transport (``prepare/point_cloud/correspondence``)."""
 
-    rest_pose: str = "tpose"         # robot rest config used for the OT alignment
     ot_reg: float = 0.05             # OT entropic regularisation
     robot_density: float = 3000.0    # points / m^2 sampled on the robot surface for the OT build
+
+    def __post_init__(self) -> None:
+        if self.ot_reg <= 0.0:
+            raise ValueError(f"ot_reg must be > 0, got {self.ot_reg}")
+        if self.robot_density <= 0.0:
+            raise ValueError(f"robot_density must be > 0, got {self.robot_density}")
 
 
 @dataclass(frozen=True)

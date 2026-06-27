@@ -4,7 +4,7 @@ Robot-agnostic: the robot-specific bits are the URDF (``RobotSpec.urdf_path``) a
 angles (``load/robot.correspondence_rest_angles``); everything here is generic. The asset is the
 pair ``(CorrespondenceTable, SurfaceSampling)`` — the table maps each robot surface point to a human
 sample, and the sampling is the canonical ``(tri_idx, bary)`` the (subject) human cloud must reuse so
-its point order matches ``smpl_idx``. Saved in the ``.npz`` format ``correspondence/load.py`` reads.
+its point order matches ``smpl_idx``. Saved in the ``.npz`` format ``correspondence/cache.py`` reads.
 
 The human side is a NEUTRAL template body (zero betas): the per-segment OT normalises out centre and
 scale, so the coupling is shape-neutral and reused across subjects; only the subject human cloud's
@@ -22,7 +22,7 @@ from config_types import PrepareConfig
 from ...load.robot import correspondence_rest_angles
 from ...load.smpl import SmplBody, rest_body_model
 from ..sampling import SurfaceSampling, sampling_id
-from .load import load_correspondence
+from .cache import load_correspondence, save_correspondence
 from .ot_couple import couple
 from .robot_surface import sample_robot_surface
 from .segments import point_segments
@@ -74,13 +74,14 @@ def build_correspondence(config: PrepareConfig, neutral_body: SmplBody,
 class CorrespondenceBuilder:
     """``AssetBuilder`` producing the ``(CorrespondenceTable, SurfaceSampling)`` for a (robot,
     template). Scoped per (robot, template, sampling/OT config); shape-neutral, so it is reused
-    across subjects. ``load`` is the shared reader (``correspondence/load.load_correspondence``)."""
+    across subjects. ``save``/``load`` delegate to ``correspondence/cache.py`` (the shared format)."""
 
     def cache_key(self, config: PrepareConfig, spec: RobotSpec) -> str:
         h = hashlib.sha1()
         c, cc = config.cloud, config.correspondence
-        h.update(f"{c.human_density}|{c.seed}|{cc.rest_pose}|{cc.ot_reg}|{cc.robot_density}|{spec.name}".encode())
+        h.update(f"{c.human_density}|{c.seed}|{cc.ot_reg}|{cc.robot_density}|{spec.name}".encode())
         h.update(str(spec.urdf_path).encode())
+        h.update(repr(correspondence_rest_angles(spec.name)).encode())  # editing the g1 rest angles invalidates the cache
         return h.hexdigest()
 
     def build(self, config: PrepareConfig, neutral_body: SmplBody,
@@ -88,10 +89,7 @@ class CorrespondenceBuilder:
         return build_correspondence(config, neutral_body, spec)
 
     def save(self, asset: tuple[CorrespondenceTable, SurfaceSampling], path: Path) -> None:
-        table, sampling = asset
-        np.savez(Path(path), human_idx=table.smpl_idx, link_idx=table.link_idx,
-                 offset_local=table.offset_local, link_names=np.array(table.link_names, dtype="<U64"),
-                 tri_idx=sampling.tri_idx, bary=sampling.bary)
+        save_correspondence(asset, path)
 
     def load(self, path: Path) -> tuple[CorrespondenceTable, SurfaceSampling]:
         return load_correspondence(path)
@@ -103,7 +101,6 @@ def regenerate(model_dir: Path, spec: RobotSpec, out_path: Path, config: Prepare
     body = rest_body_model(np.zeros(10, np.float32), "neutral", model_dir)
     builder = CorrespondenceBuilder()
     asset = builder.build(config, body, spec)
-    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     builder.save(asset, out_path)
     table, _ = asset
     print(f"correspondence: {table.n_points} robot points over {len(table.link_names)} links -> {out_path}")

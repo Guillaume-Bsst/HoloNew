@@ -159,6 +159,6 @@ class OmomoLoader:
         object_meshes = (Path(mesh),) if mesh is not None else ()
 
         return RawMotion(
-            joint_pos=joints[:, :22].astype(np.float32), joint_names=SMPLX_BODY_JOINTS,
+            joint_pos=joints[:, :len(SMPLX_BODY_JOINTS)].astype(np.float32), joint_names=SMPLX_BODY_JOINTS,
             fps=30.0, source_format="omomo", object_poses_raw=object_poses,
             object_mesh_paths=object_meshes, smpl_params=params)
