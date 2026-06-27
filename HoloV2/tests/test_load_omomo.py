@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import RobotSpec, SceneSpec
+from src.prepare.contracts import RobotSpec, SceneSpec
 
 _PT = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/OMOMO_new/OMOMO_new/"
            "sub16_largetable_008.pt")

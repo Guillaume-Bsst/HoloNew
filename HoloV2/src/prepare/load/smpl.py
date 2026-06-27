@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from ...contracts import SmplParams
+from ..contracts import SmplParams
 from .frames import YUP_TO_ZUP
 
 # Per-joint axis-angle order for the SMPL-X 55-joint tree (matches model.parents[:55]).

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ....contracts import CorrespondenceTable
+from ...contracts import CorrespondenceTable
 from ..sampling import SurfaceSampling, sampling_id
 
 

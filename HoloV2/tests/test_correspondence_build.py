@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import RobotSpec
-from config_types import PrepareConfig
+from src.prepare.contracts import RobotSpec
+from src.prepare.config import PrepareConfig
 from src.prepare.point_cloud.correspondence import build_correspondence
 from src.prepare.point_cloud.correspondence.segments import (
     link_to_segment, point_segments, seg_index)

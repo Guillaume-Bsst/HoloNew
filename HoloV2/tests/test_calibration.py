@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import (Calibration, RawMotion, RobotSpec, SmplParams)
-from config_types import CalibrationConfig
+from src.prepare.contracts import (Calibration, RawMotion, RobotSpec, SmplParams)
+from src.prepare.config import CalibrationConfig
 from src.prepare import scene
 from src.prepare.calibration import (CalibrationBuilder, build_calibration,
                                         foot_floor_offset, human_stature, object_floor_offset)
@@ -178,7 +178,7 @@ _SMPLX = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/model
 
 @pytest.mark.skipif(not (_NPZ.exists() and _SMPLX.is_dir()), reason="SFU data / SMPL-X model absent")
 def test_calibration_grounds_real_sfu_foot_to_zero():
-    from src.contracts import SceneSpec
+    from src.prepare.contracts import SceneSpec
     from src.prepare.load import load
     from src.prepare.load.smpl import build_body_model
 

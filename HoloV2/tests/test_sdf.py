@@ -11,8 +11,8 @@ import pytest
 
 trimesh = pytest.importorskip("trimesh")
 
-from src.contracts import SDF, Channel
-from config_types import SdfConfig
+from src.prepare.contracts import SDF, Channel
+from src.prepare.config import SdfConfig
 from src.prepare.sdf.build import SdfBuilder, build_plane_sdf, build_sdf
 
 

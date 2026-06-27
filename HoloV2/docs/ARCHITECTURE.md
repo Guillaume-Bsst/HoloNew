@@ -1,21 +1,29 @@
 # HoloV2 — Architecture (vue d'ensemble)
 
 Carte globale. Détails par étape : `PREPARE.md`, `TARGETS.md`, `VIZ.md`, `CACHE.md`,
-`OBS.md` (et `SOLVE.md`, à venir). Source de vérité des types : le package `src/contracts/`.
+`OBS.md` (et `SOLVE.md`, à venir). Pas de noyau central : **chaque étage du pipeline possède
+ses types ET sa config**, co-localisés.
 
-La **config** est séparée du code ET des données, en deux dossiers au TOP du repo :
-**`config_types/`** = les SCHÉMAS (dataclasses `frozen` ; `prepare.py` → `PrepareConfig` + sous-configs
-`calibration/sdf/cloud/correspondence`) et **`config_values/`** = la FACTORY qui en instancie les valeurs
-(`default_prepare_config() -> PrepareConfig` — point d'entrée unique où des presets/CLI s'attacheront
-plus tard). `src/contracts/` ne porte QUE les données qui transitent ; `targets`/`solve` ajouteront
-leur module dans ces deux dossiers. Les clés du cache build-once dérivent de la config (voir `CACHE.md`).
+Le pipeline est **LINÉAIRE** `prepare → targets → solve`. Chaque étage expose une **surface
+publique** = son module `contracts.py` (les types de DONNÉES qui transitent — dataclasses `frozen`,
+numpy-only) + son module `config.py` (les knobs — dataclasses `frozen`) + son point d'entrée public
+(`prepare.runner.prepare`). L'aval importe **uniquement la sortie publique de l'amont** (`targets`
+fait `from ..prepare.contracts import GroundedScene, InteractionContext`), jamais ses sous-modules
+internes (`prepare/load/*`, …). Les dépendances ne vont que vers l'AVAL ⇒ graphe **acyclique par
+construction**, plus besoin d'un noyau partagé central. La config de `prepare` = `prepare/config.py`
+(`PrepareConfig` + sous-configs `calibration/sdf/cloud/correspondence`) : `PrepareConfig()` donne le
+défaut, override inline `PrepareConfig(sdf=SdfConfig(spacing=0.005))` ; un CLI tyro s'attachera ici
+avec le point d'entrée de run. Les clés du cache build-once dérivent de la config (voir `CACHE.md`).
 
 ## Règle d'or : zéro spaghetti
-1. **Dépendances à sens unique**, jamais de cycle.
-2. **Une responsabilité par module.** Pas de classe-dieu (le retargeter V1 fait ~7 métiers
-   dans une classe — on explose).
-3. **Contrats typés aux frontières** (dataclasses frozen dans le package `contracts/`), pas de
-   `SimpleNamespace`.
+1. **Dépendances à sens unique** — pipeline linéaire `prepare → targets → solve` : l'aval importe
+   la **sortie publique** de l'amont (`<étage>.contracts` / `.config`), jamais ses internes ⇒
+   acyclique par construction, jamais de cycle.
+2. **Chaque étage possède ses types + sa config**, co-localisés (`<étage>/contracts.py` +
+   `<étage>/config.py`) ; pas de noyau partagé central. Une responsabilité par module, pas de
+   classe-dieu (le retargeter V1 fait ~7 métiers dans une classe — on explose).
+3. **Contrats typés aux frontières** (dataclasses frozen dans le `contracts.py` de chaque étage),
+   pas de `SimpleNamespace`.
 4. **Effets de bord aux extrémités** (`viz/`, futur `app/`). Le cœur est pur, testable sans
    disque ni écran.
 5. **Data-oriented** (vitesse) : Structure-of-Arrays numpy, layout canal-first `(C,P)`,
@@ -43,19 +51,20 @@ fichiers bruts ─► PREPARE ─► {GroundedScene, InteractionContext, Calibra
 ```
 
 ## Arborescence
-Entrée = `SceneSpec` (data identity) + `PrepareConfig` (knobs ; schéma dans `config_types/`, valeurs
-via la factory de `config_values/`). Source de vérité des types de DONNÉES : le package `src/contracts/`.
+Entrée = `SceneSpec` (data identity) + `PrepareConfig` (knobs — `prepare/config.py`). Chaque étage
+possède sa surface publique co-localisée : `contracts.py` (types de DONNÉES) + `config.py` (knobs)
++ son point d'entrée.
 
 ```
 HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · models/ · tests/
-  config_types/    SCHÉMAS de config (dataclasses frozen), 1 module/étape : prepare.py (targets/solve à venir)
-  config_values/   FACTORY des valeurs, 1 module/étape : prepare.py -> default_prepare_config() -> PrepareConfig
   src/             TOUT le code (importé `src.…` ; imports relatifs en interne)
-    contracts/       contrats de DONNÉES (package par domaine : protocols/inputs/motion/scene/fields/assets/targets ;
-                     __init__ ré-exporte tout) — pas la config — ne dépend de rien
     obs.py           observabilité (Profile/spans), no-op quand off
 
     prepare/         ÉTAPE 1 — offline ; SEUL endroit qui instancie SMPL/meshes/robot     [PREPARE.md]
+      contracts.py     types de DONNÉES de prepare (SORTIE PUBLIQUE) : RobotSpec/SceneSpec · SmplParams/RawMotion ·
+                       ObjectMesh/Calibration/GroundedScene · SDF/Channel · PointCloud/CorrespondenceTable ·
+                       InteractionContext + protocols BodyModel/RobotModel/AssetBuilder — pas la config — numpy-only
+      config.py        knobs de prepare : CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig/PrepareConfig
       load/            base · datasets/ (1/dataset -> RawMotion) · smpl (-> BodyModel) · smpl2smplx · mesh (-> verts/faces) · robot (-> RobotModel) · frames
       calibration/     LIVRABLE : grounding scène (humain + objet)
       sdf/             LIVRABLE : SDF objets/terrain/sol (sol plat = SDF de plan exact, non caché)
@@ -63,6 +72,10 @@ HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · 
       scene.py · runner.py   (prepare(scene_spec, config) : load-or-build + assemble)
 
     targets/         ÉTAPE 2 — construction ONLINE des cibles                          [TARGETS.md]
+      contracts.py     types de targets : ContactField/MultiChannelField · StyleTargets ·
+                       Robot/EnvironmentInteractionTargets · FrameTargets · FramePose · FrameTrace
+                       (importe la sortie publique de prepare via `..prepare.contracts`)
+      config.py        knobs de targets (à venir)
       style/           objectif de style (posture, ignore l'objet) -> StyleTargets
       interaction/     pointclouds · eval · transport · targets -> Robot/Env InteractionTargets
       pipeline.py      process_frame -> FrameTargets ; trace_frame -> FrameTrace
@@ -70,18 +83,19 @@ HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · 
     viz/             VISUALISEUR — consommateur pur, zéro hook                         [VIZ.md]
       viewer.py        gros viewer viser, toggles ; lit FrameTrace + assets prepare
 
-    solve/           ÉTAPE 3 (à venir)                                                 [SOLVE.md]
+    solve/           ÉTAPE 3 (à venir) — contracts.py + config.py + point d'entrée     [SOLVE.md]
 ```
 
-## Graphe de dépendances (acyclique)
+## Graphe de dépendances (acyclique par construction)
+Pipeline linéaire ⇒ les imports ne vont que vers l'AVAL ; chaque étage importe la **sortie publique**
+de l'amont (`<étage>.contracts` / `.config`), jamais ses internes. Plus de noyau partagé central.
 ```
-contracts/   ◄── prepare/ , targets/ , viz/ , solve/
-prepare/  ──► {GroundedScene, InteractionContext, Calibration}
-targets/  ──► FrameTargets        (consomme les sorties prepare via leur TYPE, jamais le code)
-viz/      ──► (lit FrameTrace + assets prepare)
-solve/    ──► qpos                 (consomme FrameTargets)
+prepare/  ──► {GroundedScene, InteractionContext, Calibration}   (exposés par prepare/contracts.py + config.py)
+targets/  ──► FrameTargets        from ..prepare.contracts import GroundedScene, InteractionContext
+viz/      ──► (lit FrameTrace)    from ..prepare.contracts / ..targets.contracts import …
+solve/    ──► qpos                from ..targets.contracts import FrameTargets
 ```
-SMPL/meshes ne sont jamais touchés hors `prepare/`.
+Aucun cycle (deps aval seulement) ; SMPL/meshes ne sont jamais touchés hors `prepare/`.
 
 ---
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import importlib
 from typing import Protocol, runtime_checkable
 
-from ...contracts import RawMotion, SceneSpec
+from ..contracts import RawMotion, SceneSpec
 
 
 @runtime_checkable

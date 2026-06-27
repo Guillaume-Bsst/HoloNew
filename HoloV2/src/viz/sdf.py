@@ -21,7 +21,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..contracts import SDF
+from ..prepare.contracts import SDF
 from ..prepare.load.mesh import load_mesh
 from ..prepare.sdf.build import build_plane_sdf, build_sdf
 

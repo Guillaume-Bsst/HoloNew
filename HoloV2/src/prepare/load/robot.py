@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...contracts import RobotSpec
+from ..contracts import RobotSpec
 
 # Rest pose used when sampling a robot's surface for the correspondence build: a T-pose-like config
 # (limbs spread) that matches the SMPL-X rest and keeps the per-segment limb clouds separated for the

@@ -18,8 +18,8 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
 
-from ..contracts import RobotSpec, SceneSpec
-from config_types import CalibrationConfig
+from ..prepare.contracts import RobotSpec, SceneSpec
+from ..prepare.config import CalibrationConfig
 from ..prepare.calibration import build_calibration
 from ..prepare.load import load
 from ..prepare.load.smpl import build_body_model

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation as R
 
-from src.contracts import RobotSpec, SceneSpec
+from src.prepare.contracts import RobotSpec, SceneSpec
 
 _HUMAN = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/mocap_ground/"
               "office_data05_human.npz")

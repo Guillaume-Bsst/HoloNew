@@ -79,20 +79,21 @@ donc être évalué **online que contre un SDF rigide** (sol + objets).
 
 ## 4. Arborescence
 
-Trois étapes top-level : `prepare/` (offline) → `targets/` (online) → `solve/`.
-Au-dessus, le package `contracts/` (types partagés). SMPL/meshes ne sont chargés/instanciés
-QUE dans `prepare/`.
+Trois étapes top-level : `prepare/` (offline) → `targets/` (online) → `solve/`. Chaque étage possède
+sa surface publique co-localisée : `contracts.py` (types) + `config.py` (knobs). SMPL/meshes ne sont
+chargés/instanciés QUE dans `prepare/`.
 
 Entrée : **`SceneSpec`** (data identity : dataset, séquence, `RobotSpec`, model dirs) — distinct
-de **`PrepareConfig`** (knobs d'algo ; schéma dans `config_types/`, valeurs via la factory
-`default_prepare_config()` de `config_values/`). Le loader transforme `SceneSpec` -> `RawMotion`.
+de **`PrepareConfig`** (knobs d'algo ; schéma `prepare/config.py`). `PrepareConfig()` donne le défaut,
+override inline `PrepareConfig(sdf=SdfConfig(spacing=0.005))`. Le loader transforme `SceneSpec` -> `RawMotion`.
 
 ```
-src/                    (sous `HoloV2/` ; la config est aux dossiers TOP `config_types/` + `config_values/`)
-  contracts/            contrats de DONNÉES — package par domaine (protocols/inputs/motion/scene/fields/
-                        assets/targets ; __init__ ré-exporte tout) ; assets, cibles, SceneSpec, RobotSpec, SDF… — pas la config
-
+src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA config, co-localisés)
   prepare/             ÉTAPE 1 — TOUT l'offline (seul endroit qui instancie SMPL/meshes/robot)
+    contracts.py         SORTIE PUBLIQUE — types de DONNÉES de prepare (protocols BodyModel/RobotModel/AssetBuilder ;
+                         SceneSpec/RobotSpec, RawMotion/SmplParams, ObjectMesh/Calibration/GroundedScene, SDF/Channel,
+                         PointCloud/CorrespondenceTable, InteractionContext) — pas la config — numpy-only
+    config.py            knobs : PrepareConfig + sous-configs CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig
     load/                loaders OFFLINE (sous-package)
       base.py              protocol MotionLoader + registre
       datasets/            un loader par dataset (omomo, hodome, sfu, hoim3) -> RawMotion (params + chemins)
@@ -123,23 +124,28 @@ src/                    (sous `HoloV2/` ; la config est aux dossiers TOP `config
     # sorties : Calibration + SDF(objets/terrain) + PointClouds(+corr) -> GroundedScene + InteractionContext
 
   targets/             ÉTAPE 2 — construction ONLINE des 2 canaux de cibles
+    contracts.py         SORTIE PUBLIQUE — types de targets (ContactField/MultiChannelField, StyleTargets,
+                         Robot/EnvironmentInteractionTargets, FrameTargets, FramePose, FrameTrace) ;
+                         importe la sortie publique de prepare via `..prepare.contracts`
+    config.py            knobs de targets (à venir)
     style/               demo joints -> StyleTargets (mapping articulaire, provisoire)
     interaction/         pointclouds · eval · transport · targets
       …                    -> RobotInteractionTargets + EnvironmentInteractionTargets
     pipeline.py          process_frame -> FrameTargets ; trace_frame -> FrameTrace
 
   viz/                 viewer (lit FrameTrace + assets prepare)
-  solve/               ÉTAPE 3 (plus tard)
+  solve/               ÉTAPE 3 (plus tard) — contracts.py + config.py + point d'entrée
 ```
 
-**Dépendances (acyclique)** : `contracts/` ◄ tout le monde · `prepare/` instancie
-SMPL/meshes et produit {GroundedScene, InteractionContext, Calibration} · `targets/`
-les consomme **via leur type** (jamais le code de `prepare/`) et produit `FrameTargets` ·
-`solve/` consomme `FrameTargets`. Aucun cycle ; SMPL/meshes jamais touchés hors `prepare/`.
+**Dépendances (acyclique par construction)** : pipeline linéaire, deps aval seulement · `prepare/`
+instancie SMPL/meshes et produit {GroundedScene, InteractionContext, Calibration} (exposés par
+`prepare/contracts.py`) · `targets/` les consomme **via leur type** (`from ..prepare.contracts import
+…`, jamais le code interne de `prepare/`) et produit `FrameTargets` · `solve/` consomme `FrameTargets`
+(`from ..targets.contracts import …`). Aucun cycle ; SMPL/meshes jamais touchés hors `prepare/`.
 
 **Note** : les builders d'assets d'interaction (`sdf`, `correspondence`) vivent dans
 `prepare/`, séparés de la logique online (`interaction/eval`, `transport`) restée
-dans `targets/`. Lien = uniquement le type d'asset (dans `contracts/`), pas de
+dans `targets/`. Lien = uniquement le type d'asset (dans `prepare/contracts.py`), pas de
 couplage de code.
 
 **Binding nuage humain ↔ correspondance** (subtilité clé). `CorrespondenceTable.smpl_idx`
@@ -169,23 +175,27 @@ class AssetBuilder(Protocol):
 
 ## 5. Les classes (contrats)
 
-**Source de vérité unique : le package `src/contracts/`** — pas de duplication ici (zéro drift).
-Inventaire :
+**Source de vérité : le `contracts.py` de chaque étage** — pas de duplication ici (zéro drift).
+Inventaire, par module.
 
+### `prepare/contracts.py` (sortie publique de prepare)
 - **Protocols** : `BodyModel`, `RobotModel`, `AssetBuilder`
 - **entrée (data identity)** : `RobotSpec`, `SceneSpec`. La **config** (`PrepareConfig` + sous-configs)
-  n'est PAS un contrat de données : schémas dans `config_types/`, valeurs via la factory
-  `default_prepare_config()` de `config_values/` (top du repo).
+  n'est PAS un contrat de données : elle vit dans `prepare/config.py` (`PrepareConfig()` = défaut,
+  override inline `PrepareConfig(sdf=SdfConfig(spacing=0.005))`).
 - **load** : `SmplParams` (avec MAINS), `RawMotion` (J_demo)
 - **scène / calib** : `ObjectMesh` (+ `static`), `Calibration`, `GroundedScene` (LÉGER)
-- **champs** : `SDF` (grille, objets/terrain) · `ContactField` · `MultiChannelField` (per-frame
-  `(C,P)`) · `Channel` (`object_idx` + `sdf` TOUJOURS présent ; sol plat = SDF de plan)
-- **prepare** : `PointCloud` (skinning creux + `sampling_id`), `CorrespondenceTable`
+- **champs (assets)** : `SDF` (grille, objets/terrain) · `Channel` (`object_idx` + `sdf` TOUJOURS
+  présent ; sol plat = SDF de plan)
+- **nuages** : `PointCloud` (skinning creux + `sampling_id`), `CorrespondenceTable`
   (`smpl_idx`/`link_idx`/`offset_local` + `smpl_sampling_id` qui doit matcher `sampling_id`)
 - **contexte** : `InteractionContext` (`channels` = ground + objets ; invariants documentés)
+
+### `targets/contracts.py` (sortie publique de targets ; importe les types prepare amont)
+- **champs per-frame** : `ContactField` · `MultiChannelField` (`(C,P)`)
 - **cibles** : `StyleTargets` (provisoire), `RobotInteractionTargets` (field SEUL — binding statique
   dans le context), `EnvironmentInteractionTargets`, `FrameTargets`
-- **état / visu** (étape 2) : `FramePose` (`bone_rot`/`bone_pos`, J_bones), `FrameTrace`
+- **état / visu** : `FramePose` (`bone_rot`/`bone_pos`, J_bones), `FrameTrace`
 
 ---
 

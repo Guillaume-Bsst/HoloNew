@@ -1,5 +1,5 @@
-"""Put the HoloV2 root on ``sys.path`` so the top-level packages (``src``, ``config_types``,
-``config_values``) are importable when running tests from here."""
+"""Put the HoloV2 root on ``sys.path`` so the ``src`` package is importable when running tests
+from here (types/knobs live per stage, e.g. ``src.prepare.contracts`` / ``src.prepare.config``)."""
 import os
 import sys
 

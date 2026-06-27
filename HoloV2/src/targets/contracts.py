@@ -1,5 +1,19 @@
-"""Per-frame target artifacts (the ``targets`` -> ``solve`` contract) + the shared per-frame
-pose state and the viz trace. A sequence is ``list[FrameTargets]``."""
+"""Data contracts of the ``targets`` stage — its PUBLIC type surface.
+
+The per-frame field-evaluation results and target artifacts (the ``targets`` -> ``solve`` contract),
+plus the shared per-frame pose state and the viz trace. FROZEN dataclasses of numpy arrays, numpy-only
+(no logic, no I/O), so this module is importable everywhere.
+
+``targets`` consumes the upstream ``prepare`` contracts (``from ..prepare.contracts import ...``) and
+exposes these as its own public types; ``solve`` and ``viz`` import their inputs from here. The
+pipeline is linear (prepare -> targets -> solve), so each stage owns its contracts and depends only on
+the public types of the stage upstream — the dependency graph stays acyclic.
+
+Channel-first convention: ``ContactField`` / ``MultiChannelField`` arrays are ``(C, P)`` = C channels
+over P points (per-channel ops contiguous). C = ground + N objects. ``J_bones`` (SMPL skeleton, in
+``FramePose``) is distinct from ``J_demo`` (the dataset's joints) — never conflate them. A sequence is
+``list[FrameTargets]``.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -7,6 +21,48 @@ from dataclasses import dataclass
 import numpy as np
 
 
+# =============================================================================
+# interaction/ — field evaluation results
+# =============================================================================
+@dataclass(frozen=True)
+class ContactField:
+    """One cloud vs ONE channel, ONE frame. Inactive probes: distance=+margin, rest 0."""
+
+    distance: np.ndarray   # (P,)    signed distance
+    direction: np.ndarray  # (P, 3)  contact normal (surface -> point)
+    witness: np.ndarray    # (P, 3)  nearest surface point
+    active: np.ndarray     # (P,)    bool, within margin
+
+
+@dataclass(frozen=True)
+class MultiChannelField:
+    """One cloud vs ALL channels, ONE frame. Channel-first, homogeneous (C = ground + N obj)."""
+
+    distance: np.ndarray         # (C, P)
+    direction: np.ndarray        # (C, P, 3)
+    witness: np.ndarray          # (C, P, 3)
+    active: np.ndarray           # (C, P) bool
+    channels: tuple[str, ...]    # (C,) channel names
+
+    def __post_init__(self) -> None:
+        c = len(self.channels)
+        for name in ("distance", "direction", "witness", "active"):
+            got = getattr(self, name).shape[0]
+            if got != c:
+                raise ValueError(f"{name} has {got} channels, expected {c}")
+
+    @property
+    def n_channels(self) -> int:
+        return len(self.channels)
+
+    @property
+    def n_points(self) -> int:
+        return self.distance.shape[1]
+
+
+# =============================================================================
+# per-frame targets -> solve
+# =============================================================================
 @dataclass(frozen=True)
 class StyleTargets:
     """Style objective, one frame: robot posture/style tracking, G1-ready via joint mapping.
@@ -49,6 +105,9 @@ class FrameTargets:
     env_interaction: EnvironmentInteractionTargets
 
 
+# =============================================================================
+# shared per-frame state + viz trace
+# =============================================================================
 @dataclass(frozen=True)
 class FramePose:
     """Per-frame world transforms, computed ONCE and shared by both treatments: ``style``

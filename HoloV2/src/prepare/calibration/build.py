@@ -48,8 +48,8 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from ...contracts import BodyModel, Calibration, RawMotion, SmplParams
-from config_types import CalibrationConfig
+from ..contracts import BodyModel, Calibration, RawMotion, SmplParams
+from ..config import CalibrationConfig
 
 
 # =============================================================================

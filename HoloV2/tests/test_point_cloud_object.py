@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation as R
 
-from src.contracts import PointCloud, RobotSpec, SceneSpec
-from config_types import CloudConfig
+from src.prepare.contracts import PointCloud, RobotSpec, SceneSpec
+from src.prepare.config import CloudConfig
 from src.prepare.point_cloud import (assemble_rigid_cloud, build_object_cloud,
                                         sample_object_surface)
 from src.prepare.point_cloud.objects import ObjectCloudBuilder

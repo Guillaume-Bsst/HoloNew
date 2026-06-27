@@ -7,14 +7,17 @@ la LOGIQUE algorithmique, jamais la structure** (voir la carte de portage plus b
 
 ## Règles d'or (NON négociables)
 
-1. **Dépendances à sens unique, zéro cycle.** Une responsabilité par module. Pas de classe-dieu.
-2. **`src/contracts/` = source de vérité unique des types de DONNÉES** (package rangé par domaine —
-   protocols/inputs/motion/scene/fields/assets/targets ; `__init__.py` ré-exporte tout, les call-sites
-   `from ..contracts import X` restent inchangés). Artefacts `frozen` qui transitent dans le pipe ; on
-   NE duplique JAMAIS une définition ailleurs (docs incluses : on y pointe). Les **knobs de config n'y
-   sont PAS** : ils vivent au TOP du repo, séparés du code, en deux dossiers — `config_types/`
-   (SCHÉMAS, 1 module/étape : `prepare.py` → `PrepareConfig` + sous-configs) et `config_values/`
-   (FACTORY `default_prepare_config()` — point d'entrée unique où des presets/CLI s'attacheront).
+1. **Dépendances à sens unique, zéro cycle.** Pipeline LINÉAIRE `prepare → targets → solve` : l'aval
+   importe la **sortie publique** de l'amont, jamais ses internes ⇒ acyclique par construction. Une
+   responsabilité par module. Pas de classe-dieu.
+2. **Chaque étage possède SES types ET SA config**, co-localisés — pas de noyau partagé central.
+   Surface publique d'un étage = son `contracts.py` (types de DONNÉES, dataclasses `frozen`, numpy-only)
+   + son `config.py` (knobs, dataclasses `frozen`) + son point d'entrée public (`prepare.runner.prepare`).
+   L'aval importe la sortie publique de l'amont (`targets` fait
+   `from ..prepare.contracts import GroundedScene, InteractionContext`), JAMAIS un sous-module interne
+   (`prepare/load/*`, …). Un type/knob ne se duplique JAMAIS ailleurs (docs incluses : on y pointe).
+   Config de `prepare` = `prepare/config.py` : `PrepareConfig()` = défaut, override inline
+   `PrepareConfig(sdf=SdfConfig(spacing=0.005))` ; un CLI tyro s'y attachera avec le point d'entrée de run.
 3. **Cœur pur, effets de bord aux extrémités.** Les ops de calcul ne font ni I/O, ni log, ni
    mutation de leurs inputs ; elles prennent des données et rendent un artefact `frozen`. Disque
    dans `prepare/load`, écran dans `viz/`.
@@ -40,12 +43,13 @@ redupliquer ici**). En bref : `SceneSpec`+`PrepareConfig` → **prepare/** (offl
 
 ## Conventions de code
 
-- **Poids des imports** : `src/contracts/`, `src/obs.py` = **numpy-only** ; `config_types/` =
-  stdlib-only (dataclasses) — tous légers, importables partout. torch/smplx/trimesh/coal/pinocchio
-  **uniquement** dans `src/prepare/load/` et les builders `src/prepare/`. `targets`/`solve`/`viz` ne
-  dépendent jamais de torch.
-- **Imports** : relatifs DANS `src/` (`from ..contracts import X`) ; **absolus** pour atteindre la
-  config hors de `src/` (`from config_types import X`) et dans les tests (`from src.… import …`).
+- **Poids des imports** : chaque `<étage>/contracts.py` + `<étage>/config.py` et `src/obs.py` =
+  **numpy-only** (la config = stdlib-only, dataclasses) — tous légers, importables partout.
+  torch/smplx/trimesh/coal/pinocchio **uniquement** dans `src/prepare/load/` et les builders
+  `src/prepare/`. `targets`/`solve`/`viz` ne dépendent jamais de torch.
+- **Imports** : relatifs DANS `src/` ; chaque étage importe la **sortie publique** de l'amont
+  (`from ..prepare.contracts import X`, `from ..prepare.config import PrepareConfig`), jamais un
+  sous-module interne. Tests : absolus (`from src.… import …`).
 - **Types partout** ; tableaux annotés `np.ndarray` + **forme en commentaire** (`# (T, J, 3)`).
 - **dtype** : compute en `float64` ; arrays **stockés/cachés** en `float32` (grilles SDF, nuages).
 - **Erreurs** : valider les invariants de contrat par un `raise ValueError` explicite à la
@@ -69,11 +73,11 @@ le python de l'env `holonew` : `…/envs/holonew/bin/python -m pytest tests/ -q`
   (`save`→`load` == `build`). Sinon le cache est faux.
 - **Portage V1** → test de **parité** vs sortie V1 sur une séquence démo (tolérance documentée).
 - **Perf** → pour un chemin chaud, vérifier le timing via `obs.Profile.render()`.
-- Après tout changement du package `src/contracts/` : `python -m py_compile` **+** un import dans l'env.
+- Après tout changement d'un `contracts.py`/`config.py` d'étage : `python -m py_compile` **+** un import dans l'env.
 
 ## Workflow par module (« definition of done »)
 
-1. Le type est dans le package `contracts/`.
+1. Le type est dans le `contracts.py` de l'étage qui le produit (le knob dans son `config.py`).
 2. Logique = fonction(s) pure(s), sans effet de bord, sans muter les inputs.
 3. Câblée dans l'orchestrateur (`runner`/`pipeline`) avec un `prof.span(...)`.
 4. Test unitaire (+ déterminisme/parité si pertinent).
@@ -83,7 +87,7 @@ le python de l'env `holonew` : `…/envs/holonew/bin/python -m pytest tests/ -q`
 
 | Module V2 | Source(s) V1 à porter |
 |---|---|
-| `prepare/load/` (datasets→RawMotion) | `src/data_loaders/*`, `src/utils.py` (load_intermimic…), `config_types/data_type.py` |
+| `prepare/load/` (datasets→RawMotion) | `src/data_loaders/*`, `src/utils.py` (load_intermimic…), `data_type.py` (mappings V1) |
 | `prepare/load/smpl.py` (BodyModel) | `src/test_socp/correspondence/human_body.py`, `src/data_loaders/hodome.py` |
 | `prepare/load/robot.py` (RobotModel) | `src/robot_fk.py`, `src/test_socp/pin_model.py`, correspondence `g1_surface.py` |
 | `prepare/calibration/` | `src/holosoma/preprocess.py` (ground/scale), `contact/smplx_field.robust_floor_offset`, omomo betas-FK |
@@ -92,7 +96,7 @@ le python de l'env `holonew` : `…/envs/holonew/bin/python -m pytest tests/ -q`
 | `prepare/point_cloud/correspondence/` | `src/test_socp/correspondence/*` (build, ot_couple, transport, segments) |
 | `targets/interaction/eval` | `contact/contact_field.py`, `contact/combined.py`, `backends/floor.py` |
 | `targets/interaction/transport` | `correspondence/transport.py` |
-| `targets/style/` | `src/gmr_socp/*`, mappings `config_types/data_type.py` |
+| `targets/style/` | `src/gmr_socp/*`, mappings `data_type.py` (V1) |
 | `viz/` | `src/viewer.py`, `viser_player.py`, `correspondence/viz.py`, `contact/viz.py` |
 | sol plat → SDF de plan (`prepare/sdf.build_plane_sdf`) | `contact/backends/floor.py` (convention dist/dir) |
 
@@ -116,7 +120,7 @@ Détails : `docs/CACHE.md`.
 
 ## État & feuille de route
 
-Contrats + squelette posés (package `contracts/` + `obs.py` complets ; modules = stubs).
+Contrats + squelette posés (`prepare/contracts.py`+`config.py`, `targets/contracts.py`, `obs.py` complets ; modules = stubs).
 Ordre d'implémentation (dépendances) : **`prepare/load/base.py`** → un loader concret (OMOMO/SFU)
 → `calibration/` → `sdf/` + `point_cloud/` (+ `correspondence`) → `targets/interaction` →
 `targets/style` → `viz/` → `solve/`. À chaque étape : tests + parité V1.

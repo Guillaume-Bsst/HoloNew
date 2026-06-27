@@ -17,8 +17,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ....contracts import CorrespondenceTable, RobotSpec
-from config_types import PrepareConfig
+from ...contracts import CorrespondenceTable, RobotSpec
+from ...config import PrepareConfig
 from ...load.robot import correspondence_rest_angles
 from ...load.smpl import SmplBody, rest_body_model
 from ..sampling import SurfaceSampling, sampling_id

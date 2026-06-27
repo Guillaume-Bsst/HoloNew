@@ -3,7 +3,7 @@ K>1 must be the weighted average of the per-part rigid placements (the LBS-on-cl
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from src.contracts import PointCloud
+from src.prepare.contracts import PointCloud
 from src.targets.interaction import pose_cloud
 
 

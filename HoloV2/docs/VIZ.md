@@ -2,7 +2,8 @@
 
 Module **top-level indépendant**, **consommateur pur** : il LIT des artefacts typés et les
 affiche. **Zéro hook** dans le calcul, jamais d'`if visualize` dans `prepare`/`targets`.
-`viz/` dépend du package `contracts/` uniquement ; jamais l'inverse.
+`viz/` importe les types via la sortie publique des étages (`..prepare.contracts` /
+`..targets.contracts`) uniquement ; jamais l'inverse.
 
 ## Le seam : `trace_frame` -> `FrameTrace`
 
@@ -10,7 +11,7 @@ affiche. **Zéro hook** dans le calcul, jamais d'`if visualize` dans `prepare`/`
 - `process_frame(prepared, f) -> FrameTargets`   (lean, prod)
 - `trace_frame(prepared, f)   -> FrameTrace`      (instrumenté : garde chaque intermédiaire)
 
-`FrameTrace` (dans le package `contracts/`) bundle tous les artefacts d'une frame :
+`FrameTrace` (défini dans `targets/contracts.py`) bundle tous les artefacts d'une frame :
 `pose (FramePose)` · `human_cloud_world` · `object_clouds_world` · `human_field`
 (pré-transport) · `targets (FrameTargets)`. → intermédiaires explicites et typés, pas
 d'effets de bord.
@@ -58,5 +59,5 @@ debug **par étape**, livrés au fil de l'implémentation.
 
 ## Anti-spaghetti
 - viewer = 1 responsabilité (afficher), 1 méthode par couche, effets confinés ici.
-- lit `FrameTrace` + assets `prepare` via le package `contracts/` ; n'appelle aucune logique de calcul
+- lit `FrameTrace` + assets `prepare` via `..targets.contracts` / `..prepare.contracts` ; n'appelle aucune logique de calcul
   (sauf le fournisseur `get(f)`, qui est juste `trace_frame` ou un bake).

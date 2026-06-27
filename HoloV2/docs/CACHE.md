@@ -2,8 +2,8 @@
 
 Les sorties de `prepare/` sont **régénérables mais coûteuses** → cachées. Principe central :
 **rien n'est caché « par scène » ; chaque item est caché à la granularité de SES
-dépendances**, et tout dépend d'une **`PrepareConfig`** (schéma `config_types/prepare.py`, valeurs via
-la factory `default_prepare_config()` de `config_values/prepare.py`). Une scène est
+dépendances**, et tout dépend d'une **`PrepareConfig`** (schéma + sous-configs dans
+`prepare/config.py` ; `PrepareConfig()` = défaut, override inline `PrepareConfig(sdf=SdfConfig(...))`). Une scène est
 **assemblée** à partir d'items cachés individuellement.
 
 ## Ce qui est caché, et de quoi ça dépend (la clé)
@@ -56,7 +56,7 @@ cache_key(item) = hash( sous-config pertinente  +  inputs pertinents  +  clés d
   genre ; robot → nom/urdf.
 - chaque builder ne hashe **que ses dépendances** → changer un param n'invalide **que** les
   items touchés (et leur aval). `PrepareConfig` et ses sous-configs sont `frozen` + hashables.
-- `AssetBuilder.cache_key(config, *inputs) -> str` (protocol dans le package `contracts/`).
+- `AssetBuilder.cache_key(config, *inputs) -> str` (protocol dans `prepare/contracts.py`).
 
 ## Layout
 

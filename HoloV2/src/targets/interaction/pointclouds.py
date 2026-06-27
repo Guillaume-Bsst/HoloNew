@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ...contracts import PointCloud
+from ...prepare.contracts import PointCloud
 
 
 def pose_cloud(cloud: PointCloud, part_rot: np.ndarray, part_pos: np.ndarray) -> np.ndarray:

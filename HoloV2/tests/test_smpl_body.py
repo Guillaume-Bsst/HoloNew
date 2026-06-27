@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import RobotSpec, SceneSpec
+from src.prepare.contracts import RobotSpec, SceneSpec
 
 _DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
 _HODOME = _DATA / "HODome"

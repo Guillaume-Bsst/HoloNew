@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from ....contracts import RawMotion, SceneSpec, SmplParams
+from ...contracts import RawMotion, SceneSpec, SmplParams
 from ..base import register_loader
 from ..smpl import SMPLX_BODY_JOINTS, local_rotvecs_from_global, rest_body_model
 

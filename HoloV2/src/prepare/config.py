@@ -1,11 +1,10 @@
-"""Config TYPES for the ``prepare`` step — the dataclass SCHEMAS (what knobs exist).
+"""Config of the ``prepare`` stage — the dataclass SCHEMAS (the knobs), kept apart from the data.
 
-The defaults are sensible inline values; the named entry point lives in ``config_values.prepare``
-(``default_prepare_config``), and the data artifacts that flow through the pipeline live in
-``src.contracts`` (config is kept apart from data on purpose). The sub-configs are grouped by
-deliverable; ``PrepareConfig`` composes them and is what ``runner.prepare`` receives. Each builder
-reads (and hashes into its cache key) ONLY its relevant sub-config, so a knob change invalidates
-only the affected asset.
+The defaults are sensible inline values, so ``PrepareConfig()`` IS the default config. The data
+artifacts that flow through the pipeline live in ``prepare/contracts.py`` (config is the HOW, kept
+apart from the WHAT). The sub-configs are grouped by deliverable; ``PrepareConfig`` composes them and
+is what ``runner.prepare`` receives. Each builder reads (and hashes into its cache key) ONLY its
+relevant sub-config, so a knob change invalidates only the affected asset.
 
 Knob vs constant: a field here is something a user legitimately tunes. Fixed FACTS (frame
 conventions, SMPL joint orders, segment taxonomy, dataset formats, robot rest poses) and internal
@@ -13,6 +12,10 @@ perf caps are NOT knobs — they stay as constants local to the module that owns
 
 Each sub-config validates its own ranges in ``__post_init__`` (frozen, so the checks only raise —
 they never mutate), catching a nonsensical knob at construction rather than deep in a builder.
+
+Changing a run's config: ``PrepareConfig()`` for the default, or override a sub-config inline, e.g.
+``PrepareConfig(sdf=SdfConfig(spacing=0.005))``. A tyro CLI front-end attaches here with the run
+entry point.
 """
 from __future__ import annotations
 

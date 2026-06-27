@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import RobotSpec, SceneSpec
+from src.prepare.contracts import RobotSpec, SceneSpec
 
 _NPZ = Path("/home/vboxuser/Documents/wbt_rl/modules/01_retargeting/HoloNew/HoloNew/demo_data/"
             "SFU/0005_2FeetJump001.npz")

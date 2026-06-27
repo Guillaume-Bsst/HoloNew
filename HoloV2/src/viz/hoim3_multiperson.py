@@ -18,7 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..contracts import RobotSpec, SceneSpec
+from ..prepare.contracts import RobotSpec, SceneSpec
 from ..prepare.load import load
 from ..prepare.load.datasets.hoim3 import build_person_params
 

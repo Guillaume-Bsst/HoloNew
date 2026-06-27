@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ...contracts import PointCloud
+from ..contracts import PointCloud
 
 
 def save_cloud(cloud: PointCloud, path: Path) -> None:

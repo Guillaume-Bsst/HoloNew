@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import RobotSpec
+from src.prepare.contracts import RobotSpec
 from src.prepare.load.robot import build_robot_model, correspondence_rest_angles
 
 _URDF = Path(__file__).resolve().parent.parent / "models" / "g1" / "g1_29dof.urdf"

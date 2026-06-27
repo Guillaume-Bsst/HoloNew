@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import RawMotion, RobotSpec, SceneSpec
+from src.prepare.contracts import RawMotion, RobotSpec, SceneSpec
 from src.prepare.load import base
 
 

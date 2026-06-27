@@ -9,8 +9,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.contracts import RobotSpec, SceneSpec
-from config_types import CloudConfig
+from src.prepare.contracts import RobotSpec, SceneSpec
+from src.prepare.config import CloudConfig
 from src.prepare.point_cloud import HumanCloudBuilder, build_human_cloud
 from src.prepare.point_cloud.correspondence import load_correspondence
 from src.targets.interaction import pose_cloud

@@ -15,8 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ...contracts import PointCloud
-from config_types import CloudConfig
+from ..contracts import PointCloud
+from ..config import CloudConfig
 from .cache import load_cloud, save_cloud
 
 

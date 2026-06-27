@@ -18,7 +18,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from ..contracts import Calibration, GroundedScene, RawMotion, SmplParams
+from .contracts import Calibration, GroundedScene, RawMotion, SmplParams
 
 # SMPL params are in the model's NATIVE Y-up frame; the body model maps native Y -> world Z (the Q
 # rotation in load/smpl.py). So a world z-drop of ``human_offset`` is a native y-drop of the root
