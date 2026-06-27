@@ -96,7 +96,7 @@ holov2/
       omomo.py hodome.py …  un loader par dataset -> RawMotion (params + chemins)
       smpl.py              SmplParams -> BodyModel (instancie SMPL, FK os)
       mesh.py              chemin -> (verts, faces) local (trimesh ; poses ajoutées à l'assemblage scène)
-      robot.py             RobotSpec -> RobotModel (FK / surface rest G1)
+      robot.py             RobotSpec -> RobotModel (FK yourdfpy, AGNOSTIQUE) + pose de repos correspondance (keyée par robot)
     # --- les 3 LIVRABLES (build-once) ---
     calibration/         grounding ROBOT-FREE : human_stature + human_offset (foot-joint pct) + object_offset (objets partagé), root
     sdf/                 meshes objets/terrain -> SDF (caché) ; sol plat -> SDF de plan (build_plane_sdf, non caché)
@@ -105,8 +105,13 @@ holov2/
       human.py             surface SMPL -> PointCloud (skinning creux K~4) ; HumanCloudBuilder (par sujet)
       objects.py           surface objet -> PointCloud rigide K=1 ; ObjectCloudBuilder (par géométrie)
       store.py             (dé)sérialisation .npz du PointCloud (partagée par les 2 builders)
-      correspondence/load.py  corr_neutral.npz -> CorrespondenceTable + SurfaceSampling
-                              (cache RÉUTILISÉ ; rebuild OT humain↔G1 différé)
+      correspondence/      humain↔robot par OT par-segment (ROBOT-AGNOSTIQUE)
+        segments.py          15 segments + mapping joint/lien->segment + label des samples humains
+        robot_surface.py     échantillonne la surface robot (shell watertight) par lien -> RobotSurface
+        ot_couple.py         OT entropique par segment (POT) -> smpl_idx (main↔main, pied↔pied)
+        build.py             CorrespondenceBuilder : génère sampling + source humaine neutre + OT
+                             -> (CorrespondenceTable, SurfaceSampling) ; main() régénère corr_neutral.npz
+        load.py              relit le .npz -> (CorrespondenceTable, SurfaceSampling)
     scene.py             applique la calibration -> GroundedScene
     runner.py            prepare(scene_spec, config) : load-or-build + assemble ; build_all()
     # sorties : Calibration + SDF(objets/terrain) + PointClouds(+corr) -> GroundedScene + InteractionContext
@@ -137,9 +142,10 @@ indexe l'**ordre des points** du nuage humain. La correspondance est bâtie sur 
 échantillonnage** `(tri_idx, bary)` (= `SurfaceSampling`, identité portée par `sampling_id`). Le nuage
 sujet **ne ré-échantillonne donc pas** : il reprend ce `SurfaceSampling` et recalcule seulement son
 skinning (offsets `= rest_point − rest_joint[os]` dans le frame natif — la rotation de repos des os,
-pur `Q`, s'annule). Périmètre actuel : la correspondance est **réutilisée** depuis `corr_neutral.npz`,
-qui **embarque** cet échantillonnage ; `correspondence/load.py` en extrait le `SurfaceSampling`, lu par
-`human.py`. Garde-fou `sampling_id == smpl_sampling_id` asserté au runner (cf. `CACHE.md`).
+pur `Q`, s'annule). La correspondance est **construite** par `correspondence/build.py` (OT par-segment
+sur un humain NEUTRE) qui **génère** le `SurfaceSampling` et l'**embarque** dans `corr_neutral.npz` ;
+`correspondence/load.py` le relit, et `human.py` le réutilise sur le mesh du SUJET. Garde-fou
+`sampling_id == smpl_sampling_id` asserté au runner (cf. `CACHE.md`).
 
 **Contrat commun des 3 modules offline** :
 ```python

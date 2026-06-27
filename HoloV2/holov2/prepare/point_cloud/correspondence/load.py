@@ -1,12 +1,8 @@
-"""Loads the cached human->G1 correspondence into the V2 contract.
+"""Reads the cached human<->robot correspondence ``.npz`` into the V2 contracts (the reader side of
+``build.py``, which writes it). Returns the ``CorrespondenceTable`` plus the embedded
+``SurfaceSampling`` the human cloud must reuse to keep ``smpl_idx`` valid.
 
-The correspondence is built once, offline, by per-segment optimal transport between a NEUTRAL SMPL
-template cloud and the G1 surface (scale-invariant, so it is reused across subjects). That heavy
-build is not re-ported here — we reuse the cached result; this module adapts the existing
-``corr_neutral.npz`` into a ``CorrespondenceTable`` and recovers the embedded ``SurfaceSampling``
-that the human cloud must reuse to keep ``smpl_idx`` valid.
-
-Field mapping (cache -> contract): ``human_idx`` -> ``smpl_idx`` (each G1 point's driving human
+Field mapping (.npz -> contract): ``human_idx`` -> ``smpl_idx`` (each robot point's driving human
 sample), ``link_idx`` / ``offset_local`` / ``link_names`` carry over directly, and ``tri_idx`` /
 ``bary`` are the canonical sampling. ``smpl_sampling_id`` is stamped to match the sampling so the
 runner's binding assertion (``cloud.sampling_id == table.smpl_sampling_id``) holds.
