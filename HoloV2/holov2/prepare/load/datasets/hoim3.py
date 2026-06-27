@@ -25,13 +25,12 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from ...contracts import RawMotion, SceneSpec, SmplParams
-from .base import register_loader
-from .smpl import SMPLX_BODY_JOINTS, rest_body_model
-from .smpl2smplx import smpl_betas_to_smplx, smpl_rest_pelvis
+from ....contracts import RawMotion, SceneSpec, SmplParams
+from ..base import register_loader
+from ..frames import object_pose_zup
+from ..smpl import SMPLX_BODY_JOINTS, rest_body_model
+from ..smpl2smplx import smpl_betas_to_smplx, smpl_rest_pelvis
 
-# Y-up -> Z-up as a proper rotation Rx(+90deg): (x,y,z) -> (x,-z,y) (see hodome.py).
-_YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 _MESH_CACHE = Path(tempfile.gettempdir()) / "holov2_hoim3_meshes"
 
 
@@ -87,22 +86,19 @@ def _person_series(smpl_params: np.ndarray, target_id: int):
     return Rh, Th, poses, betas
 
 
-def _object_pose_zup(R_seq: np.ndarray, T_seq: np.ndarray) -> np.ndarray:
-    """object_R (T,3,3) + object_T (T,3), Y-up -> (T,7) world pose [x,y,z,qw,qx,qy,qz] in Z-up.
-
-    Q carries it from the Y-up capture to the Z-up world (object stays in its local mesh frame)."""
-    Tz = T_seq @ _YUP_TO_ZUP.T
-    Rz = _YUP_TO_ZUP @ R_seq                               # Q R
-    quat_wxyz = R.from_matrix(Rz).as_quat()[:, [3, 0, 1, 2]]
-    return np.concatenate([Tz, quat_wxyz], axis=1).astype(np.float32)
-
-
-def _objects(object_npz: Path, scanned_dir: Path, cache_dir: Path, override: tuple[Path, ...]):
-    """All objects -> (poses tuple of (T,7), mesh-path tuple). Meshes are centred (the frame the
-    poses expect). Drops objects whose mesh is absent; holds the last seen pose on a dropout."""
+def _objects(object_npz: Path, scanned_dir: Path, cache_dir: Path, override: tuple[Path, ...],
+             keep: tuple[str, ...] | None = None):
+    """Objects -> (poses tuple of (T,7), mesh-path tuple). ``keep`` selects a subset by name
+    (None => all). Meshes are centred (the frame the poses expect); objects whose mesh is absent
+    are dropped; the last seen pose is held on a per-frame dropout."""
     op = np.load(str(object_npz), allow_pickle=True)["object_params"]
     T = len(op)
     names = list(op[0].keys())
+    if keep is not None:
+        unknown = [n for n in keep if n not in names]
+        if unknown:
+            raise ValueError(f"object_names {unknown} not in the scene; available: {names}")
+        names = [n for n in names if n in keep]
     poses: list[np.ndarray] = []
     meshes: list[Path] = []
     for i, name in enumerate(names):
@@ -121,9 +117,30 @@ def _objects(object_npz: Path, scanned_dir: Path, cache_dir: Path, override: tup
             last = v
             Rs[f] = np.asarray(v["object_R"], np.float64)
             Ts[f] = np.asarray(v["object_T"], np.float64).reshape(3)
-        poses.append(_object_pose_zup(Rs, Ts))
+        poses.append(object_pose_zup(Rs, Ts))
         meshes.append(Path(mesh))
     return tuple(poses), tuple(meshes)
+
+
+def build_person_params(smpl_params: np.ndarray, target_id: int, gender: str, smplx_dir: Path):
+    """EasyMocap SMPL person ``target_id`` -> ``(SmplParams (SMPL-X), BodyModel)``.
+
+    Shared by ``load()`` (one retargeted person) and the multi-person debug view. EasyMocap places
+    the body as ``R(Rh) @ J_canonical + Th`` about the SMPL pelvis, so the SMPL-X pelvis is re-placed
+    on the SMPL one: ``transl = Th + R @ J0_smpl - J0_smplx`` (rest pelvis heights differ ~14cm)."""
+    Rh, Th, poses, betas10 = _person_series(smpl_params, target_id)
+    T = len(smpl_params)
+    smplx_npz, smplh_npz, deftrafo = _resolve_assets(Path(smplx_dir), gender)
+    betas_x = smpl_betas_to_smplx(betas10, smplh_npz, smplx_npz, deftrafo)
+    body = rest_body_model(betas_x, gender, Path(smplx_dir))
+    Rmat = R.from_rotvec(Rh).as_matrix()                              # (T,3,3)
+    transl = Th + np.einsum("tij,j->ti", Rmat, smpl_rest_pelvis(betas10, smplh_npz)) - body.rest_joints[0]
+    z = np.zeros((T, 45), np.float32)
+    params = SmplParams(
+        betas=betas_x, global_orient=Rh.astype(np.float32), body_pose=poses[:, :63].astype(np.float32),
+        left_hand_pose=z, right_hand_pose=z, transl=transl.astype(np.float32),
+        gender=gender, model_type="smplx")
+    return params, body
 
 
 @register_loader("hoim3")
@@ -141,35 +158,19 @@ class HoiM3Loader:
         fps = float(np.asarray(hd["mocap_frame_rate"]))
         smpl_params = hd["smpl_params"]
 
-        # Default: retarget the first person of frame 0 (selection refinement is future work).
-        target_id = int(np.asarray(smpl_params[0][0]["id"]))
-        Rh, Th, poses, betas10 = _person_series(smpl_params, target_id)
-        T = len(smpl_params)
-
-        smplx_npz, smplh_npz, deftrafo = _resolve_assets(Path(spec.smpl_model_dir), gender)
-        betas_x = smpl_betas_to_smplx(betas10, smplh_npz, smplx_npz, deftrafo)
-        body = rest_body_model(betas_x, gender, Path(spec.smpl_model_dir))
-
-        # EasyMocap (Rh, Th) -> SMPL-X (global_orient about pelvis, transl). EasyMocap places the
-        # body as R @ J_canonical + Th about the SMPL pelvis, so the SMPL-X pelvis must land on the
-        # SMPL one: transl = Th + R @ J0_smpl - J0_smplx (their rest pelvis heights differ ~14cm).
-        Rmat = R.from_rotvec(Rh).as_matrix()                          # (T,3,3)
-        j0_smplx = body.rest_joints[0]                                # native SMPL-X rest pelvis
-        j0_smpl = smpl_rest_pelvis(betas10, smplh_npz)                # native SMPL rest pelvis
-        transl = Th + np.einsum("tij,j->ti", Rmat, j0_smpl) - j0_smplx
-        z = np.zeros((T, 45), np.float32)
-        params = SmplParams(
-            betas=betas_x, global_orient=Rh.astype(np.float32), body_pose=poses[:, :63].astype(np.float32),
-            left_hand_pose=z, right_hand_pose=z, transl=transl.astype(np.float32),
-            gender=gender, model_type="smplx")
-
+        # Retarget the chosen person (spec.person_id), defaulting to the first present at frame 0.
+        ids = [int(np.asarray(p["id"])) for p in smpl_params[0]]
+        target_id = ids[0] if spec.person_id is None else spec.person_id
+        if target_id not in ids:
+            raise ValueError(f"person_id {target_id} not among frame-0 people {ids}")
+        params, body = build_person_params(smpl_params, target_id, gender, Path(spec.smpl_model_dir))
         joints = body.bone_positions(params)[:, :22].astype(np.float32)   # demo joints, Z-up
 
         object_npz = human_npz.with_name(human_npz.name.replace("_human.npz", "_object.npz"))
         scanned_dir = human_npz.parent.parent / "scanned_object"
         cache_dir = Path(spec.cache_dir) / "hoim3_meshes" if spec.cache_dir else _MESH_CACHE
-        object_poses, object_meshes = (((), ()) if not object_npz.exists()
-                                       else _objects(object_npz, scanned_dir, cache_dir, spec.object_mesh_paths))
+        object_poses, object_meshes = (((), ()) if not object_npz.exists() else _objects(
+            object_npz, scanned_dir, cache_dir, spec.object_mesh_paths, spec.object_names))
 
         return RawMotion(
             joint_pos=joints, joint_names=SMPLX_BODY_JOINTS, fps=fps, source_format="hoim3",

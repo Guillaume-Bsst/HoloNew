@@ -117,6 +117,10 @@ class SceneSpec:
     cache_dir: Path | None = None             # default: HoloV2/cache/
     dataset_root: Path | None = None          # release root for auxiliary metadata kept apart from
                                               # motion_path (OMOMO betas/scales + captured meshes)
+    person_id: int | None = None             # multi-person datasets: which person to retarget
+                                              # (None => the first present); ignored if single-person
+    object_names: tuple[str, ...] | None = None  # named-object datasets: subset to load
+                                              # (None => all); ignored if objects are unnamed
 
 
 # =============================================================================

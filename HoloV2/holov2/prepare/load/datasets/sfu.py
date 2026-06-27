@@ -11,9 +11,9 @@ from pathlib import Path
 
 import numpy as np
 
-from ...contracts import RawMotion, SceneSpec, SmplParams
-from .base import register_loader
-from .smpl import SMPLX_BODY_JOINTS, local_rotvecs_from_global, rest_body_model
+from ....contracts import RawMotion, SceneSpec, SmplParams
+from ..base import register_loader
+from ..smpl import SMPLX_BODY_JOINTS, local_rotvecs_from_global, rest_body_model
 
 # Layout of SFU's global_joint_orientations quaternions (validated against positions in tests).
 _QUAT_ORDER = "wxyz"

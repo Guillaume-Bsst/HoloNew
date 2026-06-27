@@ -200,10 +200,14 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--frame-step", type=int, default=2)
     ap.add_argument("--max-frames", type=int, default=200)
+    ap.add_argument("--person-id", type=int, default=None, help="multi-person: which person to retarget")
+    ap.add_argument("--object-names", default=None, help="comma-separated subset of objects to load")
     a = ap.parse_args()
     robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=("pelvis",), dof=29, height=1.3)
+    objs = tuple(a.object_names.split(",")) if a.object_names else None
     spec = SceneSpec(dataset=a.dataset, motion_path=a.motion_path, robot=robot,
-                     smpl_model_dir=a.model_dir, dataset_root=a.dataset_root)
+                     smpl_model_dir=a.model_dir, dataset_root=a.dataset_root,
+                     person_id=a.person_id, object_names=objs)
     view_scene(spec, port=a.port, frame_step=a.frame_step, max_frames=a.max_frames)
 
 

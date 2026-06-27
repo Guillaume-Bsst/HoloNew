@@ -18,9 +18,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from ...contracts import SmplParams
-
-# SMPL native Y-up -> canonical Z-up, as a proper rotation Rx(+90deg): (x,y,z)->(x,-z,y).
-_YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
+from .frames import YUP_TO_ZUP
 
 # Per-joint axis-angle order for the SMPL-X 55-joint tree (matches model.parents[:55]).
 _SMPLX_AA = ("global_orient", "body_pose", "jaw_pose", "leye_pose", "reye_pose",
@@ -61,11 +59,11 @@ def local_rotvecs_from_global(quats_zup: np.ndarray, root_pos_zup: np.ndarray, p
     n = rg.shape[1]
     local = np.empty((rg.shape[0], n, 3), np.float64)
     local[:, 0] = R.from_matrix(                                       # Q^-1 @ R_root (rebase root)
-        np.einsum("ij,tjk->tik", _YUP_TO_ZUP.T, rg[:, 0])).as_rotvec()
+        np.einsum("ij,tjk->tik", YUP_TO_ZUP.T, rg[:, 0])).as_rotvec()
     for j in range(1, n):
         rl = np.einsum("tij,tjk->tik", rg[:, parents[j]].transpose(0, 2, 1), rg[:, j])
         local[:, j] = R.from_matrix(rl).as_rotvec()                    # parent-relative (invariant)
-    transl = np.asarray(root_pos_zup, np.float64) @ _YUP_TO_ZUP - j_rest0
+    transl = np.asarray(root_pos_zup, np.float64) @ YUP_TO_ZUP - j_rest0
     return local.astype(np.float32), transl.astype(np.float32)
 
 
@@ -155,8 +153,8 @@ class SmplBody:
         g_native = _global_rotations(aa, self.parents)
         transl = np.asarray(params.transl[t], np.float64)
         j_posed = _posed_joints(g_native, self._j_rest, self.parents, transl)
-        rot_world = _YUP_TO_ZUP @ g_native                       # Q R per bone
-        pos_world = j_posed @ _YUP_TO_ZUP.T                      # Y-up -> Z-up
+        rot_world = YUP_TO_ZUP @ g_native                       # Q R per bone
+        pos_world = j_posed @ YUP_TO_ZUP.T                      # Y-up -> Z-up
         return rot_world, pos_world
 
     def bone_positions(self, params: SmplParams) -> np.ndarray:
@@ -179,7 +177,7 @@ class SmplBody:
             else:
                 g[:, j] = g[:, par] @ local[:, j]
                 jp[:, j] = jp[:, par] + np.einsum("tij,j->ti", g[:, par], self._j_rest[j] - self._j_rest[par])
-        return jp @ _YUP_TO_ZUP.T                                          # (T, 55, 3) Z-up
+        return jp @ YUP_TO_ZUP.T                                          # (T, 55, 3) Z-up
 
     def posed_vertices(self, params: SmplParams, t: int) -> np.ndarray:
         """(V, 3) world mesh vertices at frame ``t`` (Z-up), via a real SMPL-X forward."""
@@ -192,7 +190,7 @@ class SmplBody:
         with torch.no_grad():
             out = self._model(betas=self._betas_t, **kw)
         verts = out.vertices[0].detach().cpu().numpy()
-        return (verts @ _YUP_TO_ZUP.T).astype(np.float32)
+        return (verts @ YUP_TO_ZUP.T).astype(np.float32)
 
 
 def build_body_model(params: SmplParams, model_dir: Path) -> SmplBody:

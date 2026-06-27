@@ -17,15 +17,12 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 
-from ...contracts import RawMotion, SceneSpec, SmplParams
-from .base import register_loader
-from .smpl import SMPLX_BODY_JOINTS, build_body_model
+from ....contracts import RawMotion, SceneSpec, SmplParams
+from ..base import register_loader
+from ..frames import object_pose_zup
+from ..smpl import SMPLX_BODY_JOINTS, build_body_model
 
-# Y-up -> Z-up as a proper rotation Rx(+90deg): (x,y,z) -> (x,-z,y). A bare y<->z axis swap is
-# a reflection (det -1) that mirrors the body and flips face winding; the rotation preserves it.
-_YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 _MESH_CACHE = Path(tempfile.gettempdir()) / "holov2_hodome_meshes"
 _N_BODY = 22  # SMPL-X body joints used as the demo joints
 
@@ -47,21 +44,6 @@ def _smpl_params(d) -> SmplParams:
         jaw_pose=a("jaw_pose"), leye_pose=a("leye_pose"), reye_pose=a("reye_pose"),
         expression=a("expression"),
     )
-
-
-def _object_poses_zup(obj_npz: Path) -> np.ndarray:
-    """object_R (T,3,3) + object_T (T,3) -> (T,7) world pose [x,y,z,qw,qx,qy,qz] in Z-up.
-
-    A rigid world rotation Q LEFT-multiplies both (Q t, Q R); the mesh stays in its native
-    local frame. ``object_R/T`` reference the centroid-centred mesh (see ``_object_mesh``)."""
-    d = np.load(str(obj_npz), allow_pickle=True)
-    rot = np.asarray(d["object_R"], np.float64)                 # (T,3,3)
-    trans = np.asarray(d["object_T"], np.float64).reshape(-1, 3)
-    trans_z = trans @ _YUP_TO_ZUP.T
-    rot_z = _YUP_TO_ZUP @ rot                                   # Q R
-    quat_xyzw = R.from_matrix(rot_z).as_quat()                  # (T,4) xyzw
-    quat_wxyz = quat_xyzw[:, [3, 0, 1, 2]]
-    return np.concatenate([trans_z, quat_wxyz], axis=1).astype(np.float32)  # pos-first
 
 
 def _object_mesh(token: str, scaned_dir: Path, cache_dir: Path) -> Path:
@@ -110,8 +92,8 @@ class HodomeLoader:
         params = _smpl_params(d)
         body = build_body_model(params, Path(spec.smpl_model_dir))
         T = params.n_frames
-        # Demo joints = the first 22 SMPL-X bone positions (Z-up), via the body model's FK.
-        joints = np.stack([body.bone_transforms(params, t)[1][:_N_BODY] for t in range(T)]).astype(np.float32)
+        # Demo joints = the first 22 SMPL-X bone positions (Z-up), via the body model's batched FK.
+        joints = body.bone_positions(params)[:, :_N_BODY].astype(np.float32)
 
         root = npz.parent.parent                                    # HODome release root
         obj_npz = root / "object" / f"{npz.stem}.npz"
@@ -121,17 +103,15 @@ class HodomeLoader:
         object_mesh_paths: tuple[Path, ...] = ()
         fps = 30.0
         if obj_npz.exists():
-            poses = _object_poses_zup(obj_npz)[:T]                  # (T,7) pos-first Z-up
-            token = npz.stem.split("_", 1)[1] if "_" in npz.stem else npz.stem
-            if spec.object_mesh_paths:
-                mesh = spec.object_mesh_paths[0]
-            else:
-                mesh = _object_mesh(token, root / "scaned_object", cache_dir)
-            object_poses = (poses,)
-            object_mesh_paths = (Path(mesh),)
             od = np.load(str(obj_npz), allow_pickle=True)
+            poses = object_pose_zup(od["object_R"], np.asarray(od["object_T"]).reshape(-1, 3))[:T]
             if "mocap_frame_rate" in od:
                 fps = float(np.asarray(od["mocap_frame_rate"]))
+            token = npz.stem.split("_", 1)[1] if "_" in npz.stem else npz.stem
+            mesh = spec.object_mesh_paths[0] if spec.object_mesh_paths else \
+                _object_mesh(token, root / "scaned_object", cache_dir)
+            object_poses = (poses,)
+            object_mesh_paths = (Path(mesh),)
 
         return RawMotion(
             joint_pos=joints, joint_names=SMPLX_BODY_JOINTS, fps=fps, source_format="hodome",

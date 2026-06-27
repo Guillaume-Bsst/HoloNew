@@ -44,7 +44,7 @@ def get_loader(dataset: str) -> MotionLoader:
     package light (no torch/smplx pulled until a parametric dataset is actually requested)."""
     if dataset not in _LOADERS:
         try:
-            importlib.import_module(f"{__package__}.{dataset}")
+            importlib.import_module(f"{__package__}.datasets.{dataset}")
         except ModuleNotFoundError:
             pass
     try:

@@ -23,7 +23,7 @@ def _spec() -> SceneSpec:
 @pytest.mark.skipif(not (_PT.exists() and _SMPLX.is_dir()), reason="OMOMO data / SMPL-X model absent")
 def test_omomo_reconstruction_matches_body_and_hands():
     from holov2.prepare.load import load
-    from holov2.prepare.load.omomo import _SMPL_2_MUJOCO, _load_pt
+    from holov2.prepare.load.datasets.omomo import _SMPL_2_MUJOCO, _load_pt
     from holov2.prepare.load.smpl import build_body_model
 
     raw = load(_spec())
