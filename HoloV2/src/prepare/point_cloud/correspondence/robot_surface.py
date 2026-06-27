@@ -18,10 +18,6 @@ import numpy as np
 
 from .segments import link_to_segment, seg_index
 
-# Robot surface sampling density (pts / m^2) — a build-time constant of the correspondence, not a
-# per-run knob, so it stays here rather than in the config.
-SURFACE_DENSITY = 3000.0
-
 
 @dataclass(frozen=True)
 class RobotSurface:
@@ -57,7 +53,7 @@ def _outer_shell(mesh):
 
 
 def sample_robot_surface(urdf_path: Path, rest_angles: dict[str, float],
-                         density: float = SURFACE_DENSITY) -> RobotSurface:
+                         density: float) -> RobotSurface:
     """Surface-sample every link mesh at ``density`` pts/m^2, posed in the rest config.
 
     Each mesh is reduced to its watertight outer shell (samples land only on the true outside), then

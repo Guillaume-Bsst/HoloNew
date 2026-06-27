@@ -10,8 +10,8 @@ Renders any ``SDF`` (object / terrain / flat ground) in its local frame:
 Pure consumer: drives the builder once to get the asset, then only reads it; no compute hooks.
 
 Run:
-    python -m holov2.viz.sdf --mesh <path.obj>   [--spacing 0.02] [--margin 0.05] [--port 8080]
-    python -m holov2.viz.sdf --plane <size_m>    [--spacing 0.05] [--margin 0.05] [--port 8080]
+    python -m src.viz.sdf --mesh <path.obj>   [--spacing 0.02] [--margin 0.05] [--port 8080]
+    python -m src.viz.sdf --plane <size_m>    [--spacing 0.05] [--margin 0.05] [--port 8080]
 """
 from __future__ import annotations
 

@@ -11,8 +11,9 @@ import pytest
 
 trimesh = pytest.importorskip("trimesh")
 
-from holov2.contracts import SDF, Channel, SdfConfig
-from holov2.prepare.sdf.build import SdfBuilder, build_plane_sdf, build_sdf
+from src.contracts import SDF, Channel
+from config_types import SdfConfig
+from src.prepare.sdf.build import SdfBuilder, build_plane_sdf, build_sdf
 
 
 def _trilinear(sdf: SDF, pts: np.ndarray) -> np.ndarray:

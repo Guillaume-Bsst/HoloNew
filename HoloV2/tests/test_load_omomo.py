@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from holov2.contracts import RobotSpec, SceneSpec
+from src.contracts import RobotSpec, SceneSpec
 
 _PT = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/OMOMO_new/OMOMO_new/"
            "sub16_largetable_008.pt")
@@ -22,9 +22,9 @@ def _spec() -> SceneSpec:
 
 @pytest.mark.skipif(not (_PT.exists() and _SMPLX.is_dir()), reason="OMOMO data / SMPL-X model absent")
 def test_omomo_reconstruction_matches_body_and_hands():
-    from holov2.prepare.load import load
-    from holov2.prepare.load.datasets.omomo import _SMPL_2_MUJOCO, _load_pt
-    from holov2.prepare.load.smpl import build_body_model
+    from src.prepare.load import load
+    from src.prepare.load.datasets.omomo import _SMPL_2_MUJOCO, _load_pt
+    from src.prepare.load.smpl import build_body_model
 
     raw = load(_spec())
     T = raw.n_frames

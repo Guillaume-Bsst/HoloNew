@@ -6,11 +6,12 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation as R
 
-from holov2.contracts import CloudConfig, PointCloud, RobotSpec, SceneSpec
-from holov2.prepare.point_cloud import (assemble_rigid_cloud, build_object_cloud,
+from src.contracts import PointCloud, RobotSpec, SceneSpec
+from config_types import CloudConfig
+from src.prepare.point_cloud import (assemble_rigid_cloud, build_object_cloud,
                                         sample_object_surface)
-from holov2.prepare.point_cloud.objects import ObjectCloudBuilder
-from holov2.targets.interaction import pose_cloud
+from src.prepare.point_cloud.objects import ObjectCloudBuilder
+from src.targets.interaction import pose_cloud
 
 _DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
 _HODOME = _DATA / "HODome"
@@ -69,8 +70,8 @@ _SEQ = _pick()
 
 @pytest.mark.skipif(_SEQ is None, reason="HODome data not available")
 def test_object_cloud_on_real_mesh_poses_near_world_pose():
-    from holov2.prepare.load import load
-    from holov2.prepare.load.mesh import load_mesh
+    from src.prepare.load import load
+    from src.prepare.load.mesh import load_mesh
 
     spec = SceneSpec(
         dataset="hodome", motion_path=_SEQ,

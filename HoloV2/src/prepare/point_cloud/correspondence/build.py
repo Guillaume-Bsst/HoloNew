@@ -17,13 +17,14 @@ from pathlib import Path
 
 import numpy as np
 
-from ....contracts import Config, CorrespondenceTable, RobotSpec
+from ....contracts import CorrespondenceTable, RobotSpec
+from config_types import PrepareConfig
 from ...load.robot import correspondence_rest_angles
 from ...load.smpl import SmplBody, rest_body_model
 from ..sampling import SurfaceSampling, sampling_id
 from .load import load_correspondence
 from .ot_couple import couple
-from .robot_surface import SURFACE_DENSITY, sample_robot_surface
+from .robot_surface import sample_robot_surface
 from .segments import point_segments
 
 # SMPL-X rest is native Y-up facing +Z; humanoid URDF worlds are Z-up facing +X. The OT couples the
@@ -55,13 +56,14 @@ def _human_source(body: SmplBody, sampling: SurfaceSampling) -> tuple[np.ndarray
     return pts_robot, seg
 
 
-def build_correspondence(config: Config, neutral_body: SmplBody,
+def build_correspondence(config: PrepareConfig, neutral_body: SmplBody,
                          spec: RobotSpec) -> tuple[CorrespondenceTable, SurfaceSampling]:
     """Run the full OT pipeline -> ``(CorrespondenceTable, SurfaceSampling)``."""
     sampling = _sample_surface(neutral_body.rest_vertices(None), neutral_body.faces,
                                config.cloud.human_density, config.cloud.seed)
     human_pts, human_seg = _human_source(neutral_body, sampling)
-    robot = sample_robot_surface(spec.urdf_path, correspondence_rest_angles(spec.name), SURFACE_DENSITY)
+    robot = sample_robot_surface(spec.urdf_path, correspondence_rest_angles(spec.name),
+                                 config.correspondence.robot_density)
     smpl_idx = couple(human_pts, human_seg, robot.points_world, robot.seg, config.correspondence.ot_reg)
     table = CorrespondenceTable(smpl_idx=smpl_idx, link_idx=robot.link_idx,
                                 offset_local=robot.offset_local, link_names=robot.link_names,
@@ -74,14 +76,14 @@ class CorrespondenceBuilder:
     template). Scoped per (robot, template, sampling/OT config); shape-neutral, so it is reused
     across subjects. ``load`` is the shared reader (``correspondence/load.load_correspondence``)."""
 
-    def cache_key(self, config: Config, spec: RobotSpec) -> str:
+    def cache_key(self, config: PrepareConfig, spec: RobotSpec) -> str:
         h = hashlib.sha1()
         c, cc = config.cloud, config.correspondence
-        h.update(f"{c.human_density}|{c.seed}|{cc.rest_pose}|{cc.ot_reg}|{spec.name}".encode())
+        h.update(f"{c.human_density}|{c.seed}|{cc.rest_pose}|{cc.ot_reg}|{cc.robot_density}|{spec.name}".encode())
         h.update(str(spec.urdf_path).encode())
         return h.hexdigest()
 
-    def build(self, config: Config, neutral_body: SmplBody,
+    def build(self, config: PrepareConfig, neutral_body: SmplBody,
               spec: RobotSpec) -> tuple[CorrespondenceTable, SurfaceSampling]:
         return build_correspondence(config, neutral_body, spec)
 
@@ -95,9 +97,9 @@ class CorrespondenceBuilder:
         return load_correspondence(path)
 
 
-def regenerate(model_dir: Path, spec: RobotSpec, out_path: Path, config: Config | None = None) -> None:
+def regenerate(model_dir: Path, spec: RobotSpec, out_path: Path, config: PrepareConfig | None = None) -> None:
     """Rebuild the correspondence for ``spec`` from a NEUTRAL template body and write the ``.npz``."""
-    config = config or Config()
+    config = config or PrepareConfig()
     body = rest_body_model(np.zeros(10, np.float32), "neutral", model_dir)
     builder = CorrespondenceBuilder()
     asset = builder.build(config, body, spec)

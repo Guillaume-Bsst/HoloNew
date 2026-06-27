@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from holov2.contracts import RobotSpec, SceneSpec
+from src.contracts import RobotSpec, SceneSpec
 
 _DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
 _HODOME = _DATA / "HODome"
@@ -43,8 +43,8 @@ def _forward_joints_zup(params, t):
 
 @pytest.mark.skipif(_SEQ is None, reason="HODome data / SMPL-X model not available")
 def test_bone_transforms_match_forward():
-    from holov2.prepare.load import load
-    from holov2.prepare.load.smpl import build_body_model
+    from src.prepare.load import load
+    from src.prepare.load.smpl import build_body_model
 
     spec = SceneSpec(
         dataset="hodome", motion_path=_SEQ,

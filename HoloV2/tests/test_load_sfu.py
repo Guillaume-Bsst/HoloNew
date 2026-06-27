@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from holov2.contracts import RobotSpec, SceneSpec
+from src.contracts import RobotSpec, SceneSpec
 
 _NPZ = Path("/home/vboxuser/Documents/wbt_rl/modules/01_retargeting/HoloNew/HoloNew/demo_data/"
             "SFU/0005_2FeetJump001.npz")
@@ -14,8 +14,8 @@ _SMPLX = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/model
 
 @pytest.mark.skipif(not (_NPZ.exists() and _SMPLX.is_dir()), reason="SFU data / SMPL-X model absent")
 def test_sfu_reconstruction_matches_positions():
-    from holov2.prepare.load import load
-    from holov2.prepare.load.smpl import build_body_model
+    from src.prepare.load import load
+    from src.prepare.load.smpl import build_body_model
 
     spec = SceneSpec(
         dataset="sfu", motion_path=_NPZ,

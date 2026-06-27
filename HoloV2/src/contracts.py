@@ -10,8 +10,9 @@ on each other's code, which keeps the dependency graph acyclic.
 
 Two distinct inputs:
 - ``SceneSpec`` = WHAT to run (data identity: dataset, sequence, robot, model dirs).
-- ``Config``    = HOW (algorithm knobs). Cache keys mix the relevant ``Config`` subset with
-  the ``SceneSpec`` identity.
+- the step CONFIG = HOW (algorithm knobs). It lives per step in its own ``config.py`` (e.g.
+  ``prepare/config.py``), NOT here: ``contracts`` holds only the data that flows through the
+  pipeline. Cache keys mix the relevant config subset with the ``SceneSpec`` identity.
 
 Conventions
 -----------
@@ -28,7 +29,7 @@ Conventions
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -76,13 +77,15 @@ class RobotModel(Protocol):
 @runtime_checkable
 class AssetBuilder(Protocol):
     """Common interface of the offline deliverable builders (``prepare/``): calibration,
-    sdf, point_cloud. Each hashes ONLY its relevant ``Config`` subset (+ inputs + upstream
-    keys) so a param change invalidates only the affected items."""
+    sdf, point_cloud. Each hashes ONLY its relevant config subset (its module's ``config.py``,
+    + inputs + upstream keys) so a param change invalidates only the affected items. ``config`` is
+    typed ``Any`` here because each builder takes its own concrete sub-config (the protocol is
+    structural)."""
 
-    def cache_key(self, config: "Config", *inputs: Any) -> str:
+    def cache_key(self, config: Any, *inputs: Any) -> str:
         """Stable key from the relevant config subset + inputs (geometry/subject hash)."""
 
-    def build(self, config: "Config", *inputs: Any) -> Any:
+    def build(self, config: Any, *inputs: Any) -> Any:
         """The heavy offline computation -> the asset."""
 
     def load(self, path: Path) -> Any: ...
@@ -90,7 +93,7 @@ class AssetBuilder(Protocol):
 
 
 # =============================================================================
-# Entry: what to run (data identity) — distinct from Config
+# Entry: what to run (data identity) — distinct from the step config
 # =============================================================================
 @dataclass(frozen=True)
 class RobotSpec:
@@ -106,7 +109,7 @@ class RobotSpec:
 @dataclass(frozen=True)
 class SceneSpec:
     """WHAT to run. The loader turns this into ``RawMotion``; cache keys mix this identity
-    with the relevant ``Config`` subset."""
+    with the relevant step-config subset (see e.g. ``prepare/config.py``)."""
 
     dataset: str                              # loader key (omomo/hodome/sfu/lafan/...)
     motion_path: Path                         # the sequence
@@ -121,52 +124,6 @@ class SceneSpec:
                                               # (None => the first present); ignored if single-person
     object_names: tuple[str, ...] | None = None  # named-object datasets: subset to load
                                               # (None => all); ignored if objects are unnamed
-
-
-# =============================================================================
-# Configuration — drives BOTH prepare and targets; cache keys derive from it
-# =============================================================================
-# The default VALUES below are illustrative (from the previous HoloNew implementation);
-# finalised when each builder lands.
-@dataclass(frozen=True)
-class CalibrationConfig:
-    foot_percentile: float = 50.0    # human floor = this percentile of the lower foot-joint height
-                                     # over the clip (50 = median; targets the resting foot, robust
-                                     # to the SMPL toe penetration a min/low-percentile would chase)
-
-
-@dataclass(frozen=True)
-class SdfConfig:
-    spacing: float = 0.01            # isotropic voxel size (m) for object/terrain grids
-    margin: float = 0.05             # band beyond the surface that is stored
-    # (the flat ground is a coarse but EXACT plane SDF — built analytically, no mesh; see build_plane_sdf)
-
-
-@dataclass(frozen=True)
-class CloudConfig:
-    human_density: float = 2000.0    # points / m^2 on the SMPL surface
-    object_density: float = 2000.0   # points / m^2 on each object
-    seed: int = 0                    # deterministic sampling — KEY component (shared by the
-                                     # human cloud AND the correspondence; they MUST agree)
-    k_influences: int = 4            # K of the sparse LBS-on-cloud skinning
-
-
-@dataclass(frozen=True)
-class CorrespondenceConfig:
-    rest_pose: str = "tpose"         # G1 rest config for the OT alignment
-    ot_reg: float = 0.05             # OT entropic regularisation
-
-
-@dataclass(frozen=True)
-class Config:
-    """Single configuration of the whole q-independent pipeline (prepare + targets).
-    ``cloud`` feeds both the human cloud and the correspondence (the dependency chain)."""
-
-    calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
-    sdf: SdfConfig = field(default_factory=SdfConfig)
-    cloud: CloudConfig = field(default_factory=CloudConfig)
-    correspondence: CorrespondenceConfig = field(default_factory=CorrespondenceConfig)
-    margin: float = 0.05             # field-eval activation margin (used by targets)
 
 
 # =============================================================================

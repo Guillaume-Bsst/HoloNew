@@ -8,8 +8,11 @@ la LOGIQUE algorithmique, jamais la structure** (voir la carte de portage plus b
 ## Règles d'or (NON négociables)
 
 1. **Dépendances à sens unique, zéro cycle.** Une responsabilité par module. Pas de classe-dieu.
-2. **`contracts.py` = source de vérité unique des types** (dataclasses `frozen`). On NE duplique
-   JAMAIS une définition ailleurs (docs incluses : on y pointe).
+2. **`src/contracts.py` = source de vérité unique des types de DONNÉES** (artefacts `frozen` qui
+   transitent dans le pipe). On NE duplique JAMAIS une définition ailleurs (docs incluses : on y
+   pointe). Les **knobs de config n'y sont PAS** : ils vivent au TOP du repo, séparés du code, en
+   deux dossiers — `config_types/` (SCHÉMAS, 1 module/étape : `prepare.py` → `PrepareConfig` +
+   sous-configs) et `config_values/` (PRESETS nommés : `prepare_config("default")`).
 3. **Cœur pur, effets de bord aux extrémités.** Les ops de calcul ne font ni I/O, ni log, ni
    mutation de leurs inputs ; elles prennent des données et rendent un artefact `frozen`. Disque
    dans `prepare/load`, écran dans `viz/`.
@@ -28,17 +31,19 @@ la LOGIQUE algorithmique, jamais la structure** (voir la carte de portage plus b
 ## Architecture
 
 Carte complète + flux : `docs/ARCHITECTURE.md` (source unique de la structure ; **ne pas la
-redupliquer ici**). En bref : `SceneSpec`+`Config` → **prepare/** (offline, build-once cachés) →
+redupliquer ici**). En bref : `SceneSpec`+`PrepareConfig` → **prepare/** (offline, build-once cachés) →
 `{GroundedScene, InteractionContext, Calibration}` → **targets/** (online per-frame) →
 `FrameTargets` → **solve/** (à venir). `viz/` et `obs.py` = consommateurs. Détails par étape :
 `PREPARE/TARGETS/VIZ/CACHE/OBS.md`.
 
 ## Conventions de code
 
-- **Poids des imports** : `contracts.py`, `obs.py` = **numpy-only** (légers,
-  importables partout). torch/smplx/trimesh/coal/pinocchio **uniquement** dans `prepare/load/` et
-  les builders `prepare/`. `targets`/`solve`/`viz` ne dépendent jamais de torch.
-- **Imports relatifs** dans le package (`from ..contracts import X`).
+- **Poids des imports** : `src/contracts.py`, `src/obs.py` = **numpy-only** ; `config_types/` =
+  stdlib-only (dataclasses) — tous légers, importables partout. torch/smplx/trimesh/coal/pinocchio
+  **uniquement** dans `src/prepare/load/` et les builders `src/prepare/`. `targets`/`solve`/`viz` ne
+  dépendent jamais de torch.
+- **Imports** : relatifs DANS `src/` (`from ..contracts import X`) ; **absolus** pour atteindre la
+  config hors de `src/` (`from config_types import X`) et dans les tests (`from src.… import …`).
 - **Types partout** ; tableaux annotés `np.ndarray` + **forme en commentaire** (`# (T, J, 3)`).
 - **dtype** : compute en `float64` ; arrays **stockés/cachés** en `float32` (grilles SDF, nuages).
 - **Erreurs** : valider les invariants de contrat par un `raise ValueError` explicite à la

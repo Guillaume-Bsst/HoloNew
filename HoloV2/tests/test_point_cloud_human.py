@@ -9,10 +9,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from holov2.contracts import CloudConfig, RobotSpec, SceneSpec
-from holov2.prepare.point_cloud import HumanCloudBuilder, build_human_cloud
-from holov2.prepare.point_cloud.correspondence import load_correspondence
-from holov2.targets.interaction import pose_cloud
+from src.contracts import RobotSpec, SceneSpec
+from config_types import CloudConfig
+from src.prepare.point_cloud import HumanCloudBuilder, build_human_cloud
+from src.prepare.point_cloud.correspondence import load_correspondence
+from src.targets.interaction import pose_cloud
 
 _DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
 _HODOME = _DATA / "HODome"
@@ -40,8 +41,8 @@ def _posed_surface_ref(body, params, t, tri_idx, bary):
 
 @pytest.mark.skipif(_SEQ is None, reason="HODome data / SMPL-X model not available")
 def test_human_cloud_parity_determinism_roundtrip(tmp_path):
-    from holov2.prepare.load import load
-    from holov2.prepare.load.smpl import build_body_model
+    from src.prepare.load import load
+    from src.prepare.load.smpl import build_body_model
 
     spec = SceneSpec(
         dataset="hodome", motion_path=_SEQ,

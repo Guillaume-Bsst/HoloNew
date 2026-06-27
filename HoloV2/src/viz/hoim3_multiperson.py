@@ -7,7 +7,7 @@ the per-entity loading can be checked against a coherent scene. Pure consumer: i
 (objects + one person) and ``build_person_params`` (the other people) + the SMPL-X body model.
 
 Run:
-    python -m holov2.viz.hoim3_multiperson --motion-path <..._human.npz> --model-dir <smplx_models>
+    python -m src.viz.hoim3_multiperson --motion-path <..._human.npz> --model-dir <smplx_models>
 """
 from __future__ import annotations
 

@@ -1,11 +1,14 @@
 # HoloV2 — Architecture (vue d'ensemble)
 
 Carte globale. Détails par étape : `PREPARE.md`, `TARGETS.md`, `VIZ.md`, `CACHE.md`,
-`OBS.md` (et `SOLVE.md`, à venir). Source de vérité des types : `holov2/contracts.py`.
+`OBS.md` (et `SOLVE.md`, à venir). Source de vérité des types : `src/contracts.py`.
 
-`prepare` et `targets` sont pilotés par une **`Config`** (`contracts.Config` : sous-configs
-`calibration/sdf/cloud/correspondence` + `margin`). Les clés du cache build-once en dérivent
-(voir `CACHE.md`).
+La **config** est séparée du code ET des données, en deux dossiers au TOP du repo :
+**`config_types/`** = les SCHÉMAS (dataclasses `frozen` ; `prepare.py` → `PrepareConfig` + sous-configs
+`calibration/sdf/cloud/correspondence`) et **`config_values/`** = les PRESETS nommés (valeurs prêtes,
+ex. `prepare_config("default")`). `src/contracts.py` ne porte QUE les données qui transitent ;
+`targets`/`solve` ajouteront leur module dans ces deux dossiers. Les clés du cache build-once
+dérivent de la config (voir `CACHE.md`).
 
 ## Règle d'or : zéro spaghetti
 1. **Dépendances à sens unique**, jamais de cycle.
@@ -40,29 +43,33 @@ fichiers bruts ─► PREPARE ─► {GroundedScene, InteractionContext, Calibra
 ```
 
 ## Arborescence
-Entrée = `SceneSpec` (data identity) + `Config` (knobs). Source de vérité des types :
-`contracts.py`.
+Entrée = `SceneSpec` (data identity) + `PrepareConfig` (knobs ; schéma dans `config_types/`, presets
+dans `config_values/`). Source de vérité des types de DONNÉES : `src/contracts.py`.
 
 ```
-holov2/
-  contracts.py     TOUS les contrats (SceneSpec, RobotSpec, Config, SDF, assets, cibles, …) — ne dépend de rien
+HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · models/ · tests/
+  config_types/    SCHÉMAS de config (dataclasses frozen), 1 module/étape : prepare.py (targets/solve à venir)
+  config_values/   PRESETS nommés (valeurs prêtes), 1 module/étape : prepare.py -> prepare_config("default")
+  src/             TOUT le code (importé `src.…` ; imports relatifs en interne)
+    contracts.py     contrats de DONNÉES (SceneSpec, RobotSpec, SDF, assets, cibles, …) — pas la config — ne dépend de rien
+    obs.py           observabilité (Profile/spans), no-op quand off
 
-  prepare/         ÉTAPE 1 — offline ; SEUL endroit qui instancie SMPL/meshes/robot     [PREPARE.md]
-    load/            base + 1/dataset (-> RawMotion) · smpl (-> BodyModel) · mesh (-> verts/faces) · robot (-> RobotModel)
-    calibration/     LIVRABLE : grounding scène (humain + objet)
-    sdf/             LIVRABLE : SDF objets/terrain/sol (sol plat = SDF de plan exact, non caché)
-    point_cloud/     LIVRABLE : nuages (human, objects) + correspondence (SMPL<->G1)
-    scene.py · runner.py   (prepare(scene_spec, config) : load-or-build + assemble)
+    prepare/         ÉTAPE 1 — offline ; SEUL endroit qui instancie SMPL/meshes/robot     [PREPARE.md]
+      load/            base + 1/dataset (-> RawMotion) · smpl (-> BodyModel) · mesh (-> verts/faces) · robot (-> RobotModel)
+      calibration/     LIVRABLE : grounding scène (humain + objet)
+      sdf/             LIVRABLE : SDF objets/terrain/sol (sol plat = SDF de plan exact, non caché)
+      point_cloud/     LIVRABLE : nuages (human, objects) + correspondence (SMPL<->G1)
+      scene.py · runner.py   (prepare(scene_spec, config) : load-or-build + assemble)
 
-  targets/         ÉTAPE 2 — construction ONLINE des cibles                          [TARGETS.md]
-    style/           objectif de style (posture, ignore l'objet) -> StyleTargets
-    interaction/     pointclouds · eval · transport · targets -> Robot/Env InteractionTargets
-    pipeline.py      process_frame -> FrameTargets ; trace_frame -> FrameTrace
+    targets/         ÉTAPE 2 — construction ONLINE des cibles                          [TARGETS.md]
+      style/           objectif de style (posture, ignore l'objet) -> StyleTargets
+      interaction/     pointclouds · eval · transport · targets -> Robot/Env InteractionTargets
+      pipeline.py      process_frame -> FrameTargets ; trace_frame -> FrameTrace
 
-  viz/             VISUALISEUR — consommateur pur, zéro hook                         [VIZ.md]
-    viewer.py        gros viewer viser, toggles ; lit FrameTrace + assets prepare
+    viz/             VISUALISEUR — consommateur pur, zéro hook                         [VIZ.md]
+      viewer.py        gros viewer viser, toggles ; lit FrameTrace + assets prepare
 
-  solve/           ÉTAPE 3 (à venir)                                                 [SOLVE.md]
+    solve/           ÉTAPE 3 (à venir)                                                 [SOLVE.md]
 ```
 
 ## Graphe de dépendances (acyclique)

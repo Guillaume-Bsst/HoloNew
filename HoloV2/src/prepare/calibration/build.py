@@ -48,16 +48,8 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from ...contracts import BodyModel, Calibration, CalibrationConfig, RawMotion, SmplParams
-
-# Fallback stature (m) for a non-parametric source (no betas to FK); matches the previous HoloNew
-# default human height.
-DEFAULT_HUMAN_HEIGHT = 1.78
-
-# Percentile of the lowest posed object point used as the shared object floor offset: ~the "lowest
-# reach" (when the floor-resting object is set down), robust to a stray low vertex / frame. Not a
-# config knob (unlike the foot): the spec is simply "the floor-touching object just above the floor".
-_OBJECT_FLOOR_PCT = 1.0
+from ...contracts import BodyModel, Calibration, RawMotion, SmplParams
+from config_types import CalibrationConfig
 
 
 # =============================================================================
@@ -133,11 +125,12 @@ class CalibrationBuilder:
     in a ``prof.span("calibration")``."""
 
     def cache_key(self, config: CalibrationConfig, raw: RawMotion) -> str:
-        """Stable hash of everything the calibration depends on: ``foot_percentile`` + the demo
-        joints (foot-joint floor offset), the subject shape (betas/gender -> stature), and the object
-        meshes + poses (the shared object floor offset). No robot term — calibration is robot-free."""
+        """Stable hash of everything the calibration depends on: the knobs (``foot_percentile``,
+        ``object_floor_pct``, ``fallback_stature``) + the demo joints (foot-joint floor offset), the
+        subject shape (betas/gender -> stature), and the object meshes + poses (the shared object floor
+        offset). No robot term — calibration is robot-free."""
         h = hashlib.sha1()
-        h.update(f"{config.foot_percentile}".encode())
+        h.update(f"{config.foot_percentile}|{config.object_floor_pct}|{config.fallback_stature}".encode())
         h.update(np.ascontiguousarray(raw.joint_pos, np.float32).tobytes())   # drives the foot offset
         p = raw.smpl_params
         if p is not None:                                                     # drives the stature
@@ -161,8 +154,8 @@ class CalibrationBuilder:
             from ..load.smpl import build_body_model
             body = build_body_model(raw.smpl_params, smpl_model_dir)
 
-        # Stature: betas-FK from the real subject when parametric; the default otherwise.
-        stature = human_stature(body, raw.smpl_params) if body is not None else DEFAULT_HUMAN_HEIGHT
+        # Stature: betas-FK from the real subject when parametric; the configured fallback otherwise.
+        stature = human_stature(body, raw.smpl_params) if body is not None else config.fallback_stature
 
         # Human floor offset: a percentile of the lower foot-joint height (mocap demo joints).
         human = foot_floor_offset(raw.joint_pos, _foot_indices(raw.joint_names), config.foot_percentile)
@@ -172,7 +165,7 @@ class CalibrationBuilder:
         if raw.object_mesh_paths:
             from ..load.mesh import load_mesh
             obj_verts = [load_mesh(p)[0] for p in raw.object_mesh_paths]
-            object_offset = object_floor_offset(obj_verts, list(raw.object_poses_raw), _OBJECT_FLOOR_PCT)
+            object_offset = object_floor_offset(obj_verts, list(raw.object_poses_raw), config.object_floor_pct)
         else:
             object_offset = 0.0
 

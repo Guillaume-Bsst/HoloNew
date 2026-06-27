@@ -18,7 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ...contracts import CloudConfig, PointCloud, SmplParams
+from ...contracts import PointCloud, SmplParams
+from config_types import CloudConfig
 from ..load.smpl import SmplBody
 from .sampling import SurfaceSampling
 from .store import load_cloud, save_cloud

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from holov2.contracts import RobotSpec, SceneSpec
+from src.contracts import RobotSpec, SceneSpec
 
 _DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
 _HODOME = _DATA / "HODome"
@@ -26,7 +26,7 @@ _SEQ = _pick_sequence()
 
 @pytest.mark.skipif(_SEQ is None, reason="HODome data / SMPL-X model not available")
 def test_hodome_load_contract():
-    from holov2.prepare.load import load  # lazy: imports + registers the hodome loader
+    from src.prepare.load import load  # lazy: imports + registers the hodome loader
 
     spec = SceneSpec(
         dataset="hodome", motion_path=_SEQ,

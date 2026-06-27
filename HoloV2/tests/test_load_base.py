@@ -1,11 +1,11 @@
-"""Unit tests for the dataset-loader registry (``holov2.prepare.load.base``)."""
+"""Unit tests for the dataset-loader registry (``src.prepare.load.base``)."""
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from holov2.contracts import RawMotion, RobotSpec, SceneSpec
-from holov2.prepare.load import base
+from src.contracts import RawMotion, RobotSpec, SceneSpec
+from src.prepare.load import base
 
 
 def _spec(dataset: str) -> SceneSpec:

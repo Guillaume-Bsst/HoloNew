@@ -2,7 +2,7 @@
 its OWN segment (the property that keeps hand->hand, foot->foot), and all points get assigned."""
 import numpy as np
 
-from holov2.prepare.point_cloud.correspondence.ot_couple import couple
+from src.prepare.point_cloud.correspondence.ot_couple import couple
 
 
 def test_couple_assigns_within_segment():

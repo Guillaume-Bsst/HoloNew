@@ -1,4 +1,4 @@
-# HoloV2 — Observabilité (`holov2/obs.py`)
+# HoloV2 — Observabilité (`src/obs.py`)
 
 Timing + logs **à chaque étape**, sans spaghetti. Primitive : `Profile` (spans imbriqués +
 events), **opt-in** et **no-op quand désactivé** (le hot path ne paie rien).

@@ -6,11 +6,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from holov2.contracts import (Calibration, CalibrationConfig, RawMotion, RobotSpec, SmplParams)
-from holov2.prepare import scene
-from holov2.prepare.calibration import (CalibrationBuilder, DEFAULT_HUMAN_HEIGHT, build_calibration,
+from src.contracts import (Calibration, RawMotion, RobotSpec, SmplParams)
+from config_types import CalibrationConfig
+from src.prepare import scene
+from src.prepare.calibration import (CalibrationBuilder, build_calibration,
                                         foot_floor_offset, human_stature, object_floor_offset)
-from holov2.prepare.calibration.build import _foot_indices
+from src.prepare.calibration.build import _foot_indices
 
 
 def _write_cube_obj(path: Path, half: float = 0.5) -> None:
@@ -107,7 +108,7 @@ def test_builder_non_parametric_uses_default_stature():
     calib = build_calibration(_raw(3, parametric=False), CalibrationConfig())
     assert calib.human_offset == pytest.approx(0.05)                 # foot joints (same path)
     assert calib.object_offset == 0.0                                # no objects
-    assert calib.human_stature == pytest.approx(DEFAULT_HUMAN_HEIGHT)  # default (no betas to FK)
+    assert calib.human_stature == pytest.approx(CalibrationConfig().fallback_stature)  # default (no betas to FK)
 
 
 def test_builder_object_offset_grounds_lowest_object(tmp_path):
@@ -177,9 +178,9 @@ _SMPLX = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/model
 
 @pytest.mark.skipif(not (_NPZ.exists() and _SMPLX.is_dir()), reason="SFU data / SMPL-X model absent")
 def test_calibration_grounds_real_sfu_foot_to_zero():
-    from holov2.contracts import SceneSpec
-    from holov2.prepare.load import load
-    from holov2.prepare.load.smpl import build_body_model
+    from src.contracts import SceneSpec
+    from src.prepare.load import load
+    from src.prepare.load.smpl import build_body_model
 
     spec = SceneSpec(dataset="sfu", motion_path=_NPZ, robot=_robot(1.3), smpl_model_dir=_SMPLX)
     raw = load(spec)

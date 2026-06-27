@@ -84,11 +84,12 @@ Au-dessus, `contracts.py` (types partagés). SMPL/meshes ne sont chargés/instan
 QUE dans `prepare/`.
 
 Entrée : **`SceneSpec`** (data identity : dataset, séquence, `RobotSpec`, model dirs) — distinct
-de **`Config`** (knobs d'algo). Le loader transforme `SceneSpec` -> `RawMotion`.
+de **`PrepareConfig`** (knobs d'algo ; schéma dans `config_types/`, presets dans `config_values/`).
+Le loader transforme `SceneSpec` -> `RawMotion`.
 
 ```
-holov2/
-  contracts.py          contrats partagés (assets, cibles, SceneSpec, RobotSpec, Config, SDF…)
+src/                    (sous `HoloV2/` ; la config est aux dossiers TOP `config_types/` + `config_values/`)
+  contracts.py          contrats de DONNÉES (assets, cibles, SceneSpec, RobotSpec, SDF…) — pas la config
 
   prepare/             ÉTAPE 1 — TOUT l'offline (seul endroit qui instancie SMPL/meshes/robot)
     load/                loaders OFFLINE (sous-package)
@@ -160,11 +161,12 @@ class AssetBuilder(Protocol):
 
 ## 5. Les classes (contrats)
 
-**Source de vérité unique : `holov2/contracts.py`** — pas de duplication ici (zéro drift).
+**Source de vérité unique : `src/contracts.py`** — pas de duplication ici (zéro drift).
 Inventaire :
 
 - **Protocols** : `BodyModel`, `RobotModel`, `AssetBuilder`
-- **entrée / config** : `RobotSpec`, `SceneSpec` (data identity) · `Config` (+ sous-configs)
+- **entrée (data identity)** : `RobotSpec`, `SceneSpec`. La **config** (`PrepareConfig` + sous-configs)
+  n'est PAS un contrat de données : schémas dans `config_types/`, presets dans `config_values/` (top du repo).
 - **load** : `SmplParams` (avec MAINS), `RawMotion` (J_demo)
 - **scène / calib** : `ObjectMesh` (+ `static`), `Calibration`, `GroundedScene` (LÉGER)
 - **champs** : `SDF` (grille, objets/terrain) · `ContactField` · `MultiChannelField` (per-frame

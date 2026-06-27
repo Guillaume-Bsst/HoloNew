@@ -11,7 +11,7 @@ from ..obs import NULL
 
 
 def prepare(scene_spec, config, prof=NULL):
-    """scene_spec (sujet, objets, robot, prise) + Config -> (GroundedScene, InteractionContext,
+    """scene_spec (sujet, objets, robot, prise) + PrepareConfig -> (GroundedScene, InteractionContext,
     Calibration).  Span plan (filled when prepare/ is implemented):
 
         with prof.span("prepare"):

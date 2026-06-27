@@ -25,7 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
-from ...contracts import SDF, SdfConfig
+from ...contracts import SDF
+from config_types import SdfConfig
 
 
 def build_sdf(vertices: np.ndarray, faces: np.ndarray, spacing: float, margin: float,

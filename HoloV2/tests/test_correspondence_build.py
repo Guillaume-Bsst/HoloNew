@@ -6,9 +6,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from holov2.contracts import Config, RobotSpec
-from holov2.prepare.point_cloud.correspondence import build_correspondence
-from holov2.prepare.point_cloud.correspondence.segments import (
+from src.contracts import RobotSpec
+from config_types import PrepareConfig
+from src.prepare.point_cloud.correspondence import build_correspondence
+from src.prepare.point_cloud.correspondence.segments import (
     link_to_segment, point_segments, seg_index)
 
 _DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
@@ -18,11 +19,11 @@ _URDF = Path(__file__).resolve().parent.parent / "models" / "g1" / "g1_29dof.urd
 
 @pytest.mark.skipif(not (_SMPLX.is_dir() and _URDF.exists()), reason="SMPL-X model / G1 URDF absent")
 def test_rebuild_segment_consistency_and_determinism():
-    from holov2.prepare.load.smpl import rest_body_model
+    from src.prepare.load.smpl import rest_body_model
 
     spec = RobotSpec(name="g1", urdf_path=_URDF, link_names=(), dof=29, height=1.3)
     body = rest_body_model(np.zeros(10, np.float32), "neutral", _SMPLX)
-    table, sampling = build_correspondence(Config(), body, spec)
+    table, sampling = build_correspondence(PrepareConfig(), body, spec)
 
     assert table.n_points > 1000 and len(table.link_names) > 20
     assert int(table.smpl_idx.max()) < sampling.n_points
@@ -35,7 +36,7 @@ def test_rebuild_segment_consistency_and_determinism():
     assert (robot_seg == human_seg[table.smpl_idx]).all()
 
     # determinism (cache soundness): a rebuild must reproduce the asset exactly.
-    table2, sampling2 = build_correspondence(Config(), body, spec)
+    table2, sampling2 = build_correspondence(PrepareConfig(), body, spec)
     assert np.array_equal(table.smpl_idx, table2.smpl_idx)
     assert np.array_equal(table.link_idx, table2.link_idx)
     assert np.allclose(table.offset_local, table2.offset_local)

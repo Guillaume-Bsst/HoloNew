@@ -8,7 +8,7 @@ the object points (rigid K=1) are posed by their per-frame world pose and sit on
 Pure consumer (drives the bake to get artifacts; no compute hooks).
 
 Run:
-    python -m holov2.viz.cloud --motion-path <smplx.npz> --model-dir <smplx_models> [--dataset hodome]
+    python -m src.viz.cloud --motion-path <smplx.npz> --model-dir <smplx_models> [--dataset hodome]
 """
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
 
-from ..contracts import CloudConfig, RobotSpec, SceneSpec
+from ..contracts import RobotSpec, SceneSpec
+from config_types import CloudConfig
 from ..prepare.load import load
 from ..prepare.load.mesh import load_mesh
 from ..prepare.load.smpl import build_body_model

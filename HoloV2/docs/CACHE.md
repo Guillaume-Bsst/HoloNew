@@ -2,7 +2,8 @@
 
 Les sorties de `prepare/` sont **régénérables mais coûteuses** → cachées. Principe central :
 **rien n'est caché « par scène » ; chaque item est caché à la granularité de SES
-dépendances**, et tout dépend d'une **`Config`** (`contracts.Config`). Une scène est
+dépendances**, et tout dépend d'une **`PrepareConfig`** (schéma `config_types/prepare.py`, presets
+`config_values/prepare.py`). Une scène est
 **assemblée** à partir d'items cachés individuellement.
 
 ## Ce qui est caché, et de quoi ça dépend (la clé)
@@ -39,7 +40,7 @@ transport silencieusement faux).
 **État** : la correspondance est **reconstruite en V2** par `correspondence/build.py` (OT
 par-segment ; `prepare/load/robot.py` échantillonne la surface robot). Son builder **génère**
 l'échantillonnage `(tri_idx, bary)` sur l'humain neutre et l'**embarque** dans `corr_neutral.npz`
-(régénérable : `python -m holov2.prepare.point_cloud.correspondence.build`) ; `load.py` le relit et
+(régénérable : `python -m src.prepare.point_cloud.correspondence.build`) ; `load.py` le relit et
 le nuage humain (sujet) le réutilise. Conforme à la chaîne ci-dessus (correspondance bâtie SUR le
 nuage/sampling) ; garde-fou `sampling_id`↔`smpl_sampling_id` inchangé.
 
@@ -54,8 +55,8 @@ cache_key(item) = hash( sous-config pertinente  +  inputs pertinents  +  clés d
 - **inputs** : géométrie → hash des verts/faces (ou du fichier mesh) ; sujet → bytes betas +
   genre ; robot → nom/urdf.
 - chaque builder ne hashe **que ses dépendances** → changer un param n'invalide **que** les
-  items touchés (et leur aval). `Config` est `frozen` + hashable.
-- `AssetBuilder.cache_key(config, *inputs) -> str` (contrat dans `contracts.py`).
+  items touchés (et leur aval). `PrepareConfig` et ses sous-configs sont `frozen` + hashables.
+- `AssetBuilder.cache_key(config, *inputs) -> str` (protocol dans `contracts.py`).
 
 ## Layout
 
@@ -74,18 +75,18 @@ Gitignore : `cache/**` ignoré sauf le défaut `correspondence/corr_neutral.npz`
 ## Assemblage d'une scène
 
 ```
-prepare/runner.prepare(scene_spec: SceneSpec, config: Config) -> (GroundedScene, InteractionContext, Calibration)
+prepare/runner.prepare(scene_spec: SceneSpec, config: PrepareConfig) -> (GroundedScene, InteractionContext, Calibration)
 ```
 - `SceneSpec` = (dataset, séquence, `RobotSpec`, model dirs) ; le loader en tire sujet/objets/prise.
-- le runner dérive la clé de chaque item depuis `SceneSpec + Config`, fait **load-or-build**
+- le runner dérive la clé de chaque item depuis `SceneSpec + PrepareConfig`, fait **load-or-build**
   pour chacun, **assert** `sampling_id` ↔ `smpl_sampling_id`, puis **assemble** les 3 sorties.
 
 ## Cibles bakées (optionnel)
 
 Les `targets/` (per-frame) peuvent être recalculées en ligne depuis les assets cachés, OU
-**bakées** (séquence de `FrameTargets`). Une bake dépend de la config **complète** (tout
-l'amont + `margin`/canaux), donc sa clé = hash de `Config` entier + `scene_spec`. À placer
-sous `cache/targets/<scene>_<cfg>.npz` si on l'active.
+**bakées** (séquence de `FrameTargets`). Une bake dépend de la config **complète** (tout l'amont
+`PrepareConfig` + la future config `targets`, margin/canaux), donc sa clé = hash de ces deux configs
++ `scene_spec`. À placer sous `cache/targets/<scene>_<cfg>.npz` si on l'active.
 
 ## Invalidation — résumé
 - changer `sdf` → rebuild SDF seulement.

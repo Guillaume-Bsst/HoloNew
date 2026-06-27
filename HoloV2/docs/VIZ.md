@@ -51,7 +51,7 @@ mêmes règles (consommateurs purs, viser confiné, toggles par couche) :
 - `viz/scene.py` : étape **load/grounding** (mesh SMPL posé, squelette, objets, sol, debug grounding).
 - `viz/cloud.py` : bake **`point_cloud`** — nuage humain posé par `pose_cloud` (coloré par l'écart de
   parité vs la surface SMPL pleine) + nuages objets posés en monde (rigides). Runnable
-  `python -m holov2.viz.cloud --motion-path … --model-dir …`.
+  `python -m src.viz.cloud --motion-path … --model-dir …`.
 
 Ils ne remplacent pas le viewer `FrameTrace` (qui viendra avec `targets/`) ; ce sont des outils de
 debug **par étape**, livrés au fil de l'implémentation.

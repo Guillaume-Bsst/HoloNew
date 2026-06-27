@@ -2,7 +2,7 @@
 the per-sample labelling that keeps the per-segment OT hand->hand, foot->foot."""
 import numpy as np
 
-from holov2.prepare.point_cloud.correspondence.segments import (
+from src.prepare.point_cloud.correspondence.segments import (
     SEGMENTS, SMPLX_JOINT_TO_SEGMENT, link_to_segment, point_segments, seg_index)
 
 

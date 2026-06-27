@@ -6,7 +6,7 @@ poses, and the ground. Pure consumer (drives ``load`` to get artifacts; no compu
 full ``FrameTrace`` viewer (``viewer.py``) comes later, once ``targets`` exists.
 
 Run:
-    python -m holov2.viz.scene --motion-path <smplx.npz> --model-dir <smplx_models> [--dataset hodome]
+    python -m src.viz.scene --motion-path <smplx.npz> --model-dir <smplx_models> [--dataset hodome]
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
 
-from ..contracts import CalibrationConfig, RobotSpec, SceneSpec
+from ..contracts import RobotSpec, SceneSpec
+from config_types import CalibrationConfig
 from ..prepare.calibration import build_calibration
 from ..prepare.load import load
 from ..prepare.load.smpl import build_body_model

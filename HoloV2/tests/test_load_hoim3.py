@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation as R
 
-from holov2.contracts import RobotSpec, SceneSpec
+from src.contracts import RobotSpec, SceneSpec
 
 _HUMAN = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/mocap_ground/"
               "office_data05_human.npz")
@@ -25,7 +25,7 @@ def _spec() -> SceneSpec:
 @pytest.mark.skipif(not (_HUMAN.exists() and _SMPLX.is_dir() and _DEFTRAFO.exists()),
                     reason="HOI-M3 data / SMPL-X model / deftrafo absent")
 def test_hoim3_conversion_and_objects():
-    from holov2.prepare.load import load
+    from src.prepare.load import load
 
     raw = load(_spec())
     T = raw.n_frames
@@ -43,7 +43,7 @@ def test_hoim3_conversion_and_objects():
     # R(Rh) @ J_canonical + Th about the SMPL pelvis, so the SMPL-X demo pelvis (Z-up) must equal
     # Q @ (Th + R @ J0_smpl). J0_smpl is the SMPL rest pelvis (not SMPL-X: their heights differ
     # ~14cm). Recompute from the raw npz for the retargeted person and check a few frames.
-    from holov2.prepare.load.smpl2smplx import smpl_rest_pelvis
+    from src.prepare.load.smpl2smplx import smpl_rest_pelvis
     hd = np.load(str(_HUMAN), allow_pickle=True)
     sp = hd["smpl_params"]
     tid = int(np.asarray(sp[0][0]["id"]))

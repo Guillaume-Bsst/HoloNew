@@ -40,7 +40,7 @@ def get_loader(dataset: str) -> MotionLoader:
     """Instantiate the loader registered for ``dataset`` (raises ValueError if unknown).
 
     Loaders register themselves on import. By convention the module for ``dataset`` is
-    ``holov2.prepare.load.<dataset>``, so it is imported lazily on first use — keeping this
+    ``src.prepare.load.datasets.<dataset>``, so it is imported lazily on first use — keeping this
     package light (no torch/smplx pulled until a parametric dataset is actually requested)."""
     if dataset not in _LOADERS:
         try:

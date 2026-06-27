@@ -1,4 +1,5 @@
-"""Make the ``holov2`` package importable when running tests from the HoloV2 root."""
+"""Put the HoloV2 root on ``sys.path`` so the top-level packages (``src``, ``config_types``,
+``config_values``) are importable when running tests from here."""
 import os
 import sys
 

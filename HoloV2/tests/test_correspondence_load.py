@@ -4,8 +4,8 @@ from pathlib import Path
 
 import numpy as np
 
-from holov2.prepare.point_cloud import sampling_id
-from holov2.prepare.point_cloud.correspondence import load_correspondence
+from src.prepare.point_cloud import sampling_id
+from src.prepare.point_cloud.correspondence import load_correspondence
 
 _CORR = Path(__file__).resolve().parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
 
