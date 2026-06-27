@@ -92,15 +92,17 @@ def test_sole_floor_offset_median_mat_and_margin():
 # --------------------------------------------------------------------------- builder
 def test_builder_uses_surface_when_parametric():
     body = FakeBody(rest_y_extent=1.75, frame_min_z=np.full(3, 0.08))
-    calib = build_calibration(_raw(3), CalibrationConfig(mat_height=0.0), body=body)
+    calib = build_calibration(_raw(3, with_object=True), CalibrationConfig(mat_height=0.0), body=body)
     assert calib.human_stature == pytest.approx(1.75)                # real subject stature, robot-free
-    assert calib.floor_offset == pytest.approx(0.08)                 # surface sole, not toe (0.05)
+    assert calib.human_offset == pytest.approx(0.08)                 # surface sole, not toe (0.05)
+    assert calib.object_offsets == (0.0,)                            # one per object, provisional 0
     assert np.allclose(calib.root_frame, np.eye(4))
 
 
 def test_builder_falls_back_to_toe_when_non_parametric():
     calib = build_calibration(_raw(3, parametric=False), CalibrationConfig(mat_height=0.0))
-    assert calib.floor_offset == pytest.approx(0.05)                 # toe joints
+    assert calib.human_offset == pytest.approx(0.05)                 # toe joints
+    assert calib.object_offsets == ()                                # no objects
     assert calib.human_stature == pytest.approx(DEFAULT_HUMAN_HEIGHT)  # default (no betas to FK)
 
 
@@ -112,36 +114,45 @@ def test_builder_parametric_requires_body_or_model_dir():
 def test_builder_deterministic_and_cache_roundtrip(tmp_path):
     body = FakeBody(1.75, frame_min_z=np.full(3, 0.08))
     b = CalibrationBuilder()
-    cfg, raw = CalibrationConfig(mat_height=0.0), _raw(3)
+    cfg, raw = CalibrationConfig(mat_height=0.0), _raw(3, with_object=True)
     c1 = b.build(cfg, raw, body=body)
     c2 = b.build(cfg, raw, body=body)
-    assert (c1.human_stature, c1.floor_offset) == (c2.human_stature, c2.floor_offset)
+    assert (c1.human_stature, c1.human_offset, c1.object_offsets) == \
+           (c2.human_stature, c2.human_offset, c2.object_offsets)
     assert b.cache_key(cfg, raw) == b.cache_key(cfg, raw)            # stable, robot-free key
     p = tmp_path / "calib.npz"
     b.save(c1, p)
     loaded = b.load(p)
     assert loaded.human_stature == pytest.approx(c1.human_stature)
-    assert loaded.floor_offset == pytest.approx(c1.floor_offset)
+    assert loaded.human_offset == pytest.approx(c1.human_offset)
+    assert loaded.object_offsets == pytest.approx(c1.object_offsets)
     assert np.allclose(loaded.root_frame, c1.root_frame)
 
 
 # --------------------------------------------------------------------------- scene assembly
-def test_assemble_grounds_scene_and_carries_calibration():
+def test_assemble_grounds_human_and_object_by_their_own_offsets():
     raw = _raw(4, with_object=True)
-    calib = Calibration(human_stature=1.75, floor_offset=0.2, root_frame=np.eye(4))
+    # Distinct human vs object offsets -> the test fails if they are not applied independently.
+    calib = Calibration(human_stature=1.75, human_offset=0.2, object_offsets=(0.15,), root_frame=np.eye(4))
     g = scene.assemble(raw, calib)
     assert g.joint_pos.shape == raw.joint_pos.shape
-    assert np.allclose(g.joint_pos[:, :, 2], raw.joint_pos[:, :, 2] - 0.2)       # joints dropped
-    assert np.allclose(g.object_poses[0][:, 2], raw.object_poses_raw[0][:, 2] - 0.2)  # object dropped
-    assert np.allclose(g.object_poses[0][:, :2], raw.object_poses_raw[0][:, :2])      # xy untouched
+    assert np.allclose(g.joint_pos[:, :, 2], raw.joint_pos[:, :, 2] - 0.2)        # human: human_offset
     assert np.allclose(g.smpl_params.transl[:, 1], raw.smpl_params.transl[:, 1] - 0.2)  # native y
+    assert np.allclose(g.object_poses[0][:, 2], raw.object_poses_raw[0][:, 2] - 0.15)   # object: its own
+    assert np.allclose(g.object_poses[0][:, :2], raw.object_poses_raw[0][:, :2])        # xy untouched
     assert g.calibration.human_stature == 1.75    # carried; scale composed downstream, not baked here
     assert g.is_parametric and g.n_objects == 1
 
 
 def test_assemble_non_parametric_scene():
-    g = scene.assemble(_raw(3, parametric=False), Calibration(1.7, 0.1, np.eye(4)))
+    g = scene.assemble(_raw(3, parametric=False), Calibration(1.7, 0.1, (), np.eye(4)))
     assert g.smpl_params is None and not g.is_parametric and g.n_objects == 0
+
+
+def test_assemble_rejects_object_offset_count_mismatch():
+    raw = _raw(3, with_object=True)                                  # 1 object
+    with pytest.raises(ValueError):
+        scene.assemble(raw, Calibration(1.75, 0.1, (), np.eye(4)))   # 0 offsets != 1 object
 
 
 # --------------------------------------------------------------------------- real data (skip if absent)
@@ -163,7 +174,8 @@ def test_calibration_grounds_real_sfu_sole_to_zero():
 
     calib = build_calibration(raw, cfg, body=body)          # robot-free
     assert 1.4 < calib.human_stature < 2.1                  # a plausible human stature (m)
-    assert abs(calib.floor_offset) < 0.3                    # SFU is already near the floor
+    assert abs(calib.human_offset) < 0.3                    # SFU is already near the floor
+    assert calib.object_offsets == ()                       # SFU is body-only
 
     # End-to-end: grounding the params makes the residual sole offset vanish (reuse the same body).
     g = scene.assemble(raw, calib)

@@ -35,7 +35,7 @@ rapidement). Deux phases, seam explicite :
 
 **Phase calibration (offline, une fois)** — coûteux et stable :
 scale · floor offset · cadrage root · table de correspondance SMPL→G1 ·
-**SDF des objets/terrain (frame local — rigide ⇒ calculés 1 fois ; le sol plat = analytique, sans SDF)** ·
+**SDF des objets/terrain (frame local — rigide ⇒ calculés 1 fois ; le sol plat = SDF de plan exact, non caché)** ·
 échantillonnage des nuages · BVH/KD-trees. Tout ça est **cacheable sur disque**,
 clé = géométrie ; deux séquences partageant un objet partagent l'asset.
 Stockage : **`HoloV2/cache/`** (hors du package python, géré par `prepare/` via un
@@ -69,7 +69,7 @@ donc être évalué **online que contre un SDF rigide** (sol + objets).
 
 ## 3. L'évaluation = matrice homogène (clouds × canaux)
 
-- Canaux = sol + N objets = **N+1** (sol : plan analytique par défaut, ou SDF terrain ; objets : SDF)
+- Canaux = sol + N objets = **N+1** (TOUS des SDF ; sol : SDF de plan par défaut, ou SDF terrain ; objets : SDF)
 - Clouds = SMPL + N objets = **N+1 nuages**
 - Chaque cloud est évalué contre **tous** les canaux → chaque point porte **N+1
   canaux**. Sortie homogène, zéro cas particulier. Le canal « self » (cloud objet
@@ -95,11 +95,11 @@ holov2/
       base.py              protocol MotionLoader + registre
       omomo.py hodome.py …  un loader par dataset -> RawMotion (params + chemins)
       smpl.py              SmplParams -> BodyModel (instancie SMPL, FK os)
-      mesh.py              chemin -> ObjectMesh (trimesh)
+      mesh.py              chemin -> (verts, faces) local (trimesh ; poses ajoutées à l'assemblage scène)
       robot.py             RobotSpec -> RobotModel (FK / surface rest G1)
     # --- les 3 LIVRABLES (build-once) ---
-    calibration/         grounding SCÈNE (humain + objet) ROBOT-FREE : human_stature, floor (sole SMPL), root
-    sdf/                 meshes objets/terrain -> SDF ; clé géométrie  (sol plat = analytique, sans SDF)
+    calibration/         grounding ROBOT-FREE per-entity : human_stature + human_offset (sole SMPL) + 1 offset/objet, root
+    sdf/                 meshes objets/terrain -> SDF (caché) ; sol plat -> SDF de plan (build_plane_sdf, non caché)
     point_cloud/         NUAGES + correspondance
       human.py             surface SMPL -> PointCloud (skinning creux, sampling_id)
       objects.py           surfaces objets -> PointCloud par objet
@@ -149,7 +149,7 @@ Inventaire :
 - **load** : `SmplParams` (avec MAINS), `RawMotion` (J_demo)
 - **scène / calib** : `ObjectMesh` (+ `static`), `Calibration`, `GroundedScene` (LÉGER)
 - **champs** : `SDF` (grille, objets/terrain) · `ContactField` · `MultiChannelField` (per-frame
-  `(C,P)`) · `Channel` (`object_idx` + `sdf` ; `sdf=None` ⇒ sol plat analytique)
+  `(C,P)`) · `Channel` (`object_idx` + `sdf` TOUJOURS présent ; sol plat = SDF de plan)
 - **prepare** : `PointCloud` (skinning creux + `sampling_id`), `CorrespondenceTable`
   (`smpl_idx`/`link_idx`/`offset_local` + `smpl_sampling_id` qui doit matcher `sampling_id`)
 - **contexte** : `InteractionContext` (`channels` = ground + objets ; invariants documentés)

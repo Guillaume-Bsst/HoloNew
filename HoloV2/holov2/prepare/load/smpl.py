@@ -133,6 +133,7 @@ class SmplBody:
             rest = self._model(betas=self._betas_t)
         self._j_rest: np.ndarray = rest.joints[0].detach().cpu().numpy()[:_N_BONES].astype(np.float64)
         self._rest_verts: np.ndarray = rest.vertices[0].detach().cpu().numpy().astype(np.float32)
+        self._lbs_weights: np.ndarray = self._model.lbs_weights.detach().cpu().numpy().astype(np.float32)
 
     @property
     def n_bones(self) -> int:
@@ -142,6 +143,13 @@ class SmplBody:
     def rest_joints(self) -> np.ndarray:
         """(J_bones, 3) rest joint positions in the model's NATIVE frame (for reconstruction)."""
         return self._j_rest
+
+    @property
+    def lbs_weights(self) -> np.ndarray:
+        """(V, J_bones) LBS skinning weights. SMPL-specific (deliberately NOT on the ``BodyModel``
+        protocol): only the human-cloud sampler in ``prepare/`` needs it, to bake the per-point
+        sparse skinning. The cloud's rest offsets live in the NATIVE frame, matching these weights."""
+        return self._lbs_weights
 
     def rest_vertices(self, params: SmplParams) -> np.ndarray:
         """(V, 3) rest-pose vertices in the model's NATIVE frame (for cloud sampling)."""

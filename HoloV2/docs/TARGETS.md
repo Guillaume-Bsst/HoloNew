@@ -44,7 +44,7 @@ GroundedScene[f] ─► FramePose(f) = bone (R,t)  +  object (R,t)   [calculé U
 2. `object_poses[f]` réutilisé deux fois sans recalcul : poser le nuage objet ET comme frame
    du `Channel` objet pour l'éval. (Objet `static` => transfo constante, évaluable une fois.)
 3. Tout statique sauf les transfos (champs/nuages/corresp. viennent de prepare) → par frame :
-   FK (cheap) + gather + sample (SDF trilinéaire / sol plat analytique).
+   FK (cheap) + gather + sample (SDF trilinéaire — tous les canaux, sol plat inclus).
 4. Layout canal-first `(C,P)` + einsum → vectorisé, zéro boucle Python par point.
 5. Dualité online/batch : les 3 fonctions sont array-oriented (axe points) → `pipeline` les
    appelle par frame (téléop) OU batché sur T (baking dataset), même cœur.
@@ -57,7 +57,7 @@ targets/
                        FramePose -> StyleTargets (mapping articulaire / GMR)
   interaction/
     pointclouds.py     skeleton FK -> bone transforms ; pose_cloud
-    eval.py            eval_fields (sample chaque Channel : SDF trilinéaire, ou sol plat analytique si sdf=None)
+    eval.py            eval_fields (sample chaque Channel : SDF trilinéaire — chemin unique, sol plat inclus)
     transport.py       transport (gather via correspondence)
     targets.py         assemble RobotInteractionTargets + EnvironmentInteractionTargets
   pipeline.py          process_frame : FramePose -> style + interaction -> FrameTargets

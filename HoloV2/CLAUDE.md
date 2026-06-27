@@ -48,8 +48,8 @@ redupliquer ici**). En bref : `SceneSpec`+`Config` → **prepare/** (offline, bu
 - **`J_demo`** (joints dataset, `style`) ≠ **`J_bones`** (squelette SMPL, nuages) — jamais confondus.
 - **Per-frame = unité canonique** ; séquence = `list[FrameTargets]`.
 - Nuages = **skinning creux** `(parts, weights, offsets)`, posés mesh-free (`K=1` rigide / `K~4` humain).
-- Sol = canal `ground` : **plat par défaut** (pas de SDF, distance `z` analytique dans l'eval)
-  OU **terrain** (escalier/pente/climbing) via une `SDF` (`Channel.sdf`).
+- Sol = canal `ground` : **toujours un `SDF`** — plan exact par défaut (`build_plane_sdf`, non caché)
+  OU **terrain** (escalier/pente/climbing). `Channel.sdf` jamais `None` ⇒ éval homogène (chemin unique).
 - SMPL/meshes/robot instanciés **uniquement dans `prepare/`**.
 - **Commentaires autonomes** (pas de réf. à une discussion ; acronymes locaux définis).
 
@@ -87,7 +87,7 @@ le python de l'env `holonew` : `…/envs/holonew/bin/python -m pytest tests/ -q`
 | `targets/interaction/transport` | `correspondence/transport.py` |
 | `targets/style/` | `src/gmr_socp/*`, mappings `config_types/data_type.py` |
 | `viz/` | `src/viewer.py`, `viser_player.py`, `correspondence/viz.py`, `contact/viz.py` |
-| sol plat (analytique, dans `interaction/eval`) | `contact/backends/floor.py` |
+| sol plat → SDF de plan (`prepare/sdf.build_plane_sdf`) | `contact/backends/floor.py` (convention dist/dir) |
 
 ## Cache (`HoloV2/cache/`, hors package, gitignoré sauf `corr_neutral.npz`)
 

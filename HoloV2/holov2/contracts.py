@@ -113,7 +113,7 @@ class SceneSpec:
     robot: RobotSpec
     smpl_model_dir: Path | None = None        # parametric body model dir (None ok => style-only)
     object_mesh_paths: tuple[Path, ...] = ()  # optional override; else resolved by the loader
-    ground_mesh_path: Path | None = None      # None => flat ground (no SDF); else terrain -> SDF
+    ground_mesh_path: Path | None = None      # None => flat ground (plane SDF); else terrain mesh -> SDF
     cache_dir: Path | None = None             # default: HoloV2/cache/
     dataset_root: Path | None = None          # release root for auxiliary metadata kept apart from
                                               # motion_path (OMOMO betas/scales + captured meshes)
@@ -135,9 +135,9 @@ class CalibrationConfig:
 
 @dataclass(frozen=True)
 class SdfConfig:
-    spacing: float = 0.01            # isotropic voxel size (m)
+    spacing: float = 0.01            # isotropic voxel size (m) for object/terrain grids
     margin: float = 0.05             # band beyond the surface that is stored
-    # (the default flat ground has no SDF — handled analytically in the eval; no size here)
+    # (the flat ground is a coarse but EXACT plane SDF — built analytically, no mesh; see build_plane_sdf)
 
 
 @dataclass(frozen=True)
@@ -233,15 +233,21 @@ class ObjectMesh:
 
 @dataclass(frozen=True)
 class Calibration:
-    """Per-subject / per-take params: grounds the WHOLE scene (human + objects) on the floor and
-    characterises the subject. ROBOT-FREE, so it caches per subject independently of the target
-    robot. The human->robot scale is deliberately NOT here: it is a (human, robot) quantity owned
-    and applied by the correspondence + transport layer (where both bodies meet), composed from
-    ``human_stature`` and the robot height. Offline asset, but NOT a geometry cache: (subject, take)."""
+    """Per-(subject, take) grounding + subject characterisation. ROBOT-FREE, so it caches per
+    subject independently of the target robot. The human->robot scale is deliberately NOT here: it
+    is a (human, robot) quantity owned and applied by the correspondence + transport layer (where
+    both bodies meet), composed from ``human_stature`` and the robot height.
 
-    human_stature: float    # subject rest stature (m), betas-FK — feeds scale = robot_height / stature
-    floor_offset: float     # z shift grounding the scene
-    root_frame: np.ndarray  # (4, 4) world transform framing the root
+    Single-human, multi-object: ONE ``human_stature`` + a SEPARATE floor offset per entity. The
+    human sole and each object can sit at different heights / be placed independently in the raw
+    capture (e.g. the human floats while the object already rests on the floor), so each entity is
+    grounded by its OWN z-shift rather than one shared scene shift. Offline asset, NOT a geometry
+    cache: scoped to (subject, take)."""
+
+    human_stature: float                 # subject rest stature (m), betas-FK — feeds scale = robot_h / stature
+    human_offset: float                  # z-shift grounding the human (sole -> floor)
+    object_offsets: tuple[float, ...]    # z-shift grounding each object, aligned with the object order
+    root_frame: np.ndarray               # (4, 4) world transform framing the root
 
 
 @dataclass(frozen=True)
@@ -317,19 +323,18 @@ class MultiChannelField:
 @dataclass(frozen=True)
 class Channel:
     """One evaluation channel = a signed-distance source + its per-frame pose binding. Makes the
-    ground/object alignment EXPLICIT (no implicit N vs N+1 offset). The three cases:
+    ground/object alignment EXPLICIT (no implicit N vs N+1 offset). EVERY channel carries an ``sdf``
+    so the eval has a SINGLE trilinear path (homogeneous, no flat-ground special case); ``object_idx``
+    only sets the pose binding:
 
-    - ``sdf is None`` & ``object_idx is None`` => the default FLAT ground (analytic z-distance;
-      the eval samples it without a grid).
-    - ``sdf`` set & ``object_idx is None``     => a TERRAIN ground (stairs/slope/climbing) as an SDF.
-    - ``sdf`` set & ``object_idx`` set         => object ``object_idx``, posed by
-      ``object_poses[object_idx][f]``.
-
-    The flat ground is the only channel WITHOUT an SDF — handled analytically in the eval."""
+    - ``object_idx is None`` => the static GROUND in the world frame. Its ``sdf`` is a plane grid by
+      default (a plane is affine, so a tiny grid reproduces ``z`` EXACTLY) or a TERRAIN grid
+      (stairs/slope/climbing).
+    - ``object_idx`` set      => object ``object_idx``, its ``sdf`` posed by ``object_poses[object_idx][f]``."""
 
     name: str
     object_idx: int | None        # None = static ground (world) ; else index into object_poses/clouds
-    sdf: "SDF | None" = None       # None = flat analytic ground ; else the object/terrain SDF grid
+    sdf: "SDF"                     # the signed-distance grid (ground plane / terrain / object)
 
 
 # =============================================================================
@@ -337,16 +342,27 @@ class Channel:
 # =============================================================================
 @dataclass(frozen=True)
 class SDF:
-    """Signed-distance grid of a rigid surface, in its local frame — for objects AND terrain
-    ground. The flat default ground has NO SDF (``Channel.sdf is None``, handled analytically).
+    """Signed-distance grid of a rigid surface, in its local frame — for objects, terrain ground
+    AND the flat ground (a plane is an affine field, so trilinear sampling reproduces it EXACTLY on a
+    tiny grid; it is an ordinary SDF too, keeping every channel homogeneous — see ``build_plane_sdf``).
 
-    Sampled by trilinear interpolation in the eval (``targets/interaction/eval.py``); pure data
-    here (no method) so ``contracts`` stays logic-free."""
+    Carries a WITNESS grid (nearest surface point per node) alongside the distance: the eval
+    reconstructs the contact direction as ``normalize(probe - witness)`` from the trilinearly
+    interpolated witness, which stays a true unit vector near sharp box edges/corners — where a
+    finite-difference gradient of the distance grid is unstable. Sampled by trilinear interpolation
+    in the eval (``targets/interaction/eval.py``); pure data here (no method) so ``contracts`` stays
+    logic-free."""
 
     grid: np.ndarray     # (Nx, Ny, Nz) signed distance (negative = inside)
+    witness: np.ndarray  # (Nx, Ny, Nz, 3) nearest surface point per node, local frame
     origin: np.ndarray   # (3,) local coords of node (0, 0, 0)
     spacing: float       # isotropic voxel size (m)
     name: str            # channel name, e.g. "obj0" / "ground"
+
+    def __post_init__(self) -> None:
+        if self.witness.shape != self.grid.shape + (3,):
+            raise ValueError(
+                f"witness shape {self.witness.shape} != grid shape {self.grid.shape} + (3,)")
 
 
 @dataclass(frozen=True)
@@ -401,7 +417,7 @@ class InteractionContext:
     """All build-once assets for the interaction treatment, passed explicitly (no globals).
 
     Invariants (checked at assembly):
-    - ``channels[0]`` is the GROUND (static; flat by default = no SDF, or a terrain SDF);
+    - ``channels[0]`` is the GROUND (static; a plane SDF by default, or a terrain SDF);
       the rest are object channels with ``object_idx`` aligned to ``object_clouds`` and the
       scene's object order.
     - ``human_cloud.sampling_id == correspondence.smpl_sampling_id``."""

@@ -48,9 +48,9 @@ holov2/
   contracts.py     TOUS les contrats (SceneSpec, RobotSpec, Config, SDF, assets, cibles, …) — ne dépend de rien
 
   prepare/         ÉTAPE 1 — offline ; SEUL endroit qui instancie SMPL/meshes/robot     [PREPARE.md]
-    load/            base + 1/dataset (-> RawMotion) · smpl (-> BodyModel) · mesh (-> ObjectMesh) · robot (-> RobotModel)
+    load/            base + 1/dataset (-> RawMotion) · smpl (-> BodyModel) · mesh (-> verts/faces) · robot (-> RobotModel)
     calibration/     LIVRABLE : grounding scène (humain + objet)
-    sdf/             LIVRABLE : SDF objets/terrain (sol plat = analytique, sans SDF)
+    sdf/             LIVRABLE : SDF objets/terrain/sol (sol plat = SDF de plan exact, non caché)
     point_cloud/     LIVRABLE : nuages (human, objects) + correspondence (SMPL<->G1)
     scene.py · runner.py   (prepare(scene_spec, config) : load-or-build + assemble)
 

@@ -10,10 +10,13 @@ robot-free subject ``human_stature`` it composes with the robot height.
                         rest mesh). The REAL subject's size — feeds ``scale = robot_height / stature``
                         downstream. Uniform across datasets: every parametric source has a SMPL-X
                         ``BodyModel``, so there is no per-dataset stature path.
-  - ``floor_offset``  = a single world z-shift resting the human SOLE on z=0 (median over sampled
-                        frames of the lowest posed vertex, robust to crouch / airborne outliers).
-                        Applied to the human AND the objects together (``prepare/scene.py``), so the
-                        captured human<->object contact geometry is preserved.
+  - ``human_offset``  = world z-shift resting the human SOLE on z=0 (median over sampled frames of
+                        the lowest posed vertex, robust to crouch / airborne outliers).
+  - ``object_offsets``= world z-shift PER object, grounding each one independently of the human
+                        (single-human / multi-object): an object may already rest on the floor while
+                        the human floats, so a shared scene shift would push it through the floor.
+                        PROVISIONAL: 0 = keep the captured pose (correct where objects are already
+                        grounded, e.g. OMOMO); the per-object computation is still being designed.
   - ``root_frame``    = a (4,4) framing of the root. Identity for now (provisional hook; the V1
                         kept XY raw). Generalise only when a non-trivial framing is actually needed.
 
@@ -145,24 +148,32 @@ class CalibrationBuilder:
         # Stature: betas-FK from the real subject when parametric; the default otherwise.
         stature = human_stature(body, raw.smpl_params) if body is not None else DEFAULT_HUMAN_HEIGHT
 
-        # Floor: robust surface sole when parametric, else the coarse toe-joint drop.
+        # Human floor offset: robust surface sole when parametric, else the coarse toe-joint drop.
         if body is not None:
-            floor = sole_floor_offset(body, raw.smpl_params, config.mat_height)
+            human = sole_floor_offset(body, raw.smpl_params, config.mat_height)
         else:
-            floor = toe_ground_offset(raw.joint_pos, _toe_indices(raw.joint_names), config.mat_height)
+            human = toe_ground_offset(raw.joint_pos, _toe_indices(raw.joint_names), config.mat_height)
 
-        return Calibration(human_stature=stature, floor_offset=floor, root_frame=np.eye(4))
+        # One floor offset PER object, grounded independently of the human. PROVISIONAL: 0 keeps the
+        # object's captured pose (correct where it already rests on the floor, e.g. OMOMO); the real
+        # per-object computation is still being designed (see Calibration docstring).
+        object_offsets = (0.0,) * len(raw.object_poses_raw)
+
+        return Calibration(human_stature=stature, human_offset=human,
+                           object_offsets=object_offsets, root_frame=np.eye(4))
 
     def save(self, calib: Calibration, path: Path) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         np.savez(str(path), human_stature=np.float64(calib.human_stature),
-                 floor_offset=np.float64(calib.floor_offset),
+                 human_offset=np.float64(calib.human_offset),
+                 object_offsets=np.asarray(calib.object_offsets, np.float64),
                  root_frame=np.asarray(calib.root_frame, np.float64))
 
     def load(self, path: Path) -> Calibration:
         d = np.load(str(path))
-        return Calibration(human_stature=float(d["human_stature"]), floor_offset=float(d["floor_offset"]),
+        return Calibration(human_stature=float(d["human_stature"]), human_offset=float(d["human_offset"]),
+                           object_offsets=tuple(np.asarray(d["object_offsets"], np.float64).tolist()),
                            root_frame=np.asarray(d["root_frame"], np.float64))
 
 

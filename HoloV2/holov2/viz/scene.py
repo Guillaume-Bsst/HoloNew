@@ -81,23 +81,39 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
     bone_pairs = [(int(parents[j]), j) for j in range(body.n_bones) if parents[j] >= 0] if body else []
 
     # --- grounding debug: the calibration + per-frame floor clearances (RAW, pre-grounding) ---
-    # The whole scene is grounded by a SINGLE z-shift = calib.floor_offset (driven by the human
-    # sole). These clearances let us SEE whether the human soles AND each object share that floor:
-    # if the per-clip medians of human_minz and obj_minz disagree, that scene needs a DIFFERENT
-    # offset for the object than for the human (independent placement) rather than one shared shift.
+    # Grounding is PER ENTITY: the human drops by calib.human_offset, each object by its own
+    # calib.object_offsets[k]. These clearances let us SEE each entity land on z=0 separately —
+    # exactly why the offset is split (the human may float while an object already rests on the floor).
     calib = build_calibration(raw, CalibrationConfig(), body=body)
-    floor_offset = float(calib.floor_offset)
+    human_offset = float(calib.human_offset)
+    object_offsets = [float(o) for o in calib.object_offsets]          # one per object (provisional 0)
     # Human lowest world z + lowest point per frame (surface if parametric, else demo joints).
     src = verts if verts is not None else demo_j
     human_minz = src[:, :, 2].min(axis=1)                               # (F,)
     human_low = src[np.arange(F), src[:, :, 2].argmin(axis=1)]          # (F, 3)
+    # Candidate HUMAN offsets to compare VISUALLY (the open decision). "sole" = current method
+    # (median of the lowest posed vertex). "foot-joint" variants use the mocap foot joints (cheap,
+    # robust to the SMPL foot penetration); "stance" = median over planted frames (foot low AND slow).
+    human_candidates: dict[str, float] = {"sole median (actuel)": float(np.median(human_minz))}
+    _foot = [i for i, n in enumerate(raw.joint_names) if n in ("L_Foot", "R_Foot")]
+    if _foot:
+        fz = raw.joint_pos[:, _foot, 2]                                 # (T, n_foot) all frames, cheap
+        lower = fz.min(axis=1)
+        human_candidates["foot-joint median"] = float(np.median(lower))
+        human_candidates["foot-joint p10"] = float(np.percentile(lower, 10))
+        planted = [fz[:, c][(fz[:, c] < np.percentile(fz[:, c], 20) + 0.03) &
+                            (np.abs(np.gradient(fz[:, c])) < 0.004)] for c in range(fz.shape[1])]
+        planted = [p for p in planted if p.size]
+        human_candidates["foot-joint stance"] = (
+            float(np.median(np.concatenate(planted))) if planted else human_candidates["foot-joint median"])
     obj_minz, obj_low = [], []                                          # per object: (F,), (F, 3)
     for (vl, _fl, poses) in objs:
         mz, lp = _object_world_lowz(vl, poses)
         obj_minz.append(mz); obj_low.append(lp)
     hz_med = float(np.median(human_minz))
     oz_med = [float(np.median(z)) for z in obj_minz]
-    print(f"calibration: floor_offset={floor_offset:+.4f} m, human_stature={calib.human_stature:.3f} m")
+    print(f"calibration: human_offset={human_offset:+.4f} m, human_stature={calib.human_stature:.3f} m, "
+          f"object_offsets={['%+.4f' % o for o in object_offsets]}")
     print(f"  RAW clip-median lowest z: human={hz_med:+.4f}" +
           "".join(f", obj{k}={m:+.4f}" for k, m in enumerate(oz_med)))
 
@@ -115,6 +131,8 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
         show_obj = srv.gui.add_checkbox("objects", True)
     with srv.gui.add_folder("Grounding"):
         apply_ground = srv.gui.add_checkbox("apply grounding", True)
+        offset_method = srv.gui.add_dropdown("human offset", tuple(human_candidates),
+                                             initial_value=tuple(human_candidates)[0])
         show_floor = srv.gui.add_checkbox("floor plane z=0", True)
         show_low = srv.gui.add_checkbox("lowest-point markers", True)
     info = srv.gui.add_markdown("")
@@ -134,17 +152,19 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
 
     def render(_=None):
         f = int(sld.value)
-        g = floor_offset if apply_ground.value else 0.0      # grounding = shift the scene down to z=0
-        dz = np.array([0.0, 0.0, g], np.float32)
+        on = apply_ground.value                              # grounding = drop each entity to z=0
+        gh = human_candidates[offset_method.value] if on else 0.0          # selected human z-shift
+        go = [object_offsets[k] if on else 0.0 for k in range(len(objs))]   # per-object z-shift
+        dzh = np.array([0.0, 0.0, gh], np.float32)
         if body is not None and show_mesh.value:
-            srv.scene.add_mesh_simple("/body", verts[f] - dz, faces, color=(200, 200, 210),
+            srv.scene.add_mesh_simple("/body", verts[f] - dzh, faces, color=(200, 200, 210),
                                       opacity=0.55, side="double")
         else:
             srv.scene.add_mesh_simple("/body", np.zeros((3, 3), np.float32), np.array([[0, 1, 2]]), opacity=0.0)
-        hj.points = demo_j[f] - dz
+        hj.points = demo_j[f] - dzh
         hj.visible = show_joints.value
         if body is not None and show_bones.value and bone_pairs:
-            seg = np.stack([np.stack([bones[f, a], bones[f, b]]) for a, b in bone_pairs]).astype(np.float32) - dz
+            seg = np.stack([np.stack([bones[f, a], bones[f, b]]) for a, b in bone_pairs]).astype(np.float32) - dzh
             srv.scene.add_line_segments("/skeleton", seg,
                                         np.tile([[[0, 120, 255]]], (len(bone_pairs), 2, 1)).astype(np.uint8),
                                         line_width=3.0)
@@ -153,28 +173,31 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
                                         np.zeros((1, 2, 3), np.uint8), line_width=0.1)
         for k, (_, _, poses) in enumerate(objs):
             h = hobj[k]
-            h.position = poses[f][:3] - dz
+            h.position = poses[f][:3] - np.array([0.0, 0.0, go[k]], np.float32)
             h.wxyz = poses[f][3:]
             h.visible = show_obj.value
         floor_h.visible = show_floor.value
-        low_h.points = (human_low[f] - dz)[None]
+        low_h.points = (human_low[f] - dzh)[None]
         low_h.visible = show_low.value
         for k in range(len(objs)):
-            low_o[k].points = (obj_low[k][f] - dz)[None]
+            low_o[k].points = (obj_low[k][f] - np.array([0.0, 0.0, go[k]], np.float32))[None]
             low_o[k].visible = show_low.value
 
-        hz = human_minz[f] - g
-        oz = [obj_minz[k][f] - g for k in range(len(objs))]
+        hz = human_minz[f] - gh
+        oz = [obj_minz[k][f] - go[k] for k in range(len(objs))]
+        cand_str = " · ".join(f"{'**' if n == offset_method.value else ''}{n}={v:+.4f}"
+                              f"{'**' if n == offset_method.value else ''}" for n, v in human_candidates.items())
         info.content = (
-            f"**frame {frames[f]}** ({f + 1}/{F}) · grounding **{'ON' if g else 'OFF'}** "
-            f"(floor_offset = {floor_offset:+.4f} m)\n\n"
-            f"lowest z (this frame) — human **{hz:+.4f}**" +
-            "".join(f", obj{k} **{z:+.4f}**" for k, z in enumerate(oz)) + " m  (want ≈ 0)\n\n"
-            f"lowest z (clip median) — human **{hz_med - g:+.4f}**" +
-            "".join(f", obj{k} **{m - g:+.4f}**" for k, m in enumerate(oz_med)) +
-            " m  ← human vs obj differ ⇒ they need separate offsets")
+            f"**frame {frames[f]}** ({f + 1}/{F}) · grounding **{'ON' if on else 'OFF'}** · "
+            f"human offset = **{gh:+.4f} m**\n\n"
+            f"candidates: {cand_str}\n\n"
+            f"lowest z (this frame) — human sole **{hz:+.4f}**" +
+            "".join(f", obj{k} **{z:+.4f}**" for k, z in enumerate(oz)) + " m  (sole want ≈ 0)\n\n"
+            f"object offsets (provisional 0): " +
+            (", ".join(f"obj{k}={object_offsets[k]:+.4f}" for k in range(len(objs))) if objs else "none"))
 
-    for h in (sld, show_mesh, show_joints, show_bones, show_obj, apply_ground, show_floor, show_low):
+    for h in (sld, show_mesh, show_joints, show_bones, show_obj, apply_ground, offset_method,
+              show_floor, show_low):
         h.on_update(render)
     render()
 

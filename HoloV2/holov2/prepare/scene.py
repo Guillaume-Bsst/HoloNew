@@ -1,12 +1,14 @@
 """Assembles a GroundedScene by applying the Calibration to the loaded motion and object poses.
 
-The grounding (``Calibration.floor_offset``) is a single world z-shift applied to the WHOLE scene
-at once — the demo joints, the object poses AND the human params — so the captured human<->object
-contact geometry is preserved (everyone drops by the same amount). The scene stays at HUMAN scale:
-the human->robot scale is NOT applied here — it is a (human, robot) quantity composed downstream by
-the correspondence/transport layer from ``Calibration.human_stature`` and the robot height.
+Grounding is PER ENTITY (single-human / multi-object): the human (demo joints + SMPL params) drops
+by ``Calibration.human_offset``, and each object drops by ITS OWN ``Calibration.object_offsets[i]``
+— the human sole and an object can sit at different heights in the raw capture (e.g. the human
+floats while the object already rests on the floor), so one shared scene shift would push the object
+through the floor. The scene stays at HUMAN scale: the human->robot scale is NOT applied here — it is
+a (human, robot) quantity composed downstream by the correspondence/transport layer from
+``Calibration.human_stature`` and the robot height.
 
-``root_frame`` is identity for now (provisional), so only the z-shift is applied. When a non-trivial
+``root_frame`` is identity for now (provisional), so only the z-shifts are applied. When a non-trivial
 framing is introduced, apply it to the world arrays here (and rebase the native params accordingly).
 """
 from __future__ import annotations
@@ -18,7 +20,7 @@ import numpy as np
 from ..contracts import Calibration, GroundedScene, RawMotion, SmplParams
 
 # SMPL params are in the model's NATIVE Y-up frame; the body model maps native Y -> world Z (the Q
-# rotation in load/smpl.py). So a world z-drop of ``floor_offset`` is a native y-drop of the root
+# rotation in load/smpl.py). So a world z-drop of ``human_offset`` is a native y-drop of the root
 # translation by the same amount — posing the grounded params then yields the grounded world.
 _NATIVE_UP_AXIS = 1   # transl column carrying world height
 
@@ -38,11 +40,16 @@ def _ground_params(params: SmplParams, dz: float) -> SmplParams:
 
 
 def assemble(raw: RawMotion, calib: Calibration) -> GroundedScene:
-    """Apply ``calib`` to a loaded ``RawMotion`` -> ``GroundedScene`` (grounded, human-scale)."""
-    dz = float(calib.floor_offset)
+    """Apply ``calib`` to a loaded ``RawMotion`` -> ``GroundedScene`` (grounded, human-scale).
+
+    Each object uses its own ``object_offsets`` entry; the count must match the loaded objects."""
+    if len(calib.object_offsets) != len(raw.object_poses_raw):
+        raise ValueError(f"calibration has {len(calib.object_offsets)} object offsets, "
+                         f"motion has {len(raw.object_poses_raw)} objects")
+    dz = float(calib.human_offset)
     joints = np.asarray(raw.joint_pos, np.float32).copy()
     joints[:, :, 2] -= dz
-    objects = tuple(_drop_object_z(p, dz) for p in raw.object_poses_raw)
+    objects = tuple(_drop_object_z(p, off) for p, off in zip(raw.object_poses_raw, calib.object_offsets))
     params = _ground_params(raw.smpl_params, dz) if raw.is_parametric else None
     return GroundedScene(
         joint_pos=joints, joint_names=raw.joint_names, object_poses=objects,
