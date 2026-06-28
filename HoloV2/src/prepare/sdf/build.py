@@ -13,7 +13,8 @@ vectorised call; ``mesh.contains`` gives the inside/outside sign. The grid store
 distance everywhere (no clamp): the activation band (``dist < margin``) is applied later, at eval.
 
 Sampling the grid (probe -> ContactField) is NOT here — it lives in ``targets/interaction/eval.py``
-(the online, q-independent consumer). This module only builds + caches the asset.
+(the online, q-independent consumer). This module builds the asset; its ``.npz`` persistence lives in
+``cache.py`` (the builder delegates).
 
 Ported from HoloNew ``contact/backends/sdf.py`` (the grid build), with the Coal distance backend
 replaced by ``trimesh.proximity`` and the witness kept as a first-class grid.
@@ -27,6 +28,7 @@ import numpy as np
 
 from ..contracts import SDF
 from ..config import SdfConfig
+from .cache import load_sdf, save_sdf
 
 
 def build_sdf(vertices: np.ndarray, faces: np.ndarray, spacing: float, margin: float,
@@ -114,27 +116,7 @@ class SdfBuilder:
         return build_sdf(vertices, faces, config.spacing, config.margin, name=name)
 
     def save(self, sdf: SDF, path: Path) -> None:
-        return save_sdf(sdf, path)
+        return save_sdf(sdf, path)             # persistence lives in cache.py
 
     def load(self, path: Path) -> SDF:
         return load_sdf(path)
-
-
-# =============================================================================
-# Persistence — save/load co-located (the builder delegates here in one line)
-# =============================================================================
-def save_sdf(sdf: SDF, path: Path) -> None:
-    """Serialise an ``SDF`` to ``path`` (``np.savez_compressed`` — the grids are large), creating
-    parent dirs as needed."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(str(path), grid=sdf.grid, witness=sdf.witness,
-                        origin=sdf.origin, spacing=np.float64(sdf.spacing),
-                        name=np.array(sdf.name))
-
-
-def load_sdf(path: Path) -> SDF:
-    """Inverse of ``save_sdf``: load an ``SDF`` from ``path``."""
-    d = np.load(str(path), allow_pickle=False)
-    return SDF(grid=d["grid"], witness=d["witness"], origin=d["origin"],
-               spacing=float(d["spacing"]), name=str(d["name"]))

@@ -44,6 +44,7 @@ from scipy.spatial.transform import Rotation as R
 
 from ..contracts import Calibration, RawMotion
 from ..config import CalibrationConfig
+from .cache import load_calibration, save_calibration
 
 
 # =============================================================================
@@ -142,29 +143,10 @@ class CalibrationBuilder:
         return Calibration(human_offset=human, object_offset=object_offset, root_frame=np.eye(4))
 
     def save(self, calib: Calibration, path: Path) -> None:
-        return save_calibration(calib, path)
+        return save_calibration(calib, path)   # persistence lives in cache.py
 
     def load(self, path: Path) -> Calibration:
         return load_calibration(path)
-
-
-# =============================================================================
-# Persistence — save/load co-located (the builder delegates here in one line)
-# =============================================================================
-def save_calibration(calib: Calibration, path: Path) -> None:
-    """Serialise a ``Calibration`` to ``path`` (``np.savez``), creating parent dirs as needed."""
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(str(path), human_offset=np.float64(calib.human_offset),
-             object_offset=np.float64(calib.object_offset),
-             root_frame=np.asarray(calib.root_frame, np.float64))
-
-
-def load_calibration(path: Path) -> Calibration:
-    """Inverse of ``save_calibration``: load a ``Calibration`` from ``path``."""
-    d = np.load(str(path), allow_pickle=False)
-    return Calibration(human_offset=float(d["human_offset"]), object_offset=float(d["object_offset"]),
-                       root_frame=np.asarray(d["root_frame"], np.float64))
 
 
 def build_calibration(raw: RawMotion, config: CalibrationConfig) -> Calibration:
