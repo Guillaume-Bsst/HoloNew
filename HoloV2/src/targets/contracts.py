@@ -26,7 +26,8 @@ import numpy as np
 # =============================================================================
 @dataclass(frozen=True)
 class ContactField:
-    """One cloud vs ONE channel, ONE frame. Inactive probes: distance=+margin, rest 0."""
+    """One cloud vs ONE channel, ONE frame. Inactive probes: distance=+margin, rest 0.
+    ``direction``/``witness`` are in the CHANNEL's frame (see ``MultiChannelField``)."""
 
     distance: np.ndarray   # (P,)    signed distance
     direction: np.ndarray  # (P, 3)  contact normal (surface -> point)
@@ -36,7 +37,14 @@ class ContactField:
 
 @dataclass(frozen=True)
 class MultiChannelField:
-    """One cloud vs ALL channels, ONE frame. Channel-first, homogeneous (C = ground + N obj)."""
+    """One cloud vs ALL channels, ONE frame. Channel-first, homogeneous (C = ground + N obj).
+
+    Per-channel NATURAL frame (object-as-variable ready): the GROUND channel is in the WORLD frame;
+    each OBJECT channel is in THAT object's LOCAL frame — the probe is mapped into the object frame,
+    the field is read there, and ``direction``/``witness`` are KEPT there (no world round-trip).
+    ``distance`` is a length (frame-invariant). This is exactly the frame the solve's object terms are
+    built in (the object's rigid-motion Jacobian couples in object-local), so the object channel needs
+    NO rewrite when the object becomes a decision variable."""
 
     distance: np.ndarray         # (C, P)
     direction: np.ndarray        # (C, P, 3)
@@ -67,11 +75,16 @@ class MultiChannelField:
 class StyleTargets:
     """Style objective, one frame: robot posture/style tracking, G1-ready via joint mapping.
     The object-agnostic "how the body should move" channel. Provisional shape — the style
-    objective is still being designed (see ``targets/style/``)."""
+    objective is still being designed (see ``targets/style/``).
+
+    Position and rotation carry SEPARATE per-link weights (the solve's tracking term scales the
+    position residual by ``weight_pos`` and the rotation residual by ``weight_rot``, independently —
+    V1 ``w_p`` / ``w_r``)."""
 
     link_names: tuple[str, ...]            # (L,)
     position: np.ndarray                   # (L, 3) world target per link
-    weight: np.ndarray                     # (L,) tracking weight
+    weight_pos: np.ndarray                 # (L,) position tracking weight (V1 w_p)
+    weight_rot: np.ndarray                 # (L,) rotation tracking weight (V1 w_r)
     orientation: np.ndarray | None = None  # (L, 4) wxyz, or None if position-only
 
 
@@ -86,19 +99,24 @@ class RobotInteractionTargets:
 
 @dataclass(frozen=True)
 class EnvironmentInteractionTargets:
-    """Object clouds vs the channels (object-ground / object-object), ONE frame; NOT transported.
+    """Object clouds vs the channels (object<->ground / object<->object), ONE frame; NOT transported.
 
-    Consumer status: scene-side contact, currently for viz / diagnostics; a potential ``solve``
-    constraint later (object consistency). Cheap (same eval matrix as the human side)."""
+    First-class solve input for the OBJECT-AS-VARIABLE terms: when the object is a decision variable,
+    these scene-side contacts (object vs ground, object vs other objects, in object-local frame) drive
+    its consistency. Same eval matrix as the human side (cheap, homogeneous)."""
 
     per_object: tuple[MultiChannelField, ...]  # one per object cloud
 
 
 @dataclass(frozen=True)
 class FrameTargets:
-    """Output of ``process_frame`` for ONE frame; the targets -> solve contract.
-    A sequence is ``list[FrameTargets]``. Solve also receives the static
-    ``InteractionContext`` (for the correspondence binding)."""
+    """Output of ``process_frame`` for ONE frame; the targets -> solve contract. A sequence is
+    ``list[FrameTargets]``.
+
+    The solve seam is ``(FrameTargets, InteractionContext)``: solve also reads the static
+    ``InteractionContext`` (the correspondence binding for the robot control points, and the channel
+    SDFs it re-queries at those points). ``env_interaction`` feeds the object-as-variable terms (the
+    object's own contacts), so it is part of the prod path — not viz-only."""
 
     style: StyleTargets
     robot_interaction: RobotInteractionTargets
