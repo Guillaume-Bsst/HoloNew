@@ -134,6 +134,10 @@ class SmplBody:
         self._rest_verts: np.ndarray = rest.vertices[0].detach().cpu().numpy().astype(np.float32)
         self._lbs_weights: np.ndarray = self._model.lbs_weights.detach().cpu().numpy().astype(np.float32)
 
+        # Subject rest stature (m) = vertical extent of the rest mesh in the model's NATIVE Y-up frame.
+        # A pure rest-mesh property (no motion) -> ``BodyModel.stature``; feeds the human->robot scale.
+        self.stature: float = float(self._rest_verts[:, 1].max() - self._rest_verts[:, 1].min())
+
     @property
     def n_bones(self) -> int:
         return _N_BONES

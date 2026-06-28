@@ -40,6 +40,9 @@ class BodyModel(Protocol):
 
     faces: np.ndarray  # (F, 3) int — topology, frame-invariant
     n_bones: int       # J_bones (52 SMPL-H / 55 SMPL-X)
+    stature: float     # subject rest stature (m), betas-FK — a pure rest-mesh property (no motion).
+                       # Lives on the body (its natural owner), NOT the calibration; feeds the
+                       # human->robot scale = robot_height / stature, composed at the transport seam.
 
     def posed_vertices(self, params: "SmplParams", t: int) -> np.ndarray:
         """(V, 3) world mesh vertices at frame ``t`` (offline use: sampling, viz)."""
@@ -100,7 +103,7 @@ class RobotSpec:
     dof: int
     height: float                  # nominal robot height (m); consumed DOWNSTREAM by the
                                    # correspondence/transport layer as scale = robot_height /
-                                   # human_stature — NOT by the (robot-free) calibration
+                                   # body.stature — NOT by the (robot-free) calibration
 
 
 @dataclass(frozen=True)
@@ -191,21 +194,21 @@ class ObjectMesh:
 
 @dataclass(frozen=True)
 class Calibration:
-    """Per-(subject, take) grounding + subject characterisation. ROBOT-FREE, so it caches per
-    subject independently of the target robot. The human->robot scale is deliberately NOT here: it
-    is a (human, robot) quantity owned and applied by the correspondence + transport layer (where
-    both bodies meet), composed from ``human_stature`` and the robot height.
+    """Per-(subject, take) GROUNDING. ROBOT-FREE *and* BODY-FREE: built from the mocap demo joints
+    (human floor) and the object meshes/poses (object floor) alone — no betas/body needed — so it
+    caches per take independently of the target robot. The subject's ``stature`` lives on the
+    ``BodyModel`` (its natural rest-mesh owner), and the human->robot scale (a (human, robot)
+    quantity) is composed downstream at the transport seam — neither belongs here.
 
-    Single-human, multi-object: ONE ``human_stature`` + the human and the objects each grounded by
-    their OWN z-shift (the human may float while the objects already rest on the floor, so one shared
-    scene shift would push them through it). ``human_offset`` grounds the human (its feet);
-    ``object_offset`` is a SINGLE shift shared by ALL objects (grounds the lowest-reaching object just
-    above the floor, keeping inter-object geometry). Offline asset, NOT a geometry cache: (subject, take).
+    Single-human, multi-object: the human and the objects each ground by their OWN z-shift (the human
+    may float while the objects already rest on the floor, so one shared scene shift would push them
+    through it). ``human_offset`` grounds the human (its feet); ``object_offset`` is a SINGLE shift
+    shared by ALL objects (grounds the lowest-reaching object just above the floor, keeping
+    inter-object geometry). Offline asset, NOT a geometry cache: (subject, take).
 
     TODO: a finer per-object / inter-object calibration could ground each object and jointly optimise
     the object<->object & object<->floor contacts (then ``object_offset`` -> per-object offsets)."""
 
-    human_stature: float                 # subject rest stature (m), betas-FK — feeds scale = robot_h / stature
     human_offset: float                  # z-shift grounding the human (feet -> floor)
     object_offset: float                 # z-shift shared by ALL objects (lowest-reaching object -> ~floor)
     root_frame: np.ndarray               # (4, 4) world transform framing the root
@@ -214,12 +217,17 @@ class Calibration:
 @dataclass(frozen=True)
 class GroundedScene:
     """Output of ``prepare`` (loaded motion with calibration applied). The single input of both
-    treatments (style, interaction).
+    treatments (style, interaction). The grounding ``Calibration`` rides inside (provenance/viz), so
+    ``prepare`` returns just ``(GroundedScene, InteractionContext)``.
 
-    LIGHT by design: no live ``BodyModel``, no trimesh — only grounded motion, params and
-    mesh PATHS. Heavy geometry is built ON DEMAND (``prepare/load/smpl.py`` -> ``BodyModel``,
-    ``prepare/load/mesh.py`` -> ``ObjectMesh``) inside ``prepare/``, so geometry never reaches
-    the style treatment or the solve."""
+    Carries the subject's ``body`` (the live posing engine): per frame, ``interaction`` poses the
+    human cloud via ``body.bone_transforms(smpl_params, f)``. The body is typed by the numpy-only
+    ``BodyModel`` PROTOCOL, so ``targets`` calls it while staying torch-free at import (torch is
+    hidden inside the instance, built once in ``prepare``). Object meshes stay mesh PATHS, NOT live
+    geometry — the asymmetry is principled: the human DEFORMS (needs per-frame FK), objects are RIGID
+    (a pose7 + the pre-sampled object cloud suffice). ``style`` ignores the body (it tracks the demo
+    joints); ``solve`` never sees a ``GroundedScene`` (it consumes ``FrameTargets``) — so no heavy
+    object reaches them. ``body is None`` <=> a positions-only source (no SMPL params, style-only)."""
 
     joint_pos: np.ndarray                  # (T, J_demo, 3) grounded demo joints — style
     joint_names: tuple[str, ...]           # (J_demo,)
@@ -227,7 +235,8 @@ class GroundedScene:
     object_mesh_paths: tuple[Path, ...]    # geometry pulled on demand by prepare
     calibration: Calibration
     fps: float
-    smpl_params: SmplParams | None = None  # grounded params -> build BodyModel on demand
+    smpl_params: SmplParams | None = None  # grounded params -> consumed by ``body.bone_transforms``
+    body: BodyModel | None = None          # the subject's live posing engine (None => positions-only)
 
     @property
     def n_frames(self) -> int:

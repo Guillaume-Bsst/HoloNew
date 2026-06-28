@@ -1,16 +1,12 @@
-"""prepare/calibration — grounds the whole scene (human + objects) and characterises the subject.
+"""prepare/calibration — grounds the whole scene (human + objects) onto the floor.
 
-Produces the per-(subject, take) ``Calibration`` (``contracts.Calibration``): a subject stature, a
-human grounding offset, a shared object grounding offset and a root frame — computed offline once
-and cached. ROBOT-FREE by design — the human->robot scale is a
-(human, robot) quantity, owned and applied by the correspondence + transport layer (the module
-whose job IS the human<->robot pairing, where both surfaces meet); calibration only supplies the
-robot-free subject ``human_stature`` it composes with the robot height.
+Produces the per-(subject, take) ``Calibration`` (``contracts.Calibration``): a human grounding
+offset, a shared object grounding offset and a root frame — computed offline once and cached.
+ROBOT-FREE *and* BODY-FREE by design: the offsets come from the mocap demo joints (human floor) and
+the object meshes/poses (object floor) alone — no betas/body needed — so it caches per take. The
+subject ``stature`` lives on the ``BodyModel`` (its natural rest-mesh owner, see ``load/smpl.py``),
+and the human->robot scale (a (human, robot) quantity) is composed downstream at the transport seam.
 
-  - ``human_stature`` = the subject's rest-pose stature (m), from betas-FK (vertical extent of the
-                        rest mesh). The REAL subject's size — feeds ``scale = robot_height / stature``
-                        downstream. Uniform across datasets: every parametric source has a SMPL-X
-                        ``BodyModel``, so there is no per-dataset stature path.
   - ``human_offset``  = world z-shift grounding the human. The ``CalibrationConfig.foot_percentile``
                         percentile (default 50 = median) of the lower mocap FOOT-JOINT height over
                         the clip. The foot joint (not the SMPL sole) is used on purpose: the SMPL
@@ -33,12 +29,10 @@ Grounding is ALWAYS recomputed (uniform): an already-grounded clip (SFU) simply 
 ``human_offset ~= 0``.
 
 Dataset-agnostic by construction: every difference between datasets lives in the DATA the loader
-already produced (``smpl_params`` present -> betas-FK stature, else the default; ``joint_names`` ->
-foot-joint indices for the human offset; object meshes -> shared object offset, empty list -> 0),
-never in a branch here.
+already produced (``joint_names`` -> foot-joint indices for the human offset; object meshes ->
+shared object offset, empty list -> 0), never in a branch here.
 
-Ported from HoloNew: ``holosoma/preprocess.ground_to_floor`` (foot-joint grounding),
-``data_loaders/omomo.omomo_height_from_betas`` (betas-FK stature).
+Ported from HoloNew: ``holosoma/preprocess.ground_to_floor`` (foot-joint grounding).
 """
 from __future__ import annotations
 
@@ -48,22 +42,13 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from ..contracts import BodyModel, Calibration, RawMotion, SmplParams
+from ..contracts import Calibration, RawMotion
 from ..config import CalibrationConfig
 
 
 # =============================================================================
-# Pure functions (no I/O, no mutation) — the calibration math
+# Pure functions (no I/O, no mutation) — the grounding math
 # =============================================================================
-def human_stature(body: BodyModel, params: SmplParams) -> float:
-    """Rest-pose stature (m) = vertical extent of the subject's rest mesh, from betas-FK.
-
-    ``rest_vertices`` is in the model's NATIVE Y-up frame, so the stature is the Y-extent (the same
-    quantity the previous HoloNew measured for both the SMPL-X and the OMOMO betas paths)."""
-    rv = np.asarray(body.rest_vertices(params), np.float64)   # (V, 3) native Y-up
-    return float(rv[:, 1].max() - rv[:, 1].min())
-
-
 def foot_floor_offset(joint_pos: np.ndarray, foot_idx: list[int], percentile: float) -> float:
     """Human floor offset = ``percentile`` of the lower mocap FOOT-JOINT height over the clip.
 
@@ -119,44 +104,29 @@ def _foot_indices(joint_names: tuple[str, ...]) -> list[int]:
 # CalibrationBuilder — the AssetBuilder for this deliverable (build / cache)
 # =============================================================================
 class CalibrationBuilder:
-    """``AssetBuilder`` producing the ``Calibration`` for a (subject, take). Scoped to that pair
-    (NOT a geometry cache): the floor offset depends on the whole motion, the stature on the
-    subject. ROBOT-FREE (no robot input -> caches per subject). The runner wraps ``build``/``load``
-    in a ``prof.span("calibration")``."""
+    """``AssetBuilder`` producing the grounding ``Calibration`` for a (subject, take). Scoped to that
+    pair (NOT a geometry cache): the floor offsets depend on the whole motion + objects. ROBOT-FREE
+    *and* BODY-FREE (no robot/body input -> caches per take). The runner wraps ``build``/``load`` in a
+    ``prof.span("calibration")``."""
 
     def cache_key(self, config: CalibrationConfig, raw: RawMotion) -> str:
-        """Stable hash of everything the calibration depends on: the knobs (``foot_percentile``,
-        ``object_floor_pct``, ``fallback_stature``) + the demo joints (foot-joint floor offset), the
-        subject shape (betas/gender -> stature), and the object meshes + poses (the shared object floor
-        offset). No robot term — calibration is robot-free."""
+        """Stable hash of everything the grounding depends on: the knobs (``foot_percentile``,
+        ``object_floor_pct``) + the demo joints (foot-joint floor offset) + the object meshes + poses
+        (the shared object floor offset). No body/betas term (the stature lives on the BodyModel) and
+        no robot term — grounding is body-free and robot-free."""
         h = hashlib.sha1()
-        h.update(f"{config.foot_percentile}|{config.object_floor_pct}|{config.fallback_stature}".encode())
+        h.update(f"{config.foot_percentile}|{config.object_floor_pct}".encode())
         h.update(np.ascontiguousarray(raw.joint_pos, np.float32).tobytes())   # drives the foot offset
-        p = raw.smpl_params
-        if p is not None:                                                     # drives the stature
-            h.update(str(p.gender).encode())
-            h.update(np.ascontiguousarray(p.betas, np.float32).tobytes())
         for path, pose in zip(raw.object_mesh_paths, raw.object_poses_raw):   # drive the object offset
             h.update(Path(path).read_bytes())   # mesh BYTES: a mesh that changes at a constant path
             h.update(np.ascontiguousarray(pose, np.float32).tobytes())        # must change the key
         return h.hexdigest()
 
-    def build(self, config: CalibrationConfig, raw: RawMotion,
-              body: BodyModel | None = None, smpl_model_dir: Path | None = None) -> Calibration:
-        """Compute the ``Calibration``. The floor offset is mocap-joint based (no body needed); the
-        ``body`` is used only for the betas-FK STATURE of a parametric source — reuse it if supplied,
-        else build it from ``raw.smpl_params`` + ``smpl_model_dir`` (one is required; the model dir
-        lives on ``SceneSpec``, not ``RawMotion``). A positions-only clip uses the default stature."""
-        if raw.is_parametric and body is None:
-            if smpl_model_dir is None:
-                raise ValueError("a parametric scene needs a BodyModel or smpl_model_dir to "
-                                 "compute the betas-FK stature")
-            from ..load.smpl import build_body_model
-            body = build_body_model(raw.smpl_params, smpl_model_dir)
-
-        # Stature: betas-FK from the real subject when parametric; the configured fallback otherwise.
-        stature = human_stature(body, raw.smpl_params) if body is not None else config.fallback_stature
-
+    def build(self, config: CalibrationConfig, raw: RawMotion) -> Calibration:
+        """Compute the grounding ``Calibration`` from the loaded ``RawMotion``. Body-free: the human
+        floor is the foot-joint percentile (mocap demo joints) and the object floor a percentile of
+        the lowest posed object point — neither needs the SMPL body (the subject stature lives on the
+        BodyModel). Uniform for parametric and positions-only sources alike."""
         # Human floor offset: a percentile of the lower foot-joint height (mocap demo joints).
         human = foot_floor_offset(raw.joint_pos, _foot_indices(raw.joint_names), config.foot_percentile)
 
@@ -169,8 +139,7 @@ class CalibrationBuilder:
         else:
             object_offset = 0.0
 
-        return Calibration(human_stature=stature, human_offset=human,
-                           object_offset=object_offset, root_frame=np.eye(4))
+        return Calibration(human_offset=human, object_offset=object_offset, root_frame=np.eye(4))
 
     def save(self, calib: Calibration, path: Path) -> None:
         return save_calibration(calib, path)
@@ -186,8 +155,7 @@ def save_calibration(calib: Calibration, path: Path) -> None:
     """Serialise a ``Calibration`` to ``path`` (``np.savez``), creating parent dirs as needed."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(str(path), human_stature=np.float64(calib.human_stature),
-             human_offset=np.float64(calib.human_offset),
+    np.savez(str(path), human_offset=np.float64(calib.human_offset),
              object_offset=np.float64(calib.object_offset),
              root_frame=np.asarray(calib.root_frame, np.float64))
 
@@ -195,12 +163,10 @@ def save_calibration(calib: Calibration, path: Path) -> None:
 def load_calibration(path: Path) -> Calibration:
     """Inverse of ``save_calibration``: load a ``Calibration`` from ``path``."""
     d = np.load(str(path), allow_pickle=False)
-    return Calibration(human_stature=float(d["human_stature"]), human_offset=float(d["human_offset"]),
-                       object_offset=float(d["object_offset"]),
+    return Calibration(human_offset=float(d["human_offset"]), object_offset=float(d["object_offset"]),
                        root_frame=np.asarray(d["root_frame"], np.float64))
 
 
-def build_calibration(raw: RawMotion, config: CalibrationConfig, body: BodyModel | None = None,
-                      smpl_model_dir: Path | None = None) -> Calibration:
+def build_calibration(raw: RawMotion, config: CalibrationConfig) -> Calibration:
     """Convenience wrapper around ``CalibrationBuilder.build`` (the common call site)."""
-    return CalibrationBuilder().build(config, raw, body=body, smpl_model_dir=smpl_model_dir)
+    return CalibrationBuilder().build(config, raw)

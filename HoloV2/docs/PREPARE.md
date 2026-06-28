@@ -103,7 +103,7 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
       robot.py             RobotSpec -> RobotModel (FK yourdfpy, AGNOSTIQUE) + pose de repos correspondance (keyée par robot)
       frames.py            conventions de frame partagées
     # --- les 3 LIVRABLES (build-once) ; persistance UNIFORME : save_<asset>/load_<asset> co-localisés, le builder délègue ---
-    calibration/         grounding ROBOT-FREE : human_stature + human_offset (foot-joint pct) + object_offset (objets partagé), root
+    calibration/         grounding ROBOT-FREE & BODY-FREE : human_offset (foot-joint pct) + object_offset (objets partagé) + root
                          ; expose save_calibration/load_calibration (CalibrationBuilder délègue)
     sdf/                 meshes objets/terrain -> SDF (caché) ; sol plat -> SDF de plan (build_plane_sdf, non caché)
                          ; expose save_sdf/load_sdf (SdfBuilder délègue)
@@ -138,7 +138,7 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
 ```
 
 **Dépendances (acyclique par construction)** : pipeline linéaire, deps aval seulement · `prepare/`
-instancie SMPL/meshes et produit {GroundedScene, InteractionContext, Calibration} (exposés par
+instancie SMPL/meshes et produit {GroundedScene, InteractionContext} (calib dans `grounded.calibration` ; exposés par
 `prepare/contracts.py`) · `targets/` les consomme **via leur type** (`from ..prepare.contracts import
 …`, jamais le code interne de `prepare/`) et produit `FrameTargets` · `solve/` consomme `FrameTargets`
 (`from ..targets.contracts import …`). Aucun cycle ; SMPL/meshes jamais touchés hors `prepare/`.
@@ -179,12 +179,13 @@ class AssetBuilder(Protocol):
 Inventaire, par module.
 
 ### `prepare/contracts.py` (sortie publique de prepare)
-- **Protocols** : `BodyModel`, `RobotModel`, `AssetBuilder`
+- **Protocols** : `BodyModel` (+ `stature`, propriété rest-mesh du sujet), `RobotModel`, `AssetBuilder`
 - **entrée (data identity)** : `RobotSpec`, `SceneSpec`. La **config** (`PrepareConfig` + sous-configs)
   n'est PAS un contrat de données : elle vit dans `prepare/config.py` (`PrepareConfig()` = défaut,
   override inline `PrepareConfig(sdf=SdfConfig(spacing=0.005))`).
 - **load** : `SmplParams` (avec MAINS), `RawMotion` (J_demo)
-- **scène / calib** : `ObjectMesh` (+ `static`), `Calibration`, `GroundedScene` (LÉGER)
+- **scène / calib** : `ObjectMesh` (+ `static`), `Calibration` (grounding seul, body-free), `GroundedScene`
+  (porte `body` = moteur de posage live + `calibration` ; meshes objets = PATHS)
 - **champs (assets)** : `SDF` (grille, objets/terrain) · `Channel` (`object_idx` + `sdf` TOUJOURS
   présent ; sol plat = SDF de plan)
 - **nuages** : `PointCloud` (skinning creux + `sampling_id`), `CorrespondenceTable`
@@ -201,9 +202,11 @@ Inventaire, par module.
 
 ## 6. Décisions encore ouvertes
 
-1. ~~Convention de scale dans `calibration`~~ TRANCHÉ : `calibration` est ROBOT-FREE et n'expose
-   que `human_stature` (sujet réel, betas-FK) ; la scale humain→robot = `robot_height / human_stature`
-   est une grandeur de la PAIRE (humain, robot), possédée et appliquée par la couche
-   `correspondence`/`transport` (là où les deux surfaces se rencontrent), jamais bakée dans la scène.
+1. ~~Convention de scale dans `calibration`~~ TRANCHÉ : `calibration` est ROBOT-FREE **et BODY-FREE**
+   (grounding seul) ; la **stature** vit sur le `BodyModel` (`body.stature`, sujet réel, betas-FK — pure
+   propriété du rest mesh). La scale humain→robot = `robot_height / body.stature` est une grandeur de la
+   PAIRE (humain, robot), possédée et appliquée par la couche `correspondence`/`transport` (là où les
+   deux surfaces se rencontrent), jamais bakée dans la scène — exposée comme `InteractionContext.scale`
+   le jour où `transport` est codé (différée d'ici là, YAGNI).
 2. Datasets concrets pris en charge par `load/` (plusieurs d'emblée).
 3. Contenu réel de l'objectif de `style` (à reconcevoir).

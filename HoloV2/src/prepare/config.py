@@ -32,15 +32,13 @@ class CalibrationConfig:
     object_floor_pct: float = 1.0    # object floor = this (low) percentile of the lowest posed object
                                      # point: ~the "lowest reach" of the floor-touching object, robust
                                      # to a stray low vertex/frame
-    fallback_stature: float = 1.78   # human stature (m) used for a non-parametric source (no betas to FK)
+    # (no stature knob: grounding is body-free; the subject stature lives on the BodyModel, betas-FK)
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.foot_percentile <= 100.0:
             raise ValueError(f"foot_percentile must be in [0, 100], got {self.foot_percentile}")
         if not 0.0 <= self.object_floor_pct <= 100.0:
             raise ValueError(f"object_floor_pct must be in [0, 100], got {self.object_floor_pct}")
-        if self.fallback_stature <= 0.0:
-            raise ValueError(f"fallback_stature must be > 0, got {self.fallback_stature}")
 
 
 @dataclass(frozen=True)

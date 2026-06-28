@@ -42,7 +42,7 @@ avec le point d'entrée de run. Les clés du cache build-once dérivent de la co
 
 ## Les 3 étapes
 ```
-fichiers bruts ─► PREPARE ─► {GroundedScene, InteractionContext, Calibration} ─► TARGETS ─► FrameTargets ─► SOLVE ─► qpos
+fichiers bruts ─► PREPARE ─► {GroundedScene, InteractionContext} ─► TARGETS ─► FrameTargets ─► SOLVE ─► qpos
                   (offline, q-indép.)                                            (online, q-indép.)          (q-dép.)
                                                                                       │
                                                                                  trace_frame
@@ -90,7 +90,7 @@ HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · 
 Pipeline linéaire ⇒ les imports ne vont que vers l'AVAL ; chaque étage importe la **sortie publique**
 de l'amont (`<étage>.contracts` / `.config`), jamais ses internes. Plus de noyau partagé central.
 ```
-prepare/  ──► {GroundedScene, InteractionContext, Calibration}   (exposés par prepare/contracts.py + config.py)
+prepare/  ──► {GroundedScene, InteractionContext}   (calib dans grounded.calibration ; exposés par prepare/contracts.py + config.py)
 targets/  ──► FrameTargets        from ..prepare.contracts import GroundedScene, InteractionContext
 viz/      ──► (lit FrameTrace)    from ..prepare.contracts / ..targets.contracts import …
 solve/    ──► qpos                from ..targets.contracts import FrameTargets

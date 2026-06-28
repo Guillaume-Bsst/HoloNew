@@ -10,7 +10,7 @@ from src.prepare.contracts import (Calibration, RawMotion, RobotSpec, SmplParams
 from src.prepare.config import CalibrationConfig
 from src.prepare import scene
 from src.prepare.calibration import (CalibrationBuilder, build_calibration,
-                                        foot_floor_offset, human_stature, object_floor_offset)
+                                        foot_floor_offset, object_floor_offset)
 from src.prepare.calibration.build import _foot_indices
 
 
@@ -25,23 +25,7 @@ def _write_cube_obj(path: Path, half: float = 0.5) -> None:
 _SMPLX_JOINTS = ("Pelvis", "L_Hip", "R_Hip", "L_Ankle", "R_Ankle", "L_Foot", "R_Foot")
 
 
-# --------------------------------------------------------------------------- fakes / fixtures
-class FakeBody:
-    """Minimal BodyModel stub: a fixed rest mesh (for the betas-FK stature). No torch — the floor
-    offset is mocap-joint based, so the body is only ever used for ``rest_vertices``."""
-
-    faces = np.zeros((1, 3), np.int64)
-    n_bones = 55
-
-    def __init__(self, rest_y_extent: float = 1.75):
-        v = np.zeros((4, 3))
-        v[:, 1] = np.array([-rest_y_extent / 2, rest_y_extent / 2, 0.0, 0.1])
-        self._rest = v
-
-    def rest_vertices(self, params):
-        return self._rest
-
-
+# --------------------------------------------------------------------------- fixtures
 def _params(T: int) -> SmplParams:
     z = np.zeros
     return SmplParams(betas=z(16, np.float32), global_orient=z((T, 3), np.float32),
@@ -65,10 +49,6 @@ def _robot(h: float = 1.3) -> RobotSpec:
 
 
 # --------------------------------------------------------------------------- pure functions
-def test_human_stature():
-    assert human_stature(FakeBody(rest_y_extent=1.75), _params(1)) == pytest.approx(1.75)
-
-
 def test_foot_indices_finds_feet_then_ankles():
     assert _foot_indices(_SMPLX_JOINTS) == [5, 6]                      # L_Foot, R_Foot
     assert _foot_indices(("Pelvis", "L_Ankle", "R_Ankle")) == [1, 2]   # ankle fallback
@@ -97,18 +77,16 @@ def test_object_floor_offset_percentile():
 
 # --------------------------------------------------------------------------- builder
 def test_builder_human_offset_from_foot_percentile():
-    calib = build_calibration(_raw(3), CalibrationConfig(), body=FakeBody())
-    assert calib.human_stature == pytest.approx(1.75)                # real subject stature, robot-free
+    calib = build_calibration(_raw(3), CalibrationConfig())          # body-free grounding
     assert calib.human_offset == pytest.approx(0.05)                 # foot-joint p50 (feet at 0.05)
     assert calib.object_offset == 0.0                                # no objects
     assert np.allclose(calib.root_frame, np.eye(4))
 
 
-def test_builder_non_parametric_uses_default_stature():
+def test_builder_non_parametric_grounds_via_foot_joints():
     calib = build_calibration(_raw(3, parametric=False), CalibrationConfig())
-    assert calib.human_offset == pytest.approx(0.05)                 # foot joints (same path)
+    assert calib.human_offset == pytest.approx(0.05)                 # foot joints (same body-free path)
     assert calib.object_offset == 0.0                                # no objects
-    assert calib.human_stature == pytest.approx(CalibrationConfig().fallback_stature)  # default (no betas to FK)
 
 
 def test_builder_object_offset_grounds_lowest_object(tmp_path):
@@ -118,13 +96,8 @@ def test_builder_object_offset_grounds_lowest_object(tmp_path):
     pose = np.tile([0.0, 0.0, 0.2, 1, 0, 0, 0], (T, 1)).astype(np.float32)   # centroid at z=0.2
     raw = RawMotion(joint_pos=joints, joint_names=_SMPLX_JOINTS, fps=30.0, source_format="fake",
                     object_poses_raw=(pose,), object_mesh_paths=(obj,), smpl_params=None)
-    calib = build_calibration(raw, CalibrationConfig())              # no body needed (non-parametric)
+    calib = build_calibration(raw, CalibrationConfig())              # body-free grounding
     assert calib.object_offset == pytest.approx(-0.3, abs=1e-6)      # lowest point = 0.2 - 0.5
-
-
-def test_builder_parametric_requires_body_or_model_dir():
-    with pytest.raises(ValueError):
-        build_calibration(_raw(3), CalibrationConfig())              # no body, no model dir
 
 
 def test_builder_deterministic_and_cache_roundtrip(tmp_path):
@@ -138,13 +111,11 @@ def test_builder_deterministic_and_cache_roundtrip(tmp_path):
     cfg = CalibrationConfig()
     c1 = b.build(cfg, raw)
     c2 = b.build(cfg, raw)
-    assert (c1.human_stature, c1.human_offset, c1.object_offset) == \
-           (c2.human_stature, c2.human_offset, c2.object_offset)
-    assert b.cache_key(cfg, raw) == b.cache_key(cfg, raw)            # stable, robot-free key
+    assert (c1.human_offset, c1.object_offset) == (c2.human_offset, c2.object_offset)
+    assert b.cache_key(cfg, raw) == b.cache_key(cfg, raw)            # stable, body-free + robot-free key
     p = tmp_path / "calib.npz"
     b.save(c1, p)
     loaded = b.load(p)
-    assert loaded.human_stature == pytest.approx(c1.human_stature)
     assert loaded.human_offset == pytest.approx(c1.human_offset)
     assert loaded.object_offset == pytest.approx(c1.object_offset)
     assert np.allclose(loaded.root_frame, c1.root_frame)
@@ -154,19 +125,19 @@ def test_builder_deterministic_and_cache_roundtrip(tmp_path):
 def test_assemble_grounds_human_and_objects_by_their_own_offsets():
     raw = _raw(4, with_object=True)
     # Distinct human vs object offsets -> the test fails if they are not applied independently.
-    calib = Calibration(human_stature=1.75, human_offset=0.2, object_offset=0.15, root_frame=np.eye(4))
+    calib = Calibration(human_offset=0.2, object_offset=0.15, root_frame=np.eye(4))
     g = scene.assemble(raw, calib)
     assert g.joint_pos.shape == raw.joint_pos.shape
     assert np.allclose(g.joint_pos[:, :, 2], raw.joint_pos[:, :, 2] - 0.2)        # human: human_offset
     assert np.allclose(g.smpl_params.transl[:, 1], raw.smpl_params.transl[:, 1] - 0.2)  # native y
     assert np.allclose(g.object_poses[0][:, 2], raw.object_poses_raw[0][:, 2] - 0.15)   # object: shared
     assert np.allclose(g.object_poses[0][:, :2], raw.object_poses_raw[0][:, :2])        # xy untouched
-    assert g.calibration.human_stature == 1.75    # carried; scale composed downstream, not baked here
+    assert g.body is None                         # no body passed here (carried through when supplied)
     assert g.is_parametric and g.n_objects == 1
 
 
 def test_assemble_non_parametric_scene():
-    g = scene.assemble(_raw(3, parametric=False), Calibration(1.7, 0.1, 0.0, np.eye(4)))
+    g = scene.assemble(_raw(3, parametric=False), Calibration(0.1, 0.0, np.eye(4)))
     assert g.smpl_params is None and not g.is_parametric and g.n_objects == 0
 
 
@@ -186,13 +157,14 @@ def test_calibration_grounds_real_sfu_foot_to_zero():
     raw = load(spec)
     body = build_body_model(raw.smpl_params, _SMPLX)
 
-    calib = build_calibration(raw, CalibrationConfig(), body=body)   # robot-free, foot p50
-    assert 1.4 < calib.human_stature < 2.1                  # a plausible human stature (m)
+    assert 1.4 < body.stature < 2.1                         # a plausible human stature (m), betas-FK
+
+    calib = build_calibration(raw, CalibrationConfig())     # body-free, foot p50
     assert abs(calib.human_offset) < 0.3                    # SFU is already near the floor
     assert calib.object_offset == 0.0                       # SFU is body-only
 
     # End-to-end: grounding zeroes the foot-joint p50 residual (the offset IS that percentile).
-    g = scene.assemble(raw, calib)
+    g = scene.assemble(raw, calib, body)
     foot = _foot_indices(g.joint_names)
     residual = foot_floor_offset(g.joint_pos, foot, 50.0)
     assert abs(residual) < 1e-5, f"grounded foot still off by {residual:.5f} m"

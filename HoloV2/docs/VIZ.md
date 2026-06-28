@@ -7,9 +7,9 @@ affiche. **Zéro hook** dans le calcul, jamais d'`if visualize` dans `prepare`/`
 
 ## Le seam : `trace_frame` -> `FrameTrace`
 
-`targets/pipeline.py` expose DEUX entrées, mêmes fonctions pures :
-- `process_frame(prepared, f) -> FrameTargets`   (lean, prod)
-- `trace_frame(prepared, f)   -> FrameTrace`      (instrumenté : garde chaque intermédiaire)
+`targets/pipeline.py` expose DEUX entrées, mêmes fonctions pures (cœur partagé `_build_frame`) :
+- `process_frame(grounded, ctx, f) -> FrameTargets`   (lean, prod)
+- `trace_frame(grounded, ctx, f)   -> FrameTrace`      (instrumenté : garde chaque intermédiaire)
 
 `FrameTrace` (défini dans `targets/contracts.py`) bundle tous les artefacts d'une frame :
 `pose (FramePose)` · `human_cloud_world` · `object_clouds_world` · `human_field`
@@ -23,8 +23,8 @@ Interne rangé proprement : **une méthode `_draw_<couche>` par couche**, gardé
 C'est le SEUL endroit qui connaît viser (effets confinés).
 
 ### Entrées du viewer
-- assets STATIQUES de `prepare/` : `GroundedScene`, `InteractionContext` (channels, nuages-rest,
-  correspondance), `Calibration`.
+- assets STATIQUES de `prepare/` : `GroundedScene` (porte `body` + `calibration`), `InteractionContext`
+  (channels, nuages-rest, correspondance).
 - un fournisseur de frames `get(f) -> FrameTrace` :
   - **bake** : précalcule tous les `FrameTrace` -> playback fluide (offline),
   - **live** : `trace_frame(f)` à la volée (debug téléop).

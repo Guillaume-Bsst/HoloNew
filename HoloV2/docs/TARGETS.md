@@ -8,11 +8,13 @@ sont statiques (prepare) → coût minimal.
 Les types de l'étage `targets` vivent dans **`targets/contracts.py`** (ContactField, MultiChannelField,
 StyleTargets, Robot/EnvironmentInteractionTargets, FrameTargets, FramePose, FrameTrace). Ce module
 **importe la sortie publique de prepare** (`from ..prepare.contracts import GroundedScene,
-InteractionContext, Calibration`) — jamais les sous-modules internes de `prepare/`. Ce que `targets`
-consomme en entrée :
-- `GroundedScene` : motion calibrée (joints + params + poses objets / frame)
-- `InteractionContext` : assets statiques (channels, human_cloud, object_clouds, correspondence)
-- `Calibration`
+InteractionContext`) — jamais les sous-modules internes de `prepare/`. `pipeline` prend exactement
+`(grounded, ctx, f)` (pas de bundle `prepared`, pas de `config` — le seul knob per-frame, `margin`,
+est dans le context). Ce que `targets` consomme en entrée :
+- `GroundedScene` : motion calibrée (joints démo + params + poses objets / frame) + **`body`** (moteur
+  de posage : `body.bone_transforms` → bone (R,t)) + `calibration` (provenance, via `grounded.calibration`)
+- `InteractionContext` : assets statiques (channels, human_cloud, object_clouds, correspondence ; + `scale`
+  quand `transport` sera codé)
 
 ## Flux per-frame
 
@@ -79,8 +81,8 @@ targets/
   via `..prepare.contracts`).
 
 ## Seam visualisation
-`pipeline` expose aussi `trace_frame(prepared, f) -> FrameTrace` (mêmes ops pures que
-`process_frame`, intermédiaires gardés) pour `viz/`. `FramePose` et `FrameTrace` sont
+`pipeline` expose aussi `trace_frame(grounded, ctx, f) -> FrameTrace` (mêmes ops pures que
+`process_frame` via le cœur partagé `_build_frame`, intermédiaires gardés) pour `viz/`. `FramePose` et `FrameTrace` sont
 définis dans `targets/contracts.py`. Détail : `docs/VIZ.md`.
 
 ## À fixer quand on code `targets/`

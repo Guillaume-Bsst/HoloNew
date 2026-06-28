@@ -85,7 +85,7 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
     # Grounding is PER ENTITY: the human drops by calib.human_offset, ALL objects by the shared
     # calib.object_offset. These clearances let us SEE each entity land on z=0 (the human may float
     # while the objects already rest on the floor, hence the split human/object offsets).
-    calib = build_calibration(raw, CalibrationConfig(), body=body)
+    calib = build_calibration(raw, CalibrationConfig())                # body-free grounding
     human_offset = float(calib.human_offset)
     object_offset = float(calib.object_offset)                         # shared by all objects
     # Human lowest world z + lowest point per frame (surface if parametric, else demo joints).
@@ -106,7 +106,8 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
         obj_minz.append(mz); obj_low.append(lp)
     hz_med = float(np.median(human_minz))
     oz_med = [float(np.median(z)) for z in obj_minz]
-    print(f"calibration: human_offset={human_offset:+.4f} m, human_stature={calib.human_stature:.3f} m, "
+    stature_str = f"{body.stature:.3f} m" if body is not None else "n/a"
+    print(f"calibration: human_offset={human_offset:+.4f} m, human_stature={stature_str}, "
           f"object_offset={object_offset:+.4f}")
     print(f"  RAW clip-median lowest z: human={hz_med:+.4f}" +
           "".join(f", obj{k}={m:+.4f}" for k, m in enumerate(oz_med)))

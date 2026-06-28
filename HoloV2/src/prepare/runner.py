@@ -11,15 +11,21 @@ from ..obs import NULL
 
 
 def prepare(scene_spec, config, prof=NULL):
-    """scene_spec (sujet, objets, robot, prise) + PrepareConfig -> (GroundedScene, InteractionContext,
-    Calibration).  Span plan (filled when prepare/ is implemented):
+    """scene_spec (sujet, objets, robot, prise) + PrepareConfig -> (GroundedScene, InteractionContext).
+    The grounding ``Calibration`` rides inside ``grounded.calibration`` (provenance/viz), so the return
+    is a 2-tuple. The subject ``body`` is built ONCE here (the only place with the SMPL model dir) and
+    threaded into the scene; calibration is body-free, so it does not rebuild one. Span plan (filled
+    when prepare/ is implemented):
 
         with prof.span("prepare"):
-            with prof.span("calibration"):    calib = calibration.build_or_load(...)   # event hit/miss
-            with prof.span("scene"):          grounded = scene.assemble(..., calib)
+            raw  = load(scene_spec)
+            body = build_body_model(raw.smpl_params, scene_spec.smpl_model_dir) if raw.is_parametric else None
+            with prof.span("calibration"):    calib = CalibrationBuilder().build_or_load(...)  # body-free
+            with prof.span("scene"):          grounded = scene.assemble(raw, calib, body)
             with prof.span("sdf", n=N):       sdfs = [sdf.build_or_load(o, config) ...]
-            with prof.span("point_cloud"):    clouds = pointcloud.build_or_load(...)
+            with prof.span("point_cloud"):    clouds = pointcloud.build_or_load(body, ...)
             with prof.span("correspondence"): corr = correspondence.build_or_load(...)
+        return grounded, InteractionContext(...)   # scale = robot.height / body.stature added with transport
     """
     raise NotImplementedError
 
