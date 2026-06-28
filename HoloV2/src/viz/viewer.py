@@ -124,9 +124,23 @@ class Viewer:
                                            np.array([[0, 1, 2]]), opacity=0.0)
 
     def _draw_objects(self, trace: FrameTrace) -> None:
-        """Posed object clouds straight from ``trace.object_clouds_world`` (rigid, per-frame world)."""
+        """Posed object clouds (``trace.object_clouds_world``), coloured by their OWN env field
+        (``trace.targets.env_interaction`` — object<->ground / object<->object) on the SELECTED channel,
+        so the object's contact is visible like the human side (pick channel ``ground`` to see the
+        object resting on the floor). ``uniform`` keeps them plain orange."""
+        c = self._channel_idx()
+        mode = self.color_mode.value
+        env = trace.targets.env_interaction.per_object
         for k, h in enumerate(self._obj_handles):
-            h.points = trace.object_clouds_world[k].astype(np.float32)
+            pts = trace.object_clouds_world[k].astype(np.float32)
+            if mode == "distance":
+                col = _heat_distance(env[k].distance[c], self.margin)
+            elif mode == "active":
+                col = _active_colors(env[k].active[c])
+            else:                                                        # uniform
+                col = np.tile(np.array([255, 140, 0], np.uint8), (pts.shape[0], 1))
+            h.points = pts
+            h.colors = col
             h.point_size = float(self.size.value)
             h.visible = self.cb_objects.value
 
