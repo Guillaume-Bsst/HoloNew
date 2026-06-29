@@ -55,9 +55,9 @@ def build(pose: FramePose, robot: RobotSpec, stature: float,
     bone_rot = np.asarray(pose.bone_rot, np.float64)                   # (J_bones, 3, 3)
     bone_pos = np.asarray(pose.bone_pos, np.float64)                   # (J_bones, 3)
 
-    # SCALE anchor: the root (pelvis) world position rigidly places the whole scaled skeleton. V1-TEST
-    # defaults: scale_xy = 1.0 (x, y kept native) and scale_z = None (z scaled morphologically by the
-    # root's ``SCALE[pelvis] * ratio``). Body proportions (pelvis-local) are unchanged otherwise.
+    # SCALE anchor: the root (pelvis) world position rigidly places the whole scaled skeleton.
+    # Défaut SceneScaleConfig() (None,None) → s_xy=ratio, s_z=ratio (xy ET z scalés par ratio).
+    # scale_xy=1.0, scale_z=None reproduit le natif (xy brut, z morphologique·ratio). Body proportions (pelvis-local) are unchanged otherwise.
     root_pos = bone_pos[SMPL_BODY_INDEX[ROOT_BODY]]                    # (3,)
     # PLACEMENT du root via l'échelle de scène (None -> ratio) ; xy autour de l'origine, z autour du
     # sol. Le morphologique du pelvis (scale_torso_legs, le pelvis est torse/jambes) reste sur z.

@@ -42,7 +42,8 @@ class BodyModel(Protocol):
     n_bones: int       # J_bones (52 SMPL-H / 55 SMPL-X)
     stature: float     # subject rest stature (m), betas-FK — a pure rest-mesh property (no motion).
                        # Lives on the body (its natural owner), NOT the calibration; feeds the
-                       # human->robot scale = robot_height / stature, composed at the transport seam.
+                       # alimente le ratio du style : ``ratio = stature / StyleConfig.human_height_assumption``,
+                       # appliqué dans ``targets`` via ``targets.config.SceneScaleConfig``.
 
     def posed_vertices(self, params: "SmplParams", t: int) -> np.ndarray:
         """(V, 3) world mesh vertices at frame ``t`` (offline use: sampling, viz)."""
@@ -116,9 +117,10 @@ class RobotSpec:
     urdf_path: Path
     link_names: tuple[str, ...]
     dof: int
-    height: float                  # nominal robot height (m); consumed DOWNSTREAM by the
-                                   # correspondence/transport layer as scale = robot_height /
-                                   # body.stature — NOT by the (robot-free) calibration
+    height: float                  # nominal robot height (m); NOT used by the (robot-free) calibration.
+                                   # L'échelle de scène des refs n'utilise PAS ``robot_height/stature`` —
+                                   # elle utilise ``ratio = stature / StyleConfig.human_height_assumption``
+                                   # (ratio du style), appliqué dans ``targets.config.SceneScaleConfig``.
 
 
 @dataclass(frozen=True)
@@ -216,8 +218,9 @@ class Calibration:
     """Per-(subject, take) GROUNDING. ROBOT-FREE *and* BODY-FREE: built from the mocap demo joints
     (human floor) and the object meshes/poses (object floor) alone — no betas/body needed — so it
     caches per take independently of the target robot. The subject's ``stature`` lives on the
-    ``BodyModel`` (its natural rest-mesh owner), and the human->robot scale (a (human, robot)
-    quantity) is composed downstream at the transport seam — neither belongs here.
+    ``BodyModel`` (its natural rest-mesh owner), and the human->robot scale does NOT belong here —
+    l'échelle de scène des refs utilise ``ratio = stature / StyleConfig.human_height_assumption``
+    (le ratio du style), appliquée dans ``targets`` via ``targets.config.SceneScaleConfig``.
 
     Single-human, multi-object: the human and the objects each ground by their OWN z-shift (the human
     may float while the objects already rest on the floor, so one shared scene shift would push them

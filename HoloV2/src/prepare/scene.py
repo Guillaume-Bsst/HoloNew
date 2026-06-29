@@ -4,10 +4,9 @@ Grounding is PER ENTITY (single-human / multi-object): the human (demo joints + 
 by ``Calibration.human_offset``, and ALL objects drop together by the single ``Calibration.object_offset``
 — the human and the objects can sit at different heights in the raw capture (e.g. the human floats
 while the objects already rest on the floor), so one shared scene shift would push the objects through
-the floor; the objects share one offset so their inter-object geometry is kept. The scene stays at
-HUMAN scale: the human->robot scale is NOT applied here — it is
-a (human, robot) quantity composed downstream by the correspondence/transport layer from
-``body.stature`` and the robot height.
+the floor; the objects share one offset so their inter-object geometry is kept. The scene stays at HUMAN scale: the human->robot scale is NOT applied here — l'échelle de scène
+(placement) est appliquée en aval sur les RÉFÉRENCES de ``targets``
+(``targets.config.SceneScaleConfig``), après l'éval sur la scène réelle.
 
 The subject's ``body`` (built once upstream by the runner) is carried THROUGH onto the
 ``GroundedScene`` so the per-frame treatment can pose the human cloud (``body.bone_transforms``); it

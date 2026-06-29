@@ -39,6 +39,21 @@ GroundedScene[f] ─► FramePose(f) = bone (R,t)  +  object (R,t)   [calculé U
                                    les variables objet.
 ```
 
+## Échelle de scène (placement, configurable)
+
+`SceneScaleConfig(scale_xy, scale_z)` (`targets/config.py`), `None → ratio = stature/human_height_assumption`,
+ancre statique (xy origine, z sol). Partagée style + interaction, appliquée en **étape finale sur les
+références** APRÈS l'éval sur la scène réelle (jamais avant : sinon la détection de contact est
+corrompue — une boîte scalée passerait sous la table → faux contact sol).
+
+- `style` : placement du root (`targets/scale.resolve_scale`) ; le morphologique `0.9/0.8` reste interne.
+- `interaction` : `object_pos` (trajectoire) + witness du canal **sol** (`targets/scale.apply_scene_scale`
+  / `scale_ground_channels`) ; witness objet en frame local → suit la pose objet scalée.
+- Défaut `None,None` → `ratio` partout ; `scale_xy=1.0, scale_z=None` = comportement natif.
+- Les packages d'**éval** (`evaluator`, `interaction/eval`, `style/eval`) ne sont PAS touchés
+  (refs = sortie parallèle, cf. `evaluator.py`). Limitation : résidu de contact `(1-scale)·offset_objet`
+  (objet gardé à taille réelle).
+
 ## 3 fonctions pures, réutilisées partout (homogénéité = anti-spaghetti)
 - `pose_cloud(PointCloud, part_rot, part_pos) -> (P,3)` :
   `Σ_k w_k (R[parts_k] @ offsets_k + t[parts_k])`. `part_rot (J,3,3)` / `part_pos (J,3)` = la transfo

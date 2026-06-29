@@ -6,12 +6,11 @@ gather: ``out.<field>[c, m] = human_field.<field>[c, smpl_idx[m]]``. Ported from
 ``correspondence/transport`` (the field gather is HoloNew ``interaction.frame_references``:
 ``pf.field.<x>[human_idx]``).
 
-The human->robot metric ``scale`` is NOT applied here. V1 pre-scales the whole SCENE up front (and its
-TEST path keeps xy native, scales only z to robot height, and places the robot base at the scaled
-pelvis target), so the contact references live in a shared PLACED frame, not in a per-field multiply —
-and the object-local witness must stay native (the object mesh is not morphed). In V2 that scaling
-belongs to scene placement in ``prepare.runner`` (where the robot-scaled ``GroundedScene`` is
-assembled); ``transport`` stays a frame-agnostic gather.
+The human->robot metric ``scale`` is NOT applied here: ``transport`` stays a frame-agnostic gather.
+L'échelle de scène (placement) est appliquée en ÉTAPE FINALE sur les RÉFÉRENCES par le ``pipeline``
+(``targets.config.SceneScaleConfig`` + ``targets.scale``), APRÈS l'évaluation sur la scène réelle —
+jamais avant (sinon l'assignation des contacts est corrompue). Le witness objet reste en frame local
+(l'objet garde sa taille réelle) et suit la pose objet scalée.
 """
 from __future__ import annotations
 

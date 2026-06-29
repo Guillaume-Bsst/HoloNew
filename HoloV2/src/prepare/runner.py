@@ -11,8 +11,9 @@ Assembly DAG (one-way, dependency order):
     -> correspondence (carries the sampling) -> human cloud (bound to that sampling)
     -> object clouds -> InteractionContext.
 
-The scene stays at NATIVE (human) scale: the human->robot placement scale is a (human, robot)
-quantity owned by the downstream transport seam, NOT applied here (the interaction is scale-free).
+The scene stays at NATIVE (human) scale: l'échelle de scène (human->robot placement) est appliquée en
+aval, sur les RÉFÉRENCES de ``targets`` (``targets.config.SceneScaleConfig``), après l'éval — PAS ici
+(prepare reste à l'échelle réelle pour que la détection des contacts soit correcte).
 """
 from __future__ import annotations
 
