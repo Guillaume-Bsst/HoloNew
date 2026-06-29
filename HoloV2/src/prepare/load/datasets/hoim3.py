@@ -50,13 +50,18 @@ def _centered_mesh(src: Path, cache_dir: Path) -> Path:
     return out
 
 
-def _resolve_assets(smplx_dir: Path, gender: str):
-    """Locate the SMPL-X npz, the SMPL-H npz (SMPL body template) and the SMPL->SMPL-X deftrafo,
-    by convention from the SMPL-X model dir (``.../models/<release>/models/smplx``)."""
+def _resolve_assets(smplx_dir: Path, gender: str, smplh_dir: Path | None = None,
+                    deftrafo_pkl: Path | None = None):
+    """Locate the SMPL-X npz, the SMPL-H npz (SMPL body template) and the SMPL->SMPL-X deftrafo.
+
+    Explicit overrides (from paths.toml, threaded via SceneSpec) win; otherwise derive by
+    convention from the SMPL-X model dir (``.../models/<release>/models/smplx``)."""
     smplx_npz = smplx_dir / f"SMPLX_{gender.upper()}.npz"
     models_root = smplx_dir.parents[2]                      # .../models
-    smplh_npz = models_root / "smplh" / gender / "model.npz"
-    deftrafo = models_root / "model_transfer" / "smpl2smplx_deftrafo_setup.pkl"
+    smplh_root = Path(smplh_dir) if smplh_dir is not None else models_root / "smplh"
+    smplh_npz = smplh_root / gender / "model.npz"
+    deftrafo = (Path(deftrafo_pkl) if deftrafo_pkl is not None
+                else models_root / "model_transfer" / "smpl2smplx_deftrafo_setup.pkl")
     for p, what in ((smplx_npz, "SMPL-X npz"), (smplh_npz, "SMPL-H npz (SMPL body template)"),
                     (deftrafo, "SMPL->SMPL-X deftrafo (smpl2smplx_deftrafo_setup.pkl)")):
         if not p.exists():
@@ -122,7 +127,8 @@ def _objects(object_npz: Path, scanned_dir: Path, cache_dir: Path, override: tup
     return tuple(poses), tuple(meshes)
 
 
-def build_person_params(smpl_params: np.ndarray, target_id: int, gender: str, smplx_dir: Path):
+def build_person_params(smpl_params: np.ndarray, target_id: int, gender: str, smplx_dir: Path,
+                        smplh_dir: Path | None = None, deftrafo_pkl: Path | None = None):
     """EasyMocap SMPL person ``target_id`` -> ``(SmplParams (SMPL-X), BodyModel)``.
 
     Shared by ``load()`` (one retargeted person) and the multi-person debug view. EasyMocap places
@@ -130,7 +136,7 @@ def build_person_params(smpl_params: np.ndarray, target_id: int, gender: str, sm
     on the SMPL one: ``transl = Th + R @ J0_smpl - J0_smplx`` (rest pelvis heights differ ~14cm)."""
     Rh, Th, poses, betas10 = _person_series(smpl_params, target_id)
     T = len(smpl_params)
-    smplx_npz, smplh_npz, deftrafo = _resolve_assets(Path(smplx_dir), gender)
+    smplx_npz, smplh_npz, deftrafo = _resolve_assets(Path(smplx_dir), gender, smplh_dir, deftrafo_pkl)
     betas_x = smpl_betas_to_smplx(betas10, smplh_npz, smplx_npz, deftrafo)
     body = rest_body_model(betas_x, gender, Path(smplx_dir))
     Rmat = R.from_rotvec(Rh).as_matrix()                              # (T,3,3)
@@ -163,7 +169,8 @@ class HoiM3Loader:
         target_id = ids[0] if spec.person_id is None else spec.person_id
         if target_id not in ids:
             raise ValueError(f"person_id {target_id} not among frame-0 people {ids}")
-        params, body = build_person_params(smpl_params, target_id, gender, Path(spec.smpl_model_dir))
+        params, body = build_person_params(smpl_params, target_id, gender, Path(spec.smpl_model_dir),
+                                           spec.smplh_dir, spec.smpl2smplx_pkl)
         joints = body.bone_positions(params)[:, :len(SMPLX_BODY_JOINTS)].astype(np.float32)   # demo joints, Z-up
 
         object_npz = human_npz.with_name(human_npz.name.replace("_human.npz", "_object.npz"))

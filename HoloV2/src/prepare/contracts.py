@@ -124,6 +124,10 @@ class SceneSpec:
                                               # (None => the first present); ignored if single-person
     object_names: tuple[str, ...] | None = None  # named-object datasets: subset to load
                                               # (None => all); ignored if objects are unnamed
+    smplh_dir: Path | None = None             # HOI-M3 only: SMPL-H model dir (holds <gender>/model.npz);
+                                              # None => derive by convention from smpl_model_dir
+    smpl2smplx_pkl: Path | None = None        # HOI-M3 only: SMPL->SMPL-X deformation-transfer .pkl;
+                                              # None => derive by convention from smpl_model_dir
 
 
 # =============================================================================

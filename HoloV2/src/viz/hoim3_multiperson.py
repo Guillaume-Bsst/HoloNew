@@ -44,7 +44,8 @@ def view(spec: SceneSpec, *, port: int = 8080, frame_step: int = 30, max_frames:
     # Per-person posed SMPL-X meshes for the shown frames (real forward).
     persons = []  # (verts (F,V,3), faces, color)
     for k, pid in enumerate(ids):
-        params, body = build_person_params(smpl_params, pid, gender, Path(spec.smpl_model_dir))
+        params, body = build_person_params(smpl_params, pid, gender, Path(spec.smpl_model_dir),
+                                           spec.smplh_dir, spec.smpl2smplx_pkl)
         verts = np.stack([body.posed_vertices(params, t) for t in frames]).astype(np.float32)
         persons.append((verts, body.faces, _PALETTE[k % len(_PALETTE)]))
         print(f"  person {pid}: posed {F} frames")
@@ -103,15 +104,24 @@ def view(spec: SceneSpec, *, port: int = 8080, frame_step: int = 30, max_frames:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--motion-path", required=True, type=Path)
-    ap.add_argument("--model-dir", type=Path, default=None, help="SMPL-X model dir; default: paths.toml 'smplx'")
+    ap.add_argument("--motion-path", required=True, type=Path,
+                    help="absolute, or relative to [datasets.hoim3].motion in paths.toml")
+    ap.add_argument("--model-dir", type=Path, default=None,
+                    help="SMPL-X model dir; default: paths.toml [models].smplx")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--frame-step", type=int, default=30)
     ap.add_argument("--max-frames", type=int, default=150)
     a = ap.parse_args()
-    model_dir = a.model_dir if a.model_dir is not None else paths.smplx_dir()
-    robot = _g1_robot()
-    spec = SceneSpec(dataset="hoim3", motion_path=a.motion_path, robot=robot, smpl_model_dir=model_dir)
+    try:
+        cfg = paths.load_paths()
+    except FileNotFoundError:
+        if a.model_dir is None:
+            raise
+        cfg = {}
+    model_dir = a.model_dir if a.model_dir is not None else paths.smplx_dir(cfg)
+    motion = paths.resolve_motion("hoim3", a.motion_path, cfg)
+    spec = SceneSpec(dataset="hoim3", motion_path=motion, robot=_g1_robot(), smpl_model_dir=model_dir,
+                     smplh_dir=paths.smplh_dir(cfg), smpl2smplx_pkl=paths.smpl2smplx_pkl(cfg))
     view(spec, port=a.port, frame_step=a.frame_step, max_frames=a.max_frames)
 
 

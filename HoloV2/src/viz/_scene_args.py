@@ -17,11 +17,11 @@ def add_scene_args(ap: argparse.ArgumentParser) -> None:
     """Add the scene-selection flags shared by the viz CLIs."""
     ap.add_argument("--dataset", default="hodome")
     ap.add_argument("--motion-path", required=True, type=Path,
-                    help="absolute, or relative to the dataset's [roots] entry in paths.toml")
+                    help="absolute, or relative to [datasets.<dataset>].motion in paths.toml")
     ap.add_argument("--model-dir", type=Path, default=None,
-                    help="SMPL-X model dir; default: paths.toml 'smplx'")
+                    help="SMPL-X model dir; default: paths.toml [models].smplx")
     ap.add_argument("--dataset-root", type=Path, default=None,
-                    help="release root for object/betas metadata; default: paths.toml roots[dataset]")
+                    help="release root for object/betas metadata; default: paths.toml [datasets.<dataset>].meta")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--frame-step", type=int, default=2)
     ap.add_argument("--max-frames", type=int, default=200)
@@ -42,8 +42,8 @@ def scene_from_args(a: argparse.Namespace, *, paths_file: Path | None = None) ->
     explicit, absolute invocations work even without a paths.toml).
     """
     # paths.toml is only HARD-required when a default must come from it: a missing model-dir
-    # or a relative motion path. A missing --dataset-root degrades to None (see below), so it
-    # must NOT force the file — absolute invocations work with no paths.toml present.
+    # or a relative motion path. A missing --dataset-root degrades to None (dataset_meta_root
+    # returns None), so it must NOT force the file — absolute invocations work with no paths.toml.
     hard_need = (a.model_dir is None) or (not Path(a.motion_path).is_absolute())
     try:
         cfg = paths.load_paths(paths_file)
@@ -54,15 +54,10 @@ def scene_from_args(a: argparse.Namespace, *, paths_file: Path | None = None) ->
 
     model_dir = a.model_dir if a.model_dir is not None else paths.smplx_dir(cfg)
     motion = paths.resolve_motion(a.dataset, a.motion_path, cfg)
-    droot = a.dataset_root
-    if droot is None:
-        try:
-            droot = paths.dataset_root(a.dataset, cfg)
-        except ValueError:
-            droot = None   # datasets without a configured root (e.g. hoim3) keep dataset_root unset
+    droot = a.dataset_root if a.dataset_root is not None else paths.dataset_meta_root(a.dataset, cfg)
 
     objs = tuple(a.object_names.split(",")) if a.object_names else None
-    robot = _g1_robot()
-    return SceneSpec(dataset=a.dataset, motion_path=motion, robot=robot,
+    return SceneSpec(dataset=a.dataset, motion_path=motion, robot=_g1_robot(),
                      smpl_model_dir=model_dir, dataset_root=droot,
-                     person_id=a.person_id, object_names=objs)
+                     person_id=a.person_id, object_names=objs,
+                     smplh_dir=paths.smplh_dir(cfg), smpl2smplx_pkl=paths.smpl2smplx_pkl(cfg))
