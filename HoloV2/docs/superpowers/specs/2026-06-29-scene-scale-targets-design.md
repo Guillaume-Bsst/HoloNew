@@ -127,28 +127,29 @@ sur la vraie surface objet (`S·t + R·l`, objet gardé à taille réelle). Éca
 solveur fait un compromis. C'est inhérent à « scaler le corps mais pas la taille de l'objet » ; le seul
 « fix » serait de redimensionner l'objet (refusé : le robot manipule la vraie boîte).
 
-## Point d'implémentation à trancher dans le plan
+## Réconciliation morphologique × échelle (résolue)
 
-**Réconciliation morphologique × échelle de scène, surtout au pelvis (root).** Le style V1 mélange
-placement et morphologie : `scaled_root_z = scale_torso_legs · ratio · root_z` (le root z porte le
-`0.9`), xy natif, et les membres scalent `(src − root) · morph · ratio` **isotropiquement**. Le nouveau
-modèle factorise placement (échelle de scène, `None→ratio`) vs proportions (morphologique style-only).
-Il faut décider, sans casser le contact sol ni faire flotter le robot :
+Le morphologique (`0.9 / 0.8`, **y compris le `0.9` du pelvis sur z** : `scaled_root_z =
+scale_torso_legs · ratio · root_z`, le pelvis étant dans le groupe torse/jambes) **reste intégralement
+dans `style/build.py`**, inchangé. La `SceneScaleConfig` ne remplace QUE le **facteur de placement** —
+le `ratio` et le `1.0` xy codés en dur du root — et pilote l'interaction. Pas de factorisation qui
+« sort » le morphologique du style ; pas de bassin qui remonte.
 
-- le root z garde-t-il le facteur morphologique `0.9` (compat V1 exacte) ou devient-il pur placement
-  (`S_z · root_z`, ~+11 % de hauteur de bassin) ?
-- les membres restent-ils isotropes `morph·ratio`, ou suivent-ils l'anisotropie `(S_xy, S_z)` ?
+Conséquences :
 
-**Recommandation (défaut)** : garder la math interne actuelle du style (membres `morph·ratio`
-isotropes, root z `= morph_pelvis·ratio` ⇒ **pas de flottement, contact sol préservé**) et n'exposer
-via `SceneScaleConfig` que le **facteur de placement xy/z du root** + le scale partagé avec
-l'interaction. Le seul changement de comportement au défaut `None,None` est alors le **xy du root
-scalé par `ratio`** (le `(b′)` voulu) ; le reste reste V1. Analyse fine des coefficients (et leur
-parité) faite dans le plan, le test de parité V1 épinglé à `scale_xy=1.0` pour le xy.
+- **défaut `None, None`** → `ratio` partout : le **xy du root devient scalé par `ratio`** (le `(b′)`
+  voulu) ; le reste (z bassin `0.9·ratio`, membres `morph·ratio`) inchangé.
+- **`SceneScaleConfig(scale_xy=1.0, scale_z=None)`** → **comportement natif actuel à l'identique**.
 
-**Invariant de test** : le test de parité V1 (`test_style_matches_v1_scale_offset`, config V1 ≈
-`scale_xy=1.0, scale_z=None`) documente le comportement de référence — épinglé à la config qui le
-reproduit ; un test séparé couvre le nouveau défaut (`None → ratio` sur xy).
+Détail laissé au plan (sans impact sur ce qui précède) : si on expose des valeurs **anisotropes
+explicites** (`scale_xy ≠ scale_z` ≠ `ratio`), faut-il que les vecteurs membres pelvis-local suivent
+l'anisotropie ou restent isotropes `morph·ratio` ? Choix par défaut **isotrope `morph·ratio`**
+(préserve le natif) ; l'anisotropie ne joue alors que sur le **placement du root** + l'interaction. Cas
+d'usage réels (uniforme `ratio`, ou `xy=1.0 / z=ratio`) couverts dans les deux cas.
+
+**Critère d'acceptation (test de parité)** : `SceneScaleConfig(scale_xy=1.0, scale_z=None)` reproduit
+**exactement** la sortie style actuelle (et donc la parité V1 `test_style_matches_v1_scale_offset`) ;
+un test séparé vérifie le nouveau défaut (`None → ratio` scale aussi le xy du root).
 
 ## Fichiers touchés
 
@@ -165,7 +166,9 @@ reproduit ; un test séparé couvre le nouveau défaut (`None → ratio` sur xy)
 ## Tests
 
 - **Unitaire** `apply_scene_scale` : ancre origine/sol, `None→ratio`, anisotropie xy≠z, point sur le sol invariant en z.
-- **Style** : numérique (placement + morphologique) ; parité V1 selon décision root.
+- **Équivalence native** (le critère clé) : `SceneScaleConfig(scale_xy=1.0, scale_z=None)` reproduit **exactement** la sortie style actuelle ⇒ la parité V1 (`test_style_matches_v1_scale_offset`) reste verte épinglée à cette config.
+- **Nouveau défaut** : `None, None` scale le xy du root par `ratio` (test distinct du natif).
+- **Style** : numérique (placement + morphologique).
 - **Interaction** : witness sol scalé (xy par `S_xy`, hauteur par `S_z`) ; trajectoire objet scalée ; witness objet local inchangé (suit la pose).
 - **Cross-canal** : pour un même `SceneScaleConfig`, style et interaction appliquent la même similarité (anti-dérive).
 - **Non-régression éval** : `evaluator`/`eval.py`/`style_eval` inchangés (les tests d'éval existants passent tels quels).
