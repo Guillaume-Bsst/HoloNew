@@ -18,11 +18,12 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
 
-from ..prepare.contracts import RobotSpec, SceneSpec
+from ..prepare.contracts import SceneSpec
 from ..prepare.config import CalibrationConfig
 from ..prepare.calibration import build_calibration
 from ..prepare.load import load
 from ..prepare.load.smpl import build_body_model
+from ._scene_args import add_scene_args, scene_from_args
 
 
 def _object_world_lowz(vl: np.ndarray, poses: np.ndarray, cap: int = 8000):
@@ -206,22 +207,9 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="hodome")
-    ap.add_argument("--motion-path", required=True, type=Path)
-    ap.add_argument("--model-dir", required=True, type=Path)
-    ap.add_argument("--dataset-root", type=Path, default=None,
-                    help="release root for auxiliary metadata (OMOMO betas/scales + meshes)")
-    ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--frame-step", type=int, default=2)
-    ap.add_argument("--max-frames", type=int, default=200)
-    ap.add_argument("--person-id", type=int, default=None, help="multi-person: which person to retarget")
-    ap.add_argument("--object-names", default=None, help="comma-separated subset of objects to load")
+    add_scene_args(ap)
     a = ap.parse_args()
-    robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=("pelvis",), dof=29, height=1.3)
-    objs = tuple(a.object_names.split(",")) if a.object_names else None
-    spec = SceneSpec(dataset=a.dataset, motion_path=a.motion_path, robot=robot,
-                     smpl_model_dir=a.model_dir, dataset_root=a.dataset_root,
-                     person_id=a.person_id, object_names=objs)
+    spec = scene_from_args(a)
     view_scene(spec, port=a.port, frame_step=a.frame_step, max_frames=a.max_frames)
 
 

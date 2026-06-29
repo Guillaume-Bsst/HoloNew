@@ -19,6 +19,7 @@ from pathlib import Path
 import numpy as np
 
 from ..prepare.contracts import RobotSpec, SceneSpec
+from .. import paths
 from ..prepare.load import load
 from ..prepare.load.datasets.hoim3 import build_person_params
 
@@ -102,13 +103,15 @@ def view(spec: SceneSpec, *, port: int = 8080, frame_step: int = 30, max_frames:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--motion-path", required=True, type=Path)
-    ap.add_argument("--model-dir", required=True, type=Path)
+    ap.add_argument("--model-dir", type=Path, default=None, help="SMPL-X model dir; default: paths.toml 'smplx'")
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--frame-step", type=int, default=30)
     ap.add_argument("--max-frames", type=int, default=150)
     a = ap.parse_args()
-    robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=("pelvis",), dof=29, height=1.3)
-    spec = SceneSpec(dataset="hoim3", motion_path=a.motion_path, robot=robot, smpl_model_dir=a.model_dir)
+    model_dir = a.model_dir if a.model_dir is not None else paths.smplx_dir()
+    robot = RobotSpec(name="g1", urdf_path=paths.HOLOV2_ROOT / "models" / "g1" / "g1_29dof.urdf",
+                      link_names=("pelvis",), dof=29, height=1.3)
+    spec = SceneSpec(dataset="hoim3", motion_path=a.motion_path, robot=robot, smpl_model_dir=model_dir)
     view(spec, port=a.port, frame_step=a.frame_step, max_frames=a.max_frames)
 
 

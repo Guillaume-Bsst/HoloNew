@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
 
-from ..prepare.contracts import RobotSpec, SceneSpec
+from ..prepare.contracts import SceneSpec
 from ..prepare.config import CloudConfig
 from ..prepare.load import load
 from ..prepare.load.mesh import load_mesh
@@ -28,6 +28,7 @@ from ..prepare.load.smpl import build_body_model
 from ..prepare.point_cloud import build_human_cloud, build_object_cloud
 from ..prepare.point_cloud.correspondence import load_correspondence
 from ..targets.interaction import pose_cloud
+from ._scene_args import add_scene_args, scene_from_args
 
 _DEFAULT_CORR = Path(__file__).resolve().parent.parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
 
@@ -129,22 +130,10 @@ def view_cloud(spec: SceneSpec, corr_path: Path, *, port: int = 8080, frame_step
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--dataset", default="hodome")
-    ap.add_argument("--motion-path", required=True, type=Path)
-    ap.add_argument("--model-dir", required=True, type=Path)
-    ap.add_argument("--dataset-root", type=Path, default=None)
+    add_scene_args(ap)
     ap.add_argument("--corr", type=Path, default=_DEFAULT_CORR, help="correspondence cache (.npz)")
-    ap.add_argument("--port", type=int, default=8080)
-    ap.add_argument("--frame-step", type=int, default=2)
-    ap.add_argument("--max-frames", type=int, default=150)
-    ap.add_argument("--person-id", type=int, default=None)
-    ap.add_argument("--object-names", default=None)
     a = ap.parse_args()
-    robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=("pelvis",), dof=29, height=1.3)
-    objs = tuple(a.object_names.split(",")) if a.object_names else None
-    spec = SceneSpec(dataset=a.dataset, motion_path=a.motion_path, robot=robot,
-                     smpl_model_dir=a.model_dir, dataset_root=a.dataset_root,
-                     person_id=a.person_id, object_names=objs)
+    spec = scene_from_args(a)
     view_cloud(spec, a.corr, port=a.port, frame_step=a.frame_step, max_frames=a.max_frames)
 
 
