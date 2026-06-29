@@ -42,7 +42,8 @@ dépendances à sens unique.
 **Ce que ce design livre :**
 
 1. **Références** (q-indép., per-frame) — inchangées sur le fond, juste rangées : `StyleTargets`
-   (pos/rot cible + poids par link) ; contact refs (champ humain transporté + champs objets).
+   (**géométrie seule** : pos/rot cible par link ; les **poids de tracking sont déjà retirés vers
+   `solve`**, commit `02ef94b`) ; contact refs (champ humain transporté + champs objets).
 2. **Évaluateur** (q-dép.) — `Evaluator(ctx)`, **construit une fois** (assets statiques), exposant
    `.style(q) → StyleEval` et `.contacts(q, object_poses) → ContactEval`, chacun = **état courant +
    jacobiennes géométriques**.
@@ -93,14 +94,16 @@ targets/
                            RobotInteractionTargets, EnvironmentInteractionTargets,
                            FrameTargets, FramePose, FrameTrace                    [existe]
                    ÉVAL  : StyleEval, ContactEval (+ ContactEnvEval)              [NOUVEAU]
+  config.py        KNOBS StyleConfig/TargetsConfig + recette style robot-keyée
+                   (SMPL_BODY_INDEX/style_table) — ex-style/tables.py fusionné ici  [existe, 02ef94b]
   pipeline.py      RÉFÉRENCES : process_frame / run_sequence → FrameTargets ; trace_frame   [existe]
   evaluator.py     NOUVEAU (q-dép., orchestrateur) : Evaluator(ctx)
                        .style(q)                  → StyleEval
                        .contacts(q, object_poses) → ContactEval
   style/
-    build.py       (réf)  bones SMPL → StyleTargets                              [existe]
-    eval.py        NOUVEAU (éval) FK(q) : link (R,t) + jac → StyleEval
-    tables.py                                                                    [existe]
+    build.py       (réf)  bones SMPL → StyleTargets (géométrie seule)            [existe]
+    eval.py        NOUVEAU (éval) FK(q) : link (R,t) + jac → StyleEval (config-free :
+                   le SCALE/OFFSET ne sert qu'à la référence, pas à l'éval du robot)
   interaction/
     pointclouds.py pose_cloud              [noyau partagé]                       [existe]
     fields.py      eval_fields             [noyau partagé — RENOMMÉ depuis eval.py]
