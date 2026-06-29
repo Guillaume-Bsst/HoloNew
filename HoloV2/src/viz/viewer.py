@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import threading
 import time
-from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation as _Rot
