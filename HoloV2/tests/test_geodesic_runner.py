@@ -36,7 +36,9 @@ def _cfg():
 def test_object_channel_gets_geodesic_flat_ground_none(tmp_path):
     box = trimesh.creation.box(extents=(0.2, 0.2, 0.2))
     mesh_path = tmp_path / "box.obj"; box.export(mesh_path)
-    channels = _build_channels(_grounded(mesh_path), _spec(tmp_path), _cfg(), tmp_path, NULL, force=True)
+    meshes = [(np.asarray(box.vertices, np.float64), np.asarray(box.faces, np.int64))]
+    channels = _build_channels(_grounded(mesh_path), _spec(tmp_path), _cfg(), tmp_path, NULL,
+                               force=True, object_meshes=meshes)
     assert channels[0].name == "ground" and channels[0].geodesic is None       # sol plat
     assert isinstance(channels[1].geodesic, GeodesicTable)                      # objet
     assert channels[1].geodesic.n_points == channels[1].geodesic.geo.shape[0]
@@ -49,7 +51,8 @@ def test_terrain_ground_gets_geodesic(tmp_path):
     obj_path = tmp_path / "obj.obj"; obj.export(obj_path)
     terrain = trimesh.creation.box(extents=(1.0, 1.0, 0.05))
     terrain_path = tmp_path / "terrain.obj"; terrain.export(terrain_path)
+    meshes = [(np.asarray(obj.vertices, np.float64), np.asarray(obj.faces, np.int64))]
     channels = _build_channels(_grounded(obj_path), _spec(tmp_path, ground=terrain_path),
-                               _cfg(), tmp_path, NULL, force=True)
+                               _cfg(), tmp_path, NULL, force=True, object_meshes=meshes)
     assert channels[0].name == "ground" and channels[0].object_idx is None
     assert isinstance(channels[0].geodesic, GeodesicTable)   # terrain ground HAS a table
