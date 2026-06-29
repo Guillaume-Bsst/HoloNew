@@ -96,7 +96,7 @@ class GeodesicBuilder:
     """``AssetBuilder`` de la table géodésique d'un mesh (objet/terrain). Scopé GÉOMÉTRIE (+ le
     sampling ``CloudConfig`` qui fixe les points, + les knobs graphe ``GeodesicConfig``) : deux
     séquences partageant un mesh partagent la table cachée, indépendamment du subject/robot. Le runner
-    enveloppe ``build``/``load`` dans un ``prof.span("geodesic")``. ``max_points`` est un garde-fou
+    enveloppe ``build``/``load`` dans un ``prof.span("sdf+geodesic")``. ``max_points`` est un garde-fou
     (ne change pas l'asset produit) ⇒ HORS clé."""
 
     def cache_key(self, cloud_cfg: CloudConfig, geo_cfg: GeodesicConfig, vertices: np.ndarray,

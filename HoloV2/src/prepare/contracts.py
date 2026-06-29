@@ -296,7 +296,7 @@ class GeodesicTable:
     normals: np.ndarray   # (P, 3) f32  normale unitaire par point (gating snap/interp thin/concave)
     geo: np.ndarray       # (P, P) f32  geo[i, j] = géodésique de graphe i->j (symétrique)
     name: str             # nom de canal ("obj0"/"terrain") — provenance, aligné SDF/cloud
-    sampling_id: str = "" # identité du sampling (densité/seed/topo) — provenance/garde-fou
+    sampling_id: str = "" # identité du sampling (densité/seed/topo) — provenance
 
     @property
     def n_points(self) -> int:

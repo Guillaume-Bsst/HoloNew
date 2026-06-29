@@ -53,7 +53,7 @@ def geo_value_grad(table: GeodesicTable, source_idx: np.ndarray, query_xyz: np.n
     w = np.exp(-d2_nn / h2)                                          # (Q,k) poids gaussiens
 
     fields = table.geo[src]                                          # (Q,P) champ mono-source
-    f = np.take_along_axis(fields.astype(np.float64), nn, axis=1)    # (Q,k)
+    f = np.take_along_axis(fields, nn, axis=1).astype(np.float64)    # (Q,k) gather puis cast
     p = pts[nn]                                                      # (Q,k,3)
     dq = p - q[:, None, :]                                           # (Q,k,3) = p - q (centré en q)
     X = np.concatenate([np.ones((Q, k, 1)), dq], axis=2)            # (Q,k,4) design [1, p-q]
@@ -61,7 +61,7 @@ def geo_value_grad(table: GeodesicTable, source_idx: np.ndarray, query_xyz: np.n
     A = np.einsum("qki,qkj->qij", Xw, X) + 1e-9 * np.eye(4)         # (Q,4,4) normal eq. + ridge
 
     # Résolution simultanée : [c,b] et α = A⁻¹ e₀ (1ère col. de A⁻¹, utilisée pour ∇c)
-    e0 = np.zeros_like(f[:, :4]); e0[:, 0] = 1.0                    # (Q,4) vecteur e₀
+    e0 = np.zeros((Q, 4)); e0[:, 0] = 1.0                          # (Q,4) vecteur e₀ (robuste si k<4)
     rhs = np.einsum("qki,qk->qi", Xw, f)                             # (Q,4)
     rhs_aug = np.stack([rhs, e0], axis=-1)                            # (Q,4,2)
     sol_aug = np.linalg.solve(A, rhs_aug)                             # (Q,4,2)

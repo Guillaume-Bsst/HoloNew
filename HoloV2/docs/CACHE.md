@@ -93,7 +93,7 @@ Les `targets/` (per-frame) peuvent être recalculées en ligne depuis les assets
 
 ## Invalidation — résumé
 - changer `sdf` → rebuild SDF seulement.
-- changer `geodesic` ou `cloud` (densité/seed) → rebuild table géodésique seulement (la clé géodésique inclut sampling densité/seed + knobs k/normal_gate + géométrie).
+- changer `geodesic` → rebuild la table géodésique seulement ; un changement `cloud` (densité/seed) rebuild aussi la table géodésique (sampling partagé : même densité/seed → points bit-identiques).
 - changer `cloud` → rebuild nuages **et** correspondance (aval).
 - changer `calibration` → rebuild calibration seulement.
 - changer betas (sujet) → rebuild nuage humain + calibration ; SDF/correspondance(template) intacts.
