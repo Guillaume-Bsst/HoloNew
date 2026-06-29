@@ -18,10 +18,11 @@ from pathlib import Path
 
 import numpy as np
 
-from ..prepare.contracts import RobotSpec, SceneSpec
+from ..prepare.contracts import SceneSpec
 from .. import paths
 from ..prepare.load import load
 from ..prepare.load.datasets.hoim3 import build_person_params
+from ._scene_args import _g1_robot
 
 _PALETTE = [(70, 130, 220), (220, 90, 90), (90, 200, 120), (210, 170, 60), (170, 110, 210)]
 
@@ -109,8 +110,7 @@ def main() -> None:
     ap.add_argument("--max-frames", type=int, default=150)
     a = ap.parse_args()
     model_dir = a.model_dir if a.model_dir is not None else paths.smplx_dir()
-    robot = RobotSpec(name="g1", urdf_path=paths.HOLOV2_ROOT / "models" / "g1" / "g1_29dof.urdf",
-                      link_names=("pelvis",), dof=29, height=1.3)
+    robot = _g1_robot()
     spec = SceneSpec(dataset="hoim3", motion_path=a.motion_path, robot=robot, smpl_model_dir=model_dir)
     view(spec, port=a.port, frame_step=a.frame_step, max_frames=a.max_frames)
 
