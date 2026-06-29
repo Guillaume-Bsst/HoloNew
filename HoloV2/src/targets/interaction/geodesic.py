@@ -5,11 +5,13 @@ un brute-force vectorisé ``(Q,P)`` ; les k voisins sont sélectionnés par ``np
 ``nearest_index`` snappe un point fixe (``witness_ref``) sur sa source la plus proche (OFFLINE, pas de
 gradient). ``geo_value_grad`` lit le champ mono-source ``geo[source]`` à un ``query_xyz`` continu par
 MLS degré-1 (moindres carrés locaux pondérés, fit ``f≈c+b·(p-q)``) → valeur ``c`` ET gradient ``∇c(q)``,
-naturellement tangent à la surface. Le gradient retourné est le gradient analytique de la FONCTION c(q)
-(théorème des fonctions implicites sur les équations normales), et non le seul ``b`` (gradient du
-polynôme local) : pour un champ linéaire les deux coïncident (résidus nuls → correction nulle), et pour
-un champ non-linéaire la correction ramène ``∇c`` en cohérence avec les différences finies à O(λ) près
-(λ = terme de ridge). Vectorisé sur Q."""
+naturellement tangent à la surface. Le gradient retourné est le gradient analytique de ``c(q)`` à bande
+passante FIXE (théorème des fonctions implicites sur les équations normales), et non le seul ``b``
+(gradient du polynôme local). Pour un champ linéaire les deux coïncident (résidus nuls → correction
+nulle ; gradient EXACT à O(ridge) près). Pour un champ NON-linéaire, la correction porte les résidus
+mais OMET le terme de bande passante adaptative ``∂h/∂q`` (lui aussi nul pour un champ linéaire) → le
+gradient est APPROCHÉ (écart résiduel ~1e-2, d'où la tolérance ~2e-2 du test de différences finies),
+borné et bonne direction de descente pour le solveur — pas la précision machine. Vectorisé sur Q."""
 from __future__ import annotations
 
 import numpy as np
@@ -31,9 +33,10 @@ def geo_value_grad(table: GeodesicTable, source_idx: np.ndarray, query_xyz: np.n
     """Champ géodésique depuis ``source_idx`` lu à ``query_xyz`` par MLS degré-1.
     Renvoie ``(g:(Q,), grad:(Q,3))``. Vectorisé sur Q ; reproduit un champ localement linéaire.
 
-    Le gradient retourné est ``∇c(q)`` (gradient analytique de la valeur MLS), cohérent par
-    construction avec les différences finies de ``c(q)``. Pour un champ linéaire : exact à
-    atol~1e-9 (ridge). Pour un champ non-linéaire : erreur O(λ·‖A⁻¹‖) ≈ O(1e-9)."""
+    Le gradient retourné est ``∇c(q)`` à bande passante FIXE (gradient analytique de la valeur MLS,
+    via les fonctions implicites). Champ linéaire : EXACT à O(ridge)~1e-9 (résidus nuls → correction
+    nulle). Champ non-linéaire : le terme de bande passante adaptative ``∂h/∂q`` est OMIS (non nul) →
+    gradient APPROCHÉ ; l'écart aux différences finies est ~1e-2, absorbé par la tolérance du test."""
     pts = np.asarray(table.points, np.float64)                       # (P,3)
     q = np.atleast_2d(np.asarray(query_xyz, np.float64))             # (Q,3)
     src = np.atleast_1d(np.asarray(source_idx, np.int64))            # (Q,)
