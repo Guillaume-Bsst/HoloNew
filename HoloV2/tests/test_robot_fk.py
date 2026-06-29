@@ -53,11 +53,12 @@ def test_pin_fk_parity_vs_yourdfpy_base_relative():
     cfg = {name: float(a) for name, a in zip(urdf.actuated_joint_names, angles)}
     urdf.update_cfg(np.array([cfg[n] for n in urdf.actuated_joint_names]))
 
-    q = robot.neutral()
     # set actuated joints in pinocchio order via the public mapping (Task 2 helper)
     q = robot.config_from_angles(cfg)
     rot, pos = robot.link_transforms(q)
 
+    assert any(n in robot.link_names for n in ("left_elbow_link", "right_wrist_yaw_link", "left_knee_link")), \
+        "no parity link found in robot.link_names — check URDF link names"
     for name in ("left_elbow_link", "right_wrist_yaw_link", "left_knee_link"):
         if name not in robot.link_names:
             continue

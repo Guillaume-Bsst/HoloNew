@@ -73,6 +73,7 @@ class PinRobot:
         pin.updateFramePlacements(self.model, self.data)
 
     def link_transforms(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """WORLD link transforms for config ``q`` (nq,). Returns ``(rot (L,3,3), pos (L,3))`` aligned to ``link_names``."""
         self._fk(q)
         n = len(self.link_names)
         rot = np.empty((n, 3, 3)); pos = np.empty((n, 3))
@@ -82,6 +83,7 @@ class PinRobot:
         return rot, pos
 
     def rest_transforms(self) -> tuple[np.ndarray, np.ndarray]:
+        """Link transforms at the neutral free-flyer configuration (identity base)."""
         return self.link_transforms(self.neutral())
 
 
