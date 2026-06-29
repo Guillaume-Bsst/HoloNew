@@ -90,3 +90,30 @@ def build_geodesic_table(vertices: np.ndarray, faces: np.ndarray, cloud_cfg: Clo
     geo = all_pairs_geodesic(build_knn_graph(pts, nrm, geo_cfg.k_neighbors, geo_cfg.normal_gate))
     return GeodesicTable(points=pts.astype(np.float32), normals=nrm.astype(np.float32), geo=geo,
                          name=name, sampling_id=_sampling_id(cloud_cfg, vertices, faces))
+
+
+class GeodesicBuilder:
+    """``AssetBuilder`` de la table géodésique d'un mesh (objet/terrain). Scopé GÉOMÉTRIE (+ le
+    sampling ``CloudConfig`` qui fixe les points, + les knobs graphe ``GeodesicConfig``) : deux
+    séquences partageant un mesh partagent la table cachée, indépendamment du subject/robot. Le runner
+    enveloppe ``build``/``load`` dans un ``prof.span("geodesic")``. ``max_points`` est un garde-fou
+    (ne change pas l'asset produit) ⇒ HORS clé."""
+
+    def cache_key(self, cloud_cfg: CloudConfig, geo_cfg: GeodesicConfig, vertices: np.ndarray,
+                  faces: np.ndarray) -> str:
+        h = hashlib.sha1()
+        h.update(f"{cloud_cfg.object_density}|{cloud_cfg.seed}|{geo_cfg.k_neighbors}|"
+                 f"{geo_cfg.normal_gate}".encode())
+        h.update(np.ascontiguousarray(vertices, np.float32).tobytes())
+        h.update(np.ascontiguousarray(faces, np.int64).tobytes())
+        return h.hexdigest()
+
+    def build(self, cloud_cfg: CloudConfig, geo_cfg: GeodesicConfig, vertices: np.ndarray,
+              faces: np.ndarray, name: str = "") -> GeodesicTable:
+        return build_geodesic_table(vertices, faces, cloud_cfg, geo_cfg, name=name)
+
+    def save(self, table: GeodesicTable, path: Path) -> None:
+        return save_geo(table, path)
+
+    def load(self, path: Path) -> GeodesicTable:
+        return load_geo(path)
