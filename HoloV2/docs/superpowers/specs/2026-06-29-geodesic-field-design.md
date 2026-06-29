@@ -328,8 +328,10 @@ pour le sol plat ; `prof.span("geodesic", n=...)` dans `_run` à côté de `sdf`
 
 - **Short-circuit Isomap** (plaque plus fine que l'espacement d'échantillonnage) : neutralisé par le
   **gating normales** ; testé explicitement (test f).
-- **Graphe disconnecté** (`k`/`normal_gate` trop agressifs) : `ValueError` explicite au build (pas de
-  `inf` stocké).
+- **Graphe disconnecté** (`k`/`normal_gate` trop agressifs) : composantes reliées automatiquement par
+  bridging euclidien (pont ≈ géodésique à travers le trou) ; ``all_pairs_geodesic`` conserve un
+  ``ValueError`` de sûreté si on lui passe un graphe brut disconnecté (filet interne, inatteignable
+  depuis le chemin normal).
 - **Stockage `4·P²`** : garde-fou `max_points` ; densité pilotée par `CloudConfig.object_density`.
 - **Qualité du gradient interpolé** : MLS degré-1 (lisse, tangent) ; si insuffisant → upgrade heat method.
 ```

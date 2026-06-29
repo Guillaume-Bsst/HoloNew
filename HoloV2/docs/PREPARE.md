@@ -122,10 +122,11 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
     geodesic/            meshes objets/terrain -> table géodésique all-pairs (cachée) ; sol plat -> aucune table
                          ; expose save_geo/load_geo (GeodesicBuilder délègue). Réutilise le sampling du
                          object_cloud (même densité/seed → points bit-identiques), scopé géométrie.
-                         **Note** : contrairement à SDF/cloud (agnostiques à la connectivité), ce livrable LÈVE
-                         sur un graphe k-NN déconnecté (mesh mince/non-manifold) — un mesh problématique peut donc
-                         interrompre ``prepare`` et nécessite un ajustement de ``GeodesicConfig.k_neighbors`` /
-                         ``normal_gate`` pour la scène concernée.
+                         **Note** : si le graphe k-NN se fragmente (mesh mince/non-manifold, échantillonnage
+                         clairsemé), le build **BRIDE automatiquement** les composantes par leur arête euclidienne
+                         la plus proche (pont ≈ géodésique à travers le trou) — ``prepare`` n'est pas interrompu.
+                         Un mesh très fragmenté peut néanmoins nécessiter d'ajuster ``GeodesicConfig.k_neighbors``
+                         / ``normal_gate`` pour améliorer la qualité des distances (ponts plus courts).
       build.py             GeodesicBuilder + build_geodesic_table : k-NN gaté normales + Dijkstra all-pairs (scipy)
       cache.py             save_geo/load_geo — sérialisation .npz de GeodesicTable (points+normals+geo)
     scene.py             applique la calibration -> GroundedScene

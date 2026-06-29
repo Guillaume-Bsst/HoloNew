@@ -9,7 +9,8 @@ trimesh = pytest.importorskip("trimesh")
 from src.prepare.config import CloudConfig, GeodesicConfig
 from src.prepare.point_cloud.objects import sample_object_surface
 from src.prepare.geodesic.build import (sample_surface_with_normals, build_knn_graph,
-                                        all_pairs_geodesic, build_geodesic_table)
+                                        all_pairs_geodesic, build_geodesic_table,
+                                        _bridge_disconnected)
 
 
 def _sphere(sub=3, r=0.2):
@@ -67,11 +68,22 @@ def test_matrix_invariants():
     assert D.dtype == np.float32
 
 
-def test_disconnected_graph_raises():
-    # Deux amas éloignés, k=1 → composantes disjointes → ValueError explicite.
-    pts = np.concatenate([np.zeros((5, 3)), np.zeros((5, 3)) + [[10.0, 0, 0]]])
-    pts += np.random.default_rng(0).normal(0, 1e-3, pts.shape)
+def test_disconnected_graph_bridged():
+    # Deux amas éloignés, k=1 → 2 composantes. _bridge_disconnected les relie → all-pairs FINI
+    # (plus d'abort), la distance inter-amas ≈ l'écart euclidien (~10) traversé par le pont.
+    a = np.zeros((5, 3)); b = np.zeros((5, 3)) + [[10.0, 0, 0]]
+    pts = np.concatenate([a, b]) + np.random.default_rng(0).normal(0, 1e-3, (10, 3))
     nrm = np.tile([0.0, 0, 1.0], (10, 1))
+    graph = _bridge_disconnected(pts, build_knn_graph(pts, nrm, k=1, normal_gate=-1.0))
+    D = all_pairs_geodesic(graph)
+    assert np.isfinite(D).all()
+    assert D[0, 5] > 9.0                                # traverse le pont (~10)
+
+
+def test_all_pairs_raises_on_raw_disconnected():
+    # garde-fou interne : all_pairs_geodesic SANS bridging lève toujours (ne stocke pas d'inf).
+    pts = np.concatenate([np.zeros((3, 3)), np.zeros((3, 3)) + [[10.0, 0, 0]]])
+    nrm = np.tile([0.0, 0, 1.0], (6, 1))
     with pytest.raises(ValueError):
         all_pairs_geodesic(build_knn_graph(pts, nrm, k=1, normal_gate=-1.0))
 

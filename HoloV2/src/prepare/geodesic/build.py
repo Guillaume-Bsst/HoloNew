@@ -57,9 +57,40 @@ def build_knn_graph(points: np.ndarray, normals: np.ndarray, k: int, normal_gate
     return a.maximum(a.T)                                       # non orienté : arête si l'un OU l'autre
 
 
+def _bridge_disconnected(points: np.ndarray, graph):
+    """Garantit un graphe de surface CONNEXE. Si le k-NN gaté se fragmente (mesh fin/non-manifold,
+    échantillonnage clairsemé), relie chaque composante à l'ensemble déjà connecté par leur paire de
+    points EUCLIDIENNE la plus proche (le pont ≈ géodésique à travers le trou d'échantillonnage),
+    plutôt que de laisser ``all_pairs_geodesic`` lever et avorter tout ``prepare``. Pur, déterministe ;
+    no-op si déjà connexe."""
+    from scipy.sparse.csgraph import connected_components
+    from scipy.sparse import csr_matrix
+    from scipy.spatial import cKDTree
+    n_comp, labels = connected_components(graph, directed=False)
+    if n_comp <= 1:
+        return graph
+    pts = np.asarray(points, np.float64)
+    order = np.argsort(labels, kind="stable")                 # indices groupés par composante
+    comp_points = [order[labels[order] == c] for c in range(n_comp)]
+    rows, cols, wts = [], [], []
+    accumulated = comp_points[0]                              # ensemble connecté (croît)
+    for c in range(1, n_comp):
+        cur = comp_points[c]
+        tree = cKDTree(pts[accumulated])
+        dd, ii = tree.query(pts[cur])                         # plus proche point connecté par point de cur
+        j = int(np.argmin(dd))
+        a = int(cur[j]); bnode = int(accumulated[ii[j]]); d = float(dd[j])
+        rows += [a, bnode]; cols += [bnode, a]; wts += [d, d]  # arête de pont (non orientée)
+        accumulated = np.concatenate([accumulated, cur])
+    bridges = csr_matrix((wts, (rows, cols)), shape=graph.shape)
+    return (graph + bridges)                                  # union (croisements sans recouvrement)
+
+
 def all_pairs_geodesic(graph) -> np.ndarray:
     """All-pairs plus court chemin (Dijkstra) sur le graphe de surface → (P,P) f32. Lève si le graphe
-    est disconnecté (un ``inf`` = paire sans chemin) plutôt que de stocker des ``inf``."""
+    est disconnecté (un ``inf`` = paire sans chemin) plutôt que de stocker des ``inf``. Dans le chemin
+    normal, ``_bridge_disconnected`` est appelé en amont et rend ce cas inatteignable ; ce ValueError
+    reste comme filet de sécurité si on passe un graphe brut directement."""
     from scipy.sparse.csgraph import shortest_path
     d = shortest_path(graph, method="D", directed=False)
     if not np.isfinite(d).all():
@@ -87,7 +118,8 @@ def build_geodesic_table(vertices: np.ndarray, faces: np.ndarray, cloud_cfg: Clo
     if p > geo_cfg.max_points:
         raise ValueError(f"geodesic sampling has P={p} > max_points={geo_cfg.max_points} "
                          f"(storage is 4*P^2 bytes) — lower object_density or raise max_points")
-    geo = all_pairs_geodesic(build_knn_graph(pts, nrm, geo_cfg.k_neighbors, geo_cfg.normal_gate))
+    graph = build_knn_graph(pts, nrm, geo_cfg.k_neighbors, geo_cfg.normal_gate)
+    geo = all_pairs_geodesic(_bridge_disconnected(pts, graph))
     return GeodesicTable(points=pts.astype(np.float32), normals=nrm.astype(np.float32), geo=geo,
                          name=name, sampling_id=_sampling_id(cloud_cfg, vertices, faces))
 
