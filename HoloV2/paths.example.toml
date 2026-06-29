@@ -1,0 +1,15 @@
+# HoloV2 machine-local path registry, read at the CLI edge by src/paths.py.
+# Setup: `cp paths.example.toml paths.toml` then edit the paths for your machine.
+# A relative --motion-path on the CLI resolves against the dataset's [roots] entry;
+# an absolute --motion-path is used as-is (use absolute for OMOMO — see note below).
+
+smplx = "/abs/path/to/models_smplx_v1_1/models/smplx"   # folder holding SMPLX_NEUTRAL.npz
+
+[roots]
+# Dataset release roots. Used as the default --dataset-root (object/betas metadata)
+# AND as the base for relative --motion-path.
+hodome = "/abs/path/to/HODome"     # motion: smplx/<seq>.npz lives under this root
+sfu    = "/abs/path/to/SFU/SFU"    # motion: <subject>/<seq>.npz lives under this root
+omomo  = "/abs/path/to/OMOMO"      # metadata release (betas/scales/meshes).
+# NOTE: OMOMO InterMimic .pt motion files live in a SEPARATE OMOMO_new/ tree, NOT under
+# this root — pass an absolute --motion-path for OMOMO; roots.omomo stays the metadata root.

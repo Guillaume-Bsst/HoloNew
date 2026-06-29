@@ -6,3 +6,6 @@ cache/**
 
 __pycache__/
 *.pyc
+
+# Machine-local path registry (copy from paths.example.toml). Keep the example tracked.
+paths.toml
