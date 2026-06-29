@@ -41,6 +41,31 @@ def test_pin_robot_fk_shapes_and_neutral():
 
 
 @pytest.mark.skipif(not _URDF.exists(), reason="G1 URDF not available")
+def test_link_jacobians_match_finite_differences():
+    robot = build_robot_model(RobotSpec(name="g1", urdf_path=_URDF, link_names=(), dof=29, height=1.3))
+    rng = np.random.default_rng(1)
+    q = robot.integrate(robot.neutral(), 0.1 * rng.standard_normal(robot.nv))   # random valid config
+
+    rot, pos, jac_lin, jac_ang = robot.link_jacobians(q)
+    n = len(robot.link_names)
+    assert jac_lin.shape == (n, 3, robot.nv) and jac_ang.shape == (n, 3, robot.nv)
+    assert np.allclose(pos, robot.link_transforms(q)[1], atol=1e-9)   # transforms agree with FK
+
+    # finite-difference the WORLD position of a few links along each tangent direction.
+    eps = 1e-6
+    test_links = [robot.link_names.index(n) for n in ("left_elbow_link", "pelvis")
+                  if n in robot.link_names]
+    assert test_links, "no FD test link resolved"
+    for k in range(robot.nv):
+        v = np.zeros(robot.nv); v[k] = eps
+        pos_p = robot.link_transforms(robot.integrate(q, v))[1]
+        pos_m = robot.link_transforms(robot.integrate(q, -v))[1]
+        fd = (pos_p - pos_m) / (2 * eps)                             # (L, 3) d pos / d v_k
+        for i in test_links:
+            assert np.allclose(jac_lin[i, :, k], fd[i], atol=1e-4), (robot.link_names[i], k)
+
+
+@pytest.mark.skipif(not _URDF.exists(), reason="G1 URDF not available")
 def test_pin_fk_parity_vs_yourdfpy_base_relative():
     # At the neutral free-flyer base (identity), pinocchio WORLD transforms == yourdfpy base-relative
     # transforms (same URDF kinematics). Compare a few links at a random actuated config.

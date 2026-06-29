@@ -86,6 +86,24 @@ class PinRobot:
         """Link transforms at the neutral free-flyer configuration (identity base)."""
         return self.link_transforms(self.neutral())
 
+    def link_jacobians(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """World transforms + LOCAL_WORLD_ALIGNED translational/angular frame Jacobians per link.
+        ``dp_world = jac_lin @ v``, ``omega_world = jac_ang @ v`` (v in pinocchio tangent order)."""
+        pin = self._pin
+        qn = pin.normalize(self.model, np.asarray(q, np.float64))
+        pin.computeJointJacobians(self.model, self.data, qn)
+        pin.updateFramePlacements(self.model, self.data)
+        n = len(self.link_names); nv = self.nv
+        rot = np.empty((n, 3, 3)); pos = np.empty((n, 3))
+        jac_lin = np.empty((n, 3, nv)); jac_ang = np.empty((n, 3, nv))
+        for i, name in enumerate(self.link_names):
+            fid = self._fids[name]
+            oMf = self.data.oMf[fid]
+            rot[i] = np.asarray(oMf.rotation); pos[i] = np.asarray(oMf.translation)
+            J6 = np.asarray(pin.getFrameJacobian(self.model, self.data, fid, pin.LOCAL_WORLD_ALIGNED))
+            jac_lin[i] = J6[0:3, :]; jac_ang[i] = J6[3:6, :]
+        return rot, pos, jac_lin, jac_ang
+
 
 def build_robot_model(spec: RobotSpec) -> PinRobot:
     """Build the pinocchio ``RobotModel`` for ``spec`` (FK + Jacobians, no meshes)."""
