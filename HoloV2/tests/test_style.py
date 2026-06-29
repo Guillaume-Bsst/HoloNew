@@ -22,12 +22,12 @@ import pytest
 from scipy.spatial.transform import Rotation as R
 
 from src.prepare.contracts import RobotSpec
+from src.targets.config import SMPL_BODY_INDEX, StyleConfig, style_table
 from src.targets.contracts import FramePose
 from src.targets import style
-from src.targets.style.tables import (HUMAN_HEIGHT_ASSUMPTION, HUMAN_SCALE_TABLE, SMPL_BODY_INDEX,
-                                      style_table)
 
 _G1_LINKS = tuple(style_table("g1").keys())
+_CFG = StyleConfig()   # defaults: the morphological SCALE values + reference heights the test recomputes
 
 
 # --------------------------------------------------------------------------- helpers
@@ -55,30 +55,25 @@ def _synthetic_pose() -> FramePose:
 
 
 # --------------------------------------------------------------------------- unit
-def test_style_shapes_links_and_weights():
+def test_style_shapes_and_links():
     st = style.build(_synthetic_pose(), _robot(), stature=0.9)        # ratio = 0.5
     L = len(_G1_LINKS)
     assert st.link_names == _G1_LINKS and L == 14
     assert st.position.shape == (L, 3)
     assert st.orientation is not None and st.orientation.shape == (L, 4)
-    assert st.weight_pos.shape == (L,) and st.weight_rot.shape == (L,)
     assert st.position.dtype == np.float64 and st.orientation.dtype == np.float64
-
-    w_p = dict(zip(st.link_names, st.weight_pos))
-    assert w_p["pelvis"] == 100.0                                     # planted root
-    assert w_p["left_toe_link"] == 100.0 and w_p["right_toe_link"] == 100.0   # planted feet
-    assert w_p["left_knee_link"] == 0.0                               # limb: orientation-only
-    assert np.all(st.weight_rot == 10.0)                             # rot weight uniform in table1
+    # StyleTargets is GEOMETRY only — tracking weights are a solver concern, not produced here.
+    assert not hasattr(st, "weight_pos") and not hasattr(st, "weight_rot")
     # frozen numpy output (read-only buffers).
-    for a in (st.position, st.orientation, st.weight_pos, st.weight_rot):
+    for a in (st.position, st.orientation):
         assert a.flags.writeable is False
 
 
 def test_style_scale_and_offset_hand_computed():
     pose = _synthetic_pose()
     stature = 0.9
-    ratio = stature / HUMAN_HEIGHT_ASSUMPTION                         # 0.5
-    base = HUMAN_SCALE_TABLE["pelvis"] * ratio                        # 0.45
+    ratio = stature / _CFG.human_height_assumption                    # 0.5
+    base = _CFG.scale_torso_legs * ratio                             # 0.45 (pelvis is torso/legs)
     root = pose.bone_pos[SMPL_BODY_INDEX["pelvis"]]
     scaled_root = np.array([root[0], root[1], root[2] * base])        # sx=sy=1, sz=base
     st = style.build(pose, _robot(), stature=stature)
@@ -92,12 +87,12 @@ def test_style_scale_and_offset_hand_computed():
     np.testing.assert_allclose(got_rot, exp_rot, atol=1e-9)
 
     # left_knee: pos_offset 0, identity src_rot -> world target == pure SCALE in pelvis-local frame.
-    s_knee = HUMAN_SCALE_TABLE["left_knee"] * ratio                  # 0.45
+    s_knee = _CFG.scale_torso_legs * ratio                          # 0.45 (knee is torso/legs)
     exp_knee = (pose.bone_pos[SMPL_BODY_INDEX["left_knee"]] - root) * s_knee + scaled_root
     np.testing.assert_allclose(st.position[idx["left_knee_link"]], exp_knee, atol=1e-9)
 
     # left_toe: nonzero pos_offset (0, 0.02, 0) rotated into the re-oriented (rot_offset) body frame.
-    s_foot = HUMAN_SCALE_TABLE["left_foot"] * ratio
+    s_foot = _CFG.scale_torso_legs * ratio                          # foot is torso/legs
     scaled_foot = (pose.bone_pos[SMPL_BODY_INDEX["left_foot"]] - root) * s_foot + scaled_root
     rot = _quat_wxyz_to_mat((0.5, -0.5, -0.5, -0.5))                 # identity src_rot on left_foot
     exp_toe = scaled_foot + rot @ np.array([0.0, 0.02, 0.0])
@@ -137,7 +132,7 @@ def test_style_matches_v1_scale_offset():
     reproduce style.build per link (position to machine precision, orientation up to quaternion sign)."""
     pose = _synthetic_pose()
     stature = 1.62
-    ratio = stature / HUMAN_HEIGHT_ASSUMPTION
+    ratio = stature / _CFG.human_height_assumption
     # V1 HumanData: {smpl_body: (world pos, world quat wxyz)} from the SAME bones we feed style.build.
     human_data = {}
     for body, idx in SMPL_BODY_INDEX.items():
@@ -192,10 +187,6 @@ def test_style_on_real_data(tmp_path, capsys):
     assert st.link_names == _G1_LINKS
     assert np.isfinite(st.position).all() and np.isfinite(st.orientation).all()
     assert len(st.position) == 14
-    table = style_table("g1")
-    for i, link in enumerate(st.link_names):
-        assert st.weight_pos[i] == table[link][1]
-        assert st.weight_rot[i] == table[link][2]
 
     # pelvis target near the SMPL pelvis (x/y native by scale_xy=1.0; z is morphologically scaled).
     pelvis_i = st.link_names.index("pelvis")

@@ -71,12 +71,11 @@ def test_baked_traces_are_well_formed(baked):
         assert tr.human_cloud_world.shape == (N, 3)
         assert np.isfinite(tr.human_cloud_world).all()
 
-        # the 14 style link targets: position (14, 3), orientation (14, 4) wxyz, finite weights.
+        # the 14 style link targets: position (14, 3), orientation (14, 4) wxyz (geometry only).
         style = tr.targets.style
         L = len(style.link_names)
         assert L == 14
         assert style.position.shape == (L, 3)
-        assert style.weight_pos.shape == (L,) and style.weight_rot.shape == (L,)
         assert style.orientation is not None and style.orientation.shape == (L, 4)
         assert np.isfinite(style.position).all() and np.isfinite(style.orientation).all()
 

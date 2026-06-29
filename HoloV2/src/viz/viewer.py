@@ -11,7 +11,7 @@ robot):
   - Playback : frame slider · play · fps
   - Static   : ground plane (z=0) · SMPL ghost mesh (per-frame) · posed object clouds
   - Skeleton : SMPL bones from ``trace.pose`` (parent -> child segments)
-  - Style    : the 14 ``StyleTargets`` link targets — points (colour by ``weight_pos``) + per-link
+  - Style    : the 14 ``StyleTargets`` link targets — points (uniform colour) + per-link
                orientation frames (3 short xyz axes) + link-name labels, so one can SEE each link
                target sit on the skeleton (e.g. ``*_toe_link`` near the ankle)
   - Interaction (human) : the posed human cloud coloured by the SELECTED channel of ``human_field``
@@ -158,17 +158,14 @@ class Viewer:
     def _draw_style(self, trace: FrameTrace) -> None:
         """The 14 ``StyleTargets`` link targets — the KEY validation layer.
 
-        Points sit at ``style.position`` (coloured by ``weight_pos``: orange = planted/high weight,
-        cyan = position-free); per-link orientation frames draw 3 short xyz axes from ``style.orientation``
-        (wxyz); per-link labels name the link. With the skeleton on, this shows each link target landing
-        on the body — e.g. ``left_toe_link`` (mapped to the SMPL ANKLE + a toe pos-offset) sits at the
-        ankle, the foot->ankle mapping made visible."""
+        Points sit at ``style.position`` (uniform orange); per-link orientation frames draw 3 short xyz
+        axes from ``style.orientation`` (wxyz); per-link labels name the link. With the skeleton on,
+        this shows each link target landing on the body — e.g. ``left_toe_link`` (mapped to the SMPL
+        ANKLE + a toe pos-offset) sits at the ankle, the foot->ankle mapping made visible. Tracking
+        weights are a SOLVER concern, not in ``StyleTargets`` — so no planted/free colour split here."""
         style = trace.targets.style
         pos = np.asarray(style.position, np.float32)                      # (L, 3)
-        wp = np.asarray(style.weight_pos, np.float64)
-        # colour by weight_pos: high (planted) -> orange, low (free) -> cyan.
-        t = (wp / max(float(wp.max()), 1e-9))[:, None]
-        col = (t * np.array([255, 170, 0]) + (1.0 - t) * np.array([0, 200, 220])).astype(np.uint8)
+        col = np.tile(np.array([255, 170, 0], np.uint8), (len(pos), 1))   # uniform style colour
         self._style_pts.points = pos
         self._style_pts.colors = col
         self._style_pts.point_size = max(float(self.size.value) * 2.0, 0.02)
@@ -263,7 +260,7 @@ class Viewer:
             f"**frame {self.frames[i]}** ({i + 1}/{len(self.frames)})\n\n"
             f"channel **{self.channel.value}** · colour **{self.color_mode.value}** · "
             f"active probes **{n_active}** / {trace.human_field.n_points}\n\n"
-            f"style points: orange = planted (high w_p), cyan = position-free · "
+            f"style points: orange link targets (position + orientation) · "
             f"distance heatmap: blue near/penetrating .. red far (margin {self.margin:.3f} m)\n\n"
             f"deferred (need a solved robot): transported G1 field · SMPL<->robot lines · SDF iso-surface")
 

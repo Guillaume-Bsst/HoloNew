@@ -7,8 +7,9 @@ table) — the grounding ``Calibration`` rides inside ``grounded.calibration``, 
 so the lean and the instrumented paths can never drift; the ``prof`` spans live in that core (the
 orchestrator), never in the pure ops. See docs/TARGETS.md, VIZ.md, OBS.md.
 
-No targets ``config`` yet: the only per-frame knob (the field ``margin``) is carried by the
-``InteractionContext``; a ``targets/config.py`` is added when a real knob appears.
+Stage knobs ride on ``cfg`` (``TargetsConfig``, ``targets/config.py``): currently only ``style``
+carries knobs — ``cfg.style`` is handed to ``style.build``. The interaction per-frame knob
+(``margin``) stays on the ``InteractionContext`` (a ``prepare`` output), not in ``cfg``.
 """
 from __future__ import annotations
 
@@ -16,6 +17,7 @@ import numpy as np
 
 from ..obs import NULL
 from ..prepare.contracts import GroundedScene, InteractionContext, RobotSpec
+from .config import TargetsConfig
 from .contracts import FramePose, FrameTargets, FrameTrace
 from .interaction import (environment_interaction_targets, eval_fields, pose_cloud,
                           robot_interaction_targets, transport)
@@ -52,13 +54,14 @@ def frame_pose(grounded: GroundedScene, f: int) -> FramePose:
                      object_rot=object_rot, object_pos=object_pos)
 
 
-def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec, f: int, prof=NULL):
+def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec, f: int,
+                 cfg: TargetsConfig = TargetsConfig(), prof=NULL):
     """Run every pure op of one frame ONCE, returning all intermediates. The single source of the
     per-frame dataflow, shared by ``process_frame`` (keeps only the targets) and ``trace_frame``
     (keeps everything). Interaction is a one-way flow: pose -> eval -> transport -> assemble. The
     instrumentation (spans) lives here, in the orchestrator — the pure ops stay clean. ``robot`` keys
-    the style table (and carries the robot identity); the morphological scale uses the subject's
-    ``body.stature``."""
+    the style recipe (and carries the robot identity); the morphological scale uses ``cfg.style`` and
+    the subject's ``body.stature``."""
     if grounded.body is None:
         # The pipeline is bone-based: ``style`` tracks the SMPL bones and ``interaction`` poses the
         # human cloud, both via the body's FK. A positions-only source (``body is None``) is a
@@ -70,7 +73,7 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
         with prof.span("pose"):
             pose = frame_pose(grounded, f)
         with prof.span("style"):
-            style_t = style.build(pose, robot, grounded.body.stature)
+            style_t = style.build(pose, robot, grounded.body.stature, cfg.style)
         with prof.span("interaction.pose"):
             human_world = pose_cloud(ctx.human_cloud, pose.bone_rot, pose.bone_pos)
             object_worlds = tuple(
@@ -94,24 +97,24 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
 
 
 def process_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec, f: int,
-                  prof=NULL) -> FrameTargets:
+                  cfg: TargetsConfig = TargetsConfig(), prof=NULL) -> FrameTargets:
     """One frame -> ``FrameTargets`` (lean, prod path)."""
-    *_, targets = _build_frame(grounded, ctx, robot, f, prof)
+    *_, targets = _build_frame(grounded, ctx, robot, f, cfg, prof)
     return targets
 
 
 def trace_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec, f: int,
-                prof=NULL) -> FrameTrace:
+                cfg: TargetsConfig = TargetsConfig(), prof=NULL) -> FrameTrace:
     """Same pure ops as ``process_frame``, intermediates kept -> ``FrameTrace`` (the seam for ``viz``)."""
-    pose, human_world, object_worlds, human_field, targets = _build_frame(grounded, ctx, robot, f, prof)
+    pose, human_world, object_worlds, human_field, targets = _build_frame(grounded, ctx, robot, f, cfg, prof)
     return FrameTrace(pose=pose, human_cloud_world=human_world, object_clouds_world=object_worlds,
                       human_field=human_field, targets=targets)
 
 
 def run_sequence(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec,
-                 prof=NULL) -> list[FrameTargets]:
+                 cfg: TargetsConfig = TargetsConfig(), prof=NULL) -> list[FrameTargets]:
     """Drive all frames: the online loop ``for f: process_frame``. A vectorised batch over T (same
     array-oriented ops, T on the leading axis) is a later optimisation — see the ``bone_transforms``
     batch note in ``load/smpl.py``."""
     with prof.span("sequence", T=grounded.n_frames):
-        return [process_frame(grounded, ctx, robot, f, prof) for f in range(grounded.n_frames)]
+        return [process_frame(grounded, ctx, robot, f, cfg, prof) for f in range(grounded.n_frames)]

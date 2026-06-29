@@ -77,14 +77,13 @@ class StyleTargets:
     The object-agnostic "how the body should move" channel. Provisional shape — the style
     objective is still being designed (see ``targets/style/``).
 
-    Position and rotation carry SEPARATE per-link weights (the solve's tracking term scales the
-    position residual by ``weight_pos`` and the rotation residual by ``weight_rot``, independently —
-    V1 ``w_p`` / ``w_r``)."""
+    Per-frame GEOMETRY only: WHERE each tracked link should be (``position``) and how it should be
+    oriented (``orientation``). HOW HARD to track each link (the tracking weights / cost gains) is a
+    SOLVER concern — static, not per-frame — so it is NOT carried here; ``solve`` defines it in its
+    own config when it is built (V1 ``w_p`` / ``w_r``)."""
 
     link_names: tuple[str, ...]            # (L,)
     position: np.ndarray                   # (L, 3) world target per link
-    weight_pos: np.ndarray                 # (L,) position tracking weight (V1 w_p)
-    weight_rot: np.ndarray                 # (L,) rotation tracking weight (V1 w_r)
     orientation: np.ndarray | None = None  # (L, 4) wxyz, or None if position-only
 
 

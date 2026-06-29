@@ -76,7 +76,7 @@ HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · 
       contracts.py     types de targets : ContactField/MultiChannelField · StyleTargets ·
                        Robot/EnvironmentInteractionTargets · FrameTargets · FramePose · FrameTrace
                        (importe la sortie publique de prepare via `..prepare.contracts`)
-      config.py        knobs de targets (à venir)
+      config.py        knobs de targets : StyleConfig (échelle morpho + hauteurs) / TargetsConfig
       style/           objectif de style (posture, ignore l'objet) -> StyleTargets
       interaction/     pointclouds · eval · transport · targets -> Robot/Env InteractionTargets
       pipeline.py      process_frame -> FrameTargets ; trace_frame -> FrameTrace

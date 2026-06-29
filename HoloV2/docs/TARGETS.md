@@ -9,9 +9,11 @@ Les types de l'étage `targets` vivent dans **`targets/contracts.py`** (ContactF
 StyleTargets, Robot/EnvironmentInteractionTargets, FrameTargets, FramePose, FrameTrace). Ce module
 **importe la sortie publique de prepare** (`from ..prepare.contracts import GroundedScene,
 InteractionContext, RobotSpec`) — jamais les sous-modules internes de `prepare/`. `pipeline` prend
-`(grounded, ctx, robot, f)` (pas de bundle `prepared`, pas de `config`) : `robot` (`RobotSpec`) clé la
-table de style (`robot.name`, non atteignable via `ctx.robot` qui est un `RobotModel`) ; le seul knob
-per-frame, `margin`, est dans le context. Ce que `targets` consomme en entrée :
+`(grounded, ctx, robot, f, cfg)` (pas de bundle `prepared`) : `robot` (`RobotSpec`) clé la recette de
+style (`robot.name`, non atteignable via `ctx.robot` qui est un `RobotModel`) ; `cfg` (`TargetsConfig`,
+défaut `TargetsConfig()`) porte les knobs de l'étage — aujourd'hui seul `cfg.style` (`StyleConfig` :
+échelle morpho + hauteurs de référence) est lu, par `style.build`. Le knob per-frame `margin` reste
+dans le context (sortie `prepare`). Ce que `targets` consomme en entrée :
 - `GroundedScene` : motion calibrée (joints démo + params + poses objets / frame) + **`body`** (moteur
   de posage : `body.bone_transforms` → bone (R,t)) + `calibration` (provenance, via `grounded.calibration`)
 - `InteractionContext` : assets statiques (channels, human_cloud, object_clouds, correspondence ; + `scale`
@@ -69,9 +71,12 @@ GroundedScene[f] ─► FramePose(f) = bone (R,t)  +  object (R,t)   [calculé U
 ## Modules (1 responsabilité chacun)
 ```
 targets/
+  config.py            knobs de targets (StyleConfig échelle morpho + hauteurs / TargetsConfig) ET la
+                       recette de style robot-keyed (DATA : SMPL_BODY_INDEX, ARM_BODIES, _STYLE_TABLE
+                       lien->corps/poids/offsets, style_table()) — tout le style hors math en un fichier.
   style/               OBJECTIF DE STYLE (ex-"body") — posture, ignore l'objet.
-                       À revoir proprement (quoi/comment) ; placeholder pour l'instant.
-                       FramePose -> StyleTargets (mapping articulaire / GMR)
+                       FramePose -> StyleTargets (recette GMR par lien).
+                       build.py = la math SEULE (SCALE puis OFFSET) ; il lit knobs + recette via config.
   interaction/
     pointclouds.py     pose_cloud — pose tout nuage (humain K~4 / objet·robot K=1) [FAIT]
     eval.py            eval_fields (sample chaque Channel : SDF trilinéaire — chemin unique, sol plat inclus)
@@ -100,4 +105,4 @@ targets/
 définis dans `targets/contracts.py`. Détail : `docs/VIZ.md`.
 
 ## À fixer quand on code `targets/`
-- contenu réel de `style/` (l'objectif de style — à concevoir).
+- `style/` est implémenté (recette GMR portée, parité V1) ; knobs dans `config.StyleConfig`.

@@ -110,8 +110,7 @@ def test_frame_targets_rejects_object_pose_count_mismatch():
                                  witness=np.zeros((c, p, 3)), active=np.zeros((c, p), bool),
                                  channels=tuple(f"ch{i}" for i in range(c)))
 
-    style = StyleTargets(link_names=(), position=np.zeros((0, 3)),
-                         weight_pos=np.zeros(0), weight_rot=np.zeros(0))
+    style = StyleTargets(link_names=(), position=np.zeros((0, 3)))
     env = EnvironmentInteractionTargets(per_object=(_mcf(1, 3), _mcf(1, 3)))   # N=2
     with pytest.raises(ValueError, match="per_object"):
         FrameTargets(style=style, robot_interaction=RobotInteractionTargets(field=_mcf(1, 4)),
