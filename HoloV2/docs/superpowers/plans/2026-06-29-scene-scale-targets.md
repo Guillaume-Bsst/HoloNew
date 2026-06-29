@@ -257,6 +257,12 @@ Dans `test_style_matches_v1_scale_offset`, idem :
     st = style.build(pose, _robot(), stature=stature, scene=_NATIVE)
 ```
 
+Dans `test_style_on_real_data` (skippé sans données, mais il asserte le pelvis xy NATIF à la l.197), épingler aussi le natif — remplacer `st = style.build(pose, _robot(), grounded.body.stature)` par :
+
+```python
+    st = style.build(pose, _robot(), grounded.body.stature, scene=_NATIVE)
+```
+
 - [ ] **Step 2 : Ajouter le test du NOUVEAU défaut (xy scalé par ratio)**
 
 Ajouter dans `tests/test_style.py` :
