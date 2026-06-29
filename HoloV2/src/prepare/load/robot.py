@@ -1,4 +1,4 @@
-"""Robot kinematics from a URDF — robot-agnostic ``RobotModel`` (yourdfpy FK).
+"""Robot kinematics from a URDF — robot-agnostic ``RobotModel`` (pinocchio free-flyer FK).
 
 Generic across humanoids: the robot identity (URDF, link names, dof) comes from the ``RobotSpec``.
 The only robot-SPECIFIC data lives here as a name-keyed table — ``CORRESPONDENCE_REST_POSE`` — so
@@ -31,32 +31,60 @@ def correspondence_rest_angles(robot_name: str) -> dict[str, float]:
                          f"CORRESPONDENCE_REST_POSE") from None
 
 
-class UrdfRobot:
-    """``RobotModel`` backed by a URDF (yourdfpy). Fixed-base link world transforms for a given
-    actuated-joint configuration; ``link_names`` are every URDF link (transport indexes by name)."""
+class PinRobot:
+    """``RobotModel`` backed by pinocchio (free-flyer). World link transforms + analytic frame
+    Jacobians (LOCAL_WORLD_ALIGNED). Config ``q = [pelvis(7: pos + quat xyzw), joints]`` (pinocchio
+    order); tangent ``v`` dim ``nv = 6 + n_joints``. Ported from HoloNew ``test_socp/pin_model.py``."""
 
     def __init__(self, spec: RobotSpec) -> None:
-        import yourdfpy
-        self._urdf = yourdfpy.URDF.load(str(spec.urdf_path), load_meshes=False, build_scene_graph=True)
-        self.link_names: tuple[str, ...] = tuple(self._urdf.link_map.keys())
-        self.dof: int = len(self._urdf.actuated_joint_names)
+        import pinocchio as pin
+        self._pin = pin
+        self.model = pin.buildModelFromUrdf(str(spec.urdf_path), pin.JointModelFreeFlyer())
+        self.data = self.model.createData()
+        self.nq: int = int(self.model.nq)
+        self.nv: int = int(self.model.nv)
+        self.dof: int = self.nv - 6
+        # BODY frames = URDF links; keep their names + ids (transport/remap index by NAME).
+        self.link_names: tuple[str, ...] = tuple(
+            f.name for f in self.model.frames if f.type == pin.FrameType.BODY)
+        self._fids = {name: self.model.getFrameId(name) for name in self.link_names}
+        # actuated joint name -> idx_q / idx_v (joints 2..njoints; joint 1 is the free-flyer)
+        self._joint_qadr = {self.model.names[j]: self.model.joints[j].idx_q
+                            for j in range(2, self.model.njoints)}
 
-    def link_transforms(self, qpos: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """(L,3,3) rotations, (L,3) positions of every link for the actuated config ``qpos`` (dof,),
-        fixed base. Aligned with ``link_names``."""
-        self._urdf.update_cfg(np.asarray(qpos, np.float64))
-        rot = np.empty((len(self.link_names), 3, 3))
-        pos = np.empty((len(self.link_names), 3))
+    def neutral(self) -> np.ndarray:
+        return np.asarray(self._pin.neutral(self.model), np.float64)
+
+    def integrate(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
+        return np.asarray(self._pin.integrate(self.model, np.asarray(q, np.float64),
+                                              np.asarray(v, np.float64)), np.float64)
+
+    def config_from_angles(self, angles: dict) -> np.ndarray:
+        """Neutral base + named actuated joint angles -> q (nq,). Joints absent default to 0."""
+        q = self.neutral()
+        for name, a in angles.items():
+            if name in self._joint_qadr:
+                q[self._joint_qadr[name]] = float(a)
+        return q
+
+    def _fk(self, q: np.ndarray) -> None:
+        pin = self._pin
+        pin.forwardKinematics(self.model, self.data, pin.normalize(self.model, np.asarray(q, np.float64)))
+        pin.updateFramePlacements(self.model, self.data)
+
+    def link_transforms(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        self._fk(q)
+        n = len(self.link_names)
+        rot = np.empty((n, 3, 3)); pos = np.empty((n, 3))
         for i, name in enumerate(self.link_names):
-            t = np.asarray(self._urdf.get_transform(name))
-            rot[i], pos[i] = t[:3, :3], t[:3, 3]
+            oMf = self.data.oMf[self._fids[name]]
+            rot[i] = np.asarray(oMf.rotation); pos[i] = np.asarray(oMf.translation)
         return rot, pos
 
     def rest_transforms(self) -> tuple[np.ndarray, np.ndarray]:
-        """Link transforms at the zero (rest) configuration."""
-        return self.link_transforms(np.zeros(self.dof))
+        return self.link_transforms(self.neutral())
 
 
-def build_robot_model(spec: RobotSpec) -> UrdfRobot:
-    """Build the ``RobotModel`` for ``spec`` (loads the URDF, no meshes — FK only)."""
-    return UrdfRobot(spec)
+def build_robot_model(spec: RobotSpec) -> PinRobot:
+    """Build the pinocchio ``RobotModel`` for ``spec`` (FK + Jacobians, no meshes)."""
+    return PinRobot(spec)
