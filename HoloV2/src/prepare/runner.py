@@ -30,7 +30,8 @@ from .load import load
 from .load.mesh import load_mesh
 from .load.smpl import build_body_model, rest_body_model
 from .point_cloud import HumanCloudBuilder, ObjectCloudBuilder
-from .point_cloud.correspondence import CorrespondenceBuilder
+from .load.robot import build_robot_model
+from .point_cloud.correspondence import CorrespondenceBuilder, robot_point_cloud
 from .sdf import SdfBuilder, build_plane_sdf
 
 # The committed neutral correspondence ships under this fixed name (built by
@@ -120,7 +121,7 @@ def _correspondence(spec: SceneSpec, config: PrepareConfig, cache_dir: Path, pro
 
 
 def _validate(grounded: GroundedScene, channels: tuple[Channel, ...], human_cloud,
-              object_clouds: tuple, correspondence) -> None:
+              object_clouds: tuple, correspondence, robot_cloud) -> None:
     """Contract invariants of the assembled context — raise (not assert) on violation (golden rule).
 
     Ground first, object channels/clouds aligned with the scene's object order, and the human cloud's
@@ -140,6 +141,10 @@ def _validate(grounded: GroundedScene, channels: tuple[Channel, ...], human_clou
         raise ValueError(
             f"human cloud sampling_id {human_cloud.sampling_id!r} != correspondence "
             f"smpl_sampling_id {correspondence.smpl_sampling_id!r} — transport would be wrong")
+    if robot_cloud.n_points != correspondence.n_points:
+        raise ValueError(
+            f"robot_cloud has {robot_cloud.n_points} points, correspondence has "
+            f"{correspondence.n_points} — they must be the same M points")
 
 
 def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
@@ -185,13 +190,16 @@ def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
                     cache_dir, prof, force=force))
             object_clouds = tuple(object_clouds)
 
-        _validate(grounded, channels, human_cloud, object_clouds, corr_table)
+        robot = build_robot_model(spec.robot)
+        robot_cloud = robot_point_cloud(corr_table, robot.link_names)
+
+        _validate(grounded, channels, human_cloud, object_clouds, corr_table, robot_cloud)
 
         # margin = the SDF stored band (config.sdf.margin): the band the eval activates within IS the
         # band the grids store, a single source of truth (no separate PrepareConfig.margin knob).
         ctx = InteractionContext(channels=channels, human_cloud=human_cloud,
                                  object_clouds=object_clouds, correspondence=corr_table,
-                                 margin=config.sdf.margin)
+                                 margin=config.sdf.margin, robot_cloud=robot_cloud, robot=robot)
         return grounded, ctx
 
 

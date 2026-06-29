@@ -23,12 +23,13 @@ _DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
 _HODOME = _DATA / "HODome"
 _SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
 _CORR = Path(__file__).resolve().parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
+_URDF = Path(__file__).resolve().parent.parent / "models" / "g1" / "g1_29dof.urdf"
 
 
 def _pick() -> Path | None:
     """A HODome sequence that has BOTH smplx params and an object mesh (parametric + 1 object)."""
     sm, ob = _HODOME / "smplx", _HODOME / "object"
-    if not (sm.is_dir() and ob.is_dir() and _SMPLX.is_dir() and _CORR.exists()):
+    if not (sm.is_dir() and ob.is_dir() and _SMPLX.is_dir() and _CORR.exists() and _URDF.exists()):
         return None
     shared = {p.stem for p in sm.glob("*.npz")} & {p.stem for p in ob.glob("*.npz")}
     return sm / f"{sorted(shared)[0]}.npz" if shared else None
@@ -39,7 +40,7 @@ _SKIP = pytest.mark.skipif(_SEQ is None, reason="HODome data / SMPL-X model / co
 
 
 def _robot() -> RobotSpec:
-    return RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=("pelvis",), dof=29, height=1.3)
+    return RobotSpec(name="g1", urdf_path=_URDF, link_names=("pelvis",), dof=29, height=1.3)
 
 
 @pytest.fixture(scope="module")
@@ -88,6 +89,11 @@ def test_prepare_returns_grounded_and_context_with_invariants(prepared):
         assert ch.sdf.witness.shape == ch.sdf.grid.shape + (3,)
     assert ctx.correspondence.n_points > 0
     assert ctx.object_clouds[0].n_influences == 1            # objects are rigid K=1
+
+    # the robot side carried for solve: same M points as the correspondence + a usable FK engine.
+    assert ctx.robot_cloud.n_points == ctx.correspondence.n_points
+    assert ctx.robot_cloud.n_influences == 1
+    assert "pelvis" in ctx.robot.link_names and ctx.robot.dof == 29
 
 
 # --------------------------------------------------------------------------- case 2: cache round-trip

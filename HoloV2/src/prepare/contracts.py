@@ -354,13 +354,18 @@ class InteractionContext:
     - ``channels[0]`` is the GROUND (static; a plane SDF by default, or a terrain SDF);
       the rest are object channels with ``object_idx`` aligned to ``object_clouds`` and the
       scene's object order.
-    - ``human_cloud.sampling_id == correspondence.smpl_sampling_id``."""
+    - ``human_cloud.sampling_id == correspondence.smpl_sampling_id``.
+    - ``robot_cloud.n_points == correspondence.n_points`` (same M points)."""
 
     channels: tuple[Channel, ...]          # ground (static) + one per object
     human_cloud: PointCloud                # on the SMPL surface
     object_clouds: tuple[PointCloud, ...]  # one per object (object_clouds[i] <-> channel object_idx=i)
     correspondence: CorrespondenceTable    # SMPL -> robot (STATIC binding)
     margin: float                          # field activation margin (m)
+    robot_cloud: PointCloud                # the M correspondence robot points as a K=1 cloud, parts
+                                           # in robot FK link order — solve poses it at q (online re-eval)
+    robot: RobotModel                      # q-dependent kinematics engine (FK to pose robot_cloud);
+                                           # mirrors GroundedScene.body, heavy deps hidden in the instance
 
     @property
     def channel_names(self) -> tuple[str, ...]:

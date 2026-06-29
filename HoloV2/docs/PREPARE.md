@@ -190,7 +190,7 @@ Inventaire, par module.
   présent ; sol plat = SDF de plan)
 - **nuages** : `PointCloud` (skinning creux + `sampling_id`), `CorrespondenceTable`
   (`smpl_idx`/`link_idx`/`offset_local` + `smpl_sampling_id` qui doit matcher `sampling_id`)
-- **contexte** : `InteractionContext` (`channels` = ground + objets ; invariants documentés)
+- **contexte** : `InteractionContext` (`channels` = ground + objets ; invariants documentés). `InteractionContext` porte aussi `robot_cloud` (M points de correspondance en nuage K=1, ordre FK) + `robot` (moteur FK, symétrique à `GroundedScene.body`) pour la réévaluation online dans `solve`.
 
 ### `targets/contracts.py` (sortie publique de targets ; importe les types prepare amont)
 - **champs per-frame** : `ContactField` · `MultiChannelField` (`(C,P)`)
