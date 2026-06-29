@@ -92,7 +92,7 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
   prepare/             ÉTAPE 1 — TOUT l'offline (seul endroit qui instancie SMPL/meshes/robot)
     contracts.py         SORTIE PUBLIQUE — types de DONNÉES de prepare (protocols BodyModel/RobotModel/AssetBuilder ;
                          SceneSpec/RobotSpec, RawMotion/SmplParams, ObjectMesh/Calibration/GroundedScene, SDF/Channel,
-                         PointCloud/CorrespondenceTable, InteractionContext) — pas la config — numpy-only
+                         GeodesicTable, PointCloud/CorrespondenceTable, InteractionContext) — pas la config — numpy-only
     config.py            knobs : PrepareConfig + sous-configs CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig/GeodesicConfig
     load/                loaders OFFLINE (sous-package)
       base.py              protocol MotionLoader + registre
