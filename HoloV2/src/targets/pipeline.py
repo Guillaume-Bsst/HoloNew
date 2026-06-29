@@ -73,7 +73,7 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
         with prof.span("pose"):
             pose = frame_pose(grounded, f)
         with prof.span("style"):
-            style_t = style.build(pose, robot, grounded.body.stature, cfg.style)
+            style_t = style.build(pose, robot, grounded.body.stature, cfg.style, cfg.scene_scale)
         with prof.span("interaction.pose"):
             human_world = pose_cloud(ctx.human_cloud, pose.bone_rot, pose.bone_pos)
             object_worlds = tuple(

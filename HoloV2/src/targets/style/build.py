@@ -20,7 +20,7 @@ from __future__ import annotations
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-from ..config import ARM_BODIES, ROOT_BODY, SMPL_BODY_INDEX, StyleConfig, style_table
+from ..config import ARM_BODIES, ROOT_BODY, SMPL_BODY_INDEX, SceneScaleConfig, StyleConfig, style_table
 from ..contracts import FramePose, StyleTargets
 from ...prepare.contracts import RobotSpec
 
@@ -38,7 +38,7 @@ def _R_to_quat_wxyz(rot: np.ndarray) -> np.ndarray:
 
 
 def build(pose: FramePose, robot: RobotSpec, stature: float,
-          cfg: StyleConfig = StyleConfig()) -> StyleTargets:
+          cfg: StyleConfig = StyleConfig(), scene: SceneScaleConfig = SceneScaleConfig()) -> StyleTargets:
     """One frame of SMPL bones -> ``StyleTargets`` for ``robot``'s tracked links.
 
     ``pose`` carries the per-frame SMPL bone (R, t) (J_bones, SMPL-X order); ``robot.name`` selects the
