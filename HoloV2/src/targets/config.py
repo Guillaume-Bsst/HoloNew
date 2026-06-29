@@ -49,12 +49,35 @@ class StyleConfig:
 
 
 @dataclass(frozen=True)
+class SceneScaleConfig:
+    """Échelle de scène (placement), partagée par ``style`` et ``interaction`` et appliquée en étape
+    finale sur les RÉFÉRENCES (jamais avant l'éval des contacts). Similarité diagonale ancrée
+    statiquement : xy autour de l'origine monde, z autour du sol (``StyleConfig.ground_height``).
+
+    ``None`` => le facteur de cet axe est ``ratio = stature / StyleConfig.human_height_assumption``
+    (le MÊME ratio que le style, pour la cohérence style↔interaction). Un float = facteur fixe.
+    Défaut ``(None, None)`` => ``ratio`` partout. ``scale_xy=1.0, scale_z=None`` reproduit le
+    comportement style natif (xy non scalé, z par ``ratio``)."""
+
+    scale_xy: float | None = None   # facteur xy autour de l'origine ; None -> ratio
+    scale_z: float | None = None    # facteur z autour du sol ; None -> ratio
+
+    def __post_init__(self) -> None:
+        if self.scale_xy is not None and self.scale_xy <= 0.0:
+            raise ValueError(f"scale_xy must be > 0 when set, got {self.scale_xy}")
+        if self.scale_z is not None and self.scale_z <= 0.0:
+            raise ValueError(f"scale_z must be > 0 when set, got {self.scale_z}")
+
+
+@dataclass(frozen=True)
 class TargetsConfig:
     """All knobs of the ``targets`` step, composed — the single object ``pipeline`` receives; each op
-    reads only its sub-config. Currently only ``style`` carries knobs (interaction's per-frame
-    ``margin`` rides on ``InteractionContext``, a ``prepare`` output)."""
+    reads only its sub-config. ``style`` = recette + scalaires morpho ; ``scene_scale`` = la similarité
+    de scène partagée par style + interaction (placement). L'``InteractionContext.margin`` reste un
+    knob ``prepare``."""
 
     style: StyleConfig = field(default_factory=StyleConfig)
+    scene_scale: SceneScaleConfig = field(default_factory=SceneScaleConfig)
 
 
 # =============================================================================== ROBOT STYLE RECIPE (data)
