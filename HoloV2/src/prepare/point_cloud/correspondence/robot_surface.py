@@ -5,6 +5,12 @@ angles live in ``prepare/load/robot.py``, keyed by robot name). Each sampled poi
 frame of the link it belongs to (``offset_local``), so re-posing the robot by FK relocates it for
 free. A T-pose-like rest (limbs spread) keeps the limb clouds well separated for the per-segment OT.
 
+The robot geometry + kinematics come from **pinocchio** (the single robot model of the project — the
+same engine as ``prepare/load/robot.PinRobot``): the visual ``GeometryModel`` gives, per geometry, the
+owning link (``parentFrame``, authoritative — no scene-graph heuristic), the rest-pose world placement
+(``updateGeometryPlacements``), and the mesh file (or a primitive shape). Only the mesh sampling stays
+on ``trimesh``.
+
 Each link mesh is first reduced to its watertight OUTER SHELL so samples land only on the true
 outside: raw visual meshes are non-watertight and carry internal geometry, so plain surface sampling
 would land many points inside the body.
@@ -28,9 +34,36 @@ class RobotSurface:
     link_names: tuple[str, ...]
 
 
-def _rest_cfg(actuated_joint_names, rest_angles: dict[str, float]) -> np.ndarray:
-    """Actuated-joint vector (n,) in URDF order; joints absent from ``rest_angles`` default to 0."""
-    return np.array([rest_angles.get(name, 0.0) for name in actuated_joint_names], dtype=np.float64)
+def _rest_q(model, rest_angles: dict[str, float]) -> np.ndarray:
+    """Free-flyer neutral config with the named actuated joints set to ``rest_angles`` (absent -> 0)."""
+    q = np.asarray(__import__("pinocchio").neutral(model), np.float64)
+    qadr = {model.names[j]: model.joints[j].idx_q for j in range(2, model.njoints)}
+    for name, a in rest_angles.items():
+        if name in qadr:
+            q[qadr[name]] = float(a)
+    return q
+
+
+def _geometry_mesh(geom_obj):
+    """A ``trimesh.Trimesh`` for one ``GeometryObject``: its mesh file, or a primitive (sphere / box /
+    cylinder / capsule) rebuilt from the coal shape. Returns ``None`` for an unsupported shape."""
+    import trimesh
+    mp = geom_obj.meshPath or ""
+    if mp and Path(mp).suffix.lower() in (".obj", ".stl", ".dae", ".ply"):
+        mesh = trimesh.load(mp, force="mesh", process=False)
+        s = np.asarray(geom_obj.meshScale, np.float64)
+        if not np.allclose(s, 1.0):
+            mesh.apply_scale(s)
+        return mesh
+    g = geom_obj.geometry                                            # coal primitive
+    name = type(g).__name__
+    if name == "Sphere":
+        return trimesh.creation.icosphere(subdivisions=2, radius=float(g.radius))
+    if name == "Box":
+        return trimesh.creation.box(extents=2.0 * np.asarray(g.halfSide, np.float64))
+    if name in ("Cylinder", "Capsule"):
+        return trimesh.creation.cylinder(radius=float(g.radius), height=2.0 * float(g.halfLength))
+    return None
 
 
 def _outer_shell(mesh):
@@ -58,29 +91,31 @@ def sample_robot_surface(urdf_path: Path, rest_angles: dict[str, float],
 
     Each mesh is reduced to its watertight outer shell (samples land only on the true outside), then
     each sample is snapped back onto the real mesh (the shell is dilated ~5 mm by voxelisation, so
-    sampling it directly would float the points off the surface) and pushed out 1 mm."""
+    sampling it directly would float the points off the surface) and pushed out 1 mm. Geometry +
+    placements come from pinocchio's visual ``GeometryModel`` (mesh sampling stays trimesh)."""
     import trimesh
-    import yourdfpy
+    import pinocchio as pin
 
-    urdf = yourdfpy.URDF.load(str(urdf_path), load_meshes=True, build_scene_graph=True)
-    urdf.update_cfg(_rest_cfg(urdf.actuated_joint_names, rest_angles))
-    scene = urdf.scene
+    urdf_path = Path(urdf_path)
+    model = pin.buildModelFromUrdf(str(urdf_path), pin.JointModelFreeFlyer())
+    geom = pin.buildGeomFromUrdf(model, str(urdf_path), pin.GeometryType.VISUAL,
+                                 package_dirs=[str(urdf_path.parent)])
+    data, gdata = model.createData(), geom.createData()
+    q = _rest_q(model, rest_angles)
+    pin.forwardKinematics(model, data, q)
+    pin.updateFramePlacements(model, data)
+    pin.updateGeometryPlacements(model, data, geom, gdata)
 
     link_names: list[str] = []
     link_id: dict[str, int] = {}
     pw, li, ol, sg = [], [], [], []
     rng = np.random.default_rng(0)                       # deterministic sampling
 
-    for node in scene.graph.nodes_geometry:
-        t_geom, geom_name = scene.graph.get(node)
-        mesh = scene.geometry[geom_name]
-
-        link = node                                      # find the true owning URDF link
-        while link not in urdf.link_map and link in scene.graph.transforms.parents:
-            link = scene.graph.transforms.parents[link]
-        if link not in urdf.link_map:
-            link = next((ln for ln in urdf.link_map if ln in node), None) or (
-                "pelvis" if "pelvis" in urdf.link_map else next(iter(urdf.link_map)))
+    for i, go in enumerate(geom.geometryObjects):
+        mesh = _geometry_mesh(go)
+        if mesh is None or len(mesh.vertices) == 0:
+            continue
+        link = model.frames[go.parentFrame].name        # authoritative owning link (no heuristic)
 
         shell = _outer_shell(mesh)
         n = max(1, int(shell.area * density))
@@ -92,10 +127,10 @@ def sample_robot_surface(urdf_path: Path, rest_angles: dict[str, float],
             continue
         pts_file = pts_file + mesh.face_normals[face_idx] * 0.001     # push out 1 mm
 
-        t_geom = np.asarray(t_geom)
-        pts_world = pts_file @ t_geom[:3, :3].T + t_geom[:3, 3]
-        t_link = np.asarray(urdf.get_transform(link))
-        offset = (pts_world - t_link[:3, 3]) @ t_link[:3, :3]         # into the link frame
+        oMg = gdata.oMg[i]                                            # geometry world placement
+        pts_world = pts_file @ np.asarray(oMg.rotation).T + np.asarray(oMg.translation)
+        oMf = data.oMf[go.parentFrame]                               # link world placement
+        offset = (pts_world - np.asarray(oMf.translation)) @ np.asarray(oMf.rotation)
 
         if link not in link_id:
             link_id[link] = len(link_names)
