@@ -80,6 +80,15 @@ def test_disconnected_graph_bridged():
     assert D[0, 5] > 9.0                                # traverse le pont (~10)
 
 
+def test_disconnected_three_components_bridged():
+    # Trois amas éloignés, k=1 → 3 composantes ; le bridging itératif (accumulated grandit) relie tout.
+    c0 = np.zeros((4, 3)); c1 = np.zeros((4, 3)) + [[10.0, 0, 0]]; c2 = np.zeros((4, 3)) + [[0, 10.0, 0]]
+    pts = np.concatenate([c0, c1, c2]) + np.random.default_rng(1).normal(0, 1e-3, (12, 3))
+    nrm = np.tile([0.0, 0, 1.0], (12, 1))
+    D = all_pairs_geodesic(_bridge_disconnected(pts, build_knn_graph(pts, nrm, k=1, normal_gate=-1.0)))
+    assert np.isfinite(D).all()                          # les 3 composantes reliées
+
+
 def test_all_pairs_raises_on_raw_disconnected():
     # garde-fou interne : all_pairs_geodesic SANS bridging lève toujours (ne stocke pas d'inf).
     pts = np.concatenate([np.zeros((3, 3)), np.zeros((3, 3)) + [[10.0, 0, 0]]])

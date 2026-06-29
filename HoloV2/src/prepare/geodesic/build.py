@@ -83,7 +83,7 @@ def _bridge_disconnected(points: np.ndarray, graph):
         rows += [a, bnode]; cols += [bnode, a]; wts += [d, d]  # arête de pont (non orientée)
         accumulated = np.concatenate([accumulated, cur])
     bridges = csr_matrix((wts, (rows, cols)), shape=graph.shape)
-    return (graph + bridges)                                  # union (croisements sans recouvrement)
+    return graph.maximum(bridges)                            # union (cohérent avec build_knn_graph)
 
 
 def all_pairs_geodesic(graph) -> np.ndarray:
