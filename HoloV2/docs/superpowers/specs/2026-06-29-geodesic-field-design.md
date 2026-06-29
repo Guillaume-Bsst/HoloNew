@@ -88,7 +88,12 @@ targets/interaction/
 - **Modifier** `prepare/config.py` : `+ GeodesicConfig` ; `PrepareConfig += geodesic`.
 - **Modifier** `prepare/runner.py` : `_build_channels` construit la table par objet/terrain (load-or-build,
   `prof.span("geodesic")`), la passe au `Channel`.
-- **Modifier** `targets/__init__.py` : ré-export `geo_value_grad`, `nearest_index`.
+- **Modifier** `prepare/__init__.py` : exporter `GeodesicConfig`/`GeodesicTable` si l'`__init__` ré-expose
+  déjà les contrats/config (aligner sur l'existant `SdfConfig`/`SDF`).
+- **Modifier** `targets/interaction/__init__.py` + `targets/__init__.py` : ré-export `geo_value_grad`,
+  `nearest_index` (à côté de `pose_cloud`/`eval_fields`).
+- **Docs de structure** (source unique — `CLAUDE.md`) : **ARCHITECTURE.md**, **PREPARE.md**, **CACHE.md**,
+  **TARGETS.md** (voir « Intégration architecture » ci-dessous).
 
 ## Contrat — `GeodesicTable` (frozen, numpy-only)
 
@@ -235,6 +240,39 @@ channels.append(Channel(f"obj{i}", i, sdf, geodesic=geo))   # sol PLAN → geode
 
 Le sol-terrain (`spec.ground_mesh_path is not None`) reçoit aussi une table ; le sol plat reste
 `geodesic=None`.
+
+## Intégration architecture (config + docs de structure)
+
+Le sous-module doit être **branché partout où `sdf` l'est**, pas seulement créé. Checklist d'intégration :
+
+**Plomberie config** — `GeodesicConfig` est un citoyen de première classe de `PrepareConfig` :
+- `PrepareConfig += geodesic: GeodesicConfig = field(default_factory=GeodesicConfig)` ⇒ `PrepareConfig()`
+  inclut le défaut géodésique ; override inline `PrepareConfig(geodesic=GeodesicConfig(k_neighbors=12))`.
+- Le builder lit **uniquement** `config.cloud` (sampling) + `config.geodesic` (graphe) et les hashe dans
+  sa clé ⇒ un changement de knob géodésique n'invalide **que** l'asset géodésique.
+- Le futur CLI tyro attaché au point d'entrée de run expose donc `--geodesic.k-neighbors`, etc., sans
+  travail supplémentaire (il dérive de la dataclass).
+
+**Câblage runtime** — `Channel.geodesic` peuplé dans `_build_channels` (objets + sol-terrain), `None`
+pour le sol plat ; `prof.span("geodesic", n=...)` dans `_run` à côté de `sdf`/`point_cloud`.
+
+**Docs de structure à mettre à jour** (CLAUDE.md : `ARCHITECTURE.md` = source unique ; ne pas la redupliquer) :
+- **ARCHITECTURE.md** : ajouter `geodesic/` à l'arbre `prepare/` (ligne LIVRABLE, après `point_cloud/`) ;
+  `GeodesicConfig` à la liste des sous-configs ; `GeodesicTable` à la liste des types `prepare`.
+- **PREPARE.md** : nouvelle ligne LIVRABLE `geodesic/` ; `GeodesicConfig` dans les sous-configs ; passer
+  le décompte builders **5 → 6** (`+ GeodesicBuilder`) et livrables **3 → 4** ; mentionner
+  `Channel.geodesic` dans la liste des champs `Channel` (« `sdf` TOUJOURS présent ; `geodesic` `| None`,
+  `None` = sol plan »).
+- **CACHE.md** : ajouter la ligne de table cache **Géodésique** (clé = hash géom + sampling + knobs
+  graphe ; sous-dossier `geodesic`) ; entrée `geodesic/<geom_hash>_<cfg>.npz` dans l'arbre
+  `HoloV2/cache/` ; règle d'invalidation « changer `geodesic`/`cloud` → rebuild table géodésique ».
+- **TARGETS.md** : noter le ré-export `geo_value_grad`/`nearest_index` dans la surface publique
+  (`targets/interaction` → `targets`), avec une phrase sur l'usage (lecture différentiable du champ à
+  `witness(q)` pour le résidu witness côté solve/utilisateur).
+
+> Garde-fou de cohérence : après l'intégration, `PrepareConfig()` doit construire sans erreur, `prepare`
+> sur une scène à ≥1 objet doit produire des `Channel.geodesic` non-`None` pour les objets et `None`
+> pour le sol plat, et un second run doit faire **cache hit** sur `geodesic/`.
 
 ## Tests (`HoloV2/tests/`)
 
