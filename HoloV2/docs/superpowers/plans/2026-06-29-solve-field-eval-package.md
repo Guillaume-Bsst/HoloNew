@@ -91,8 +91,9 @@ def test_posing_reproduces_link_placement():
     ra, ta = R.from_rotvec([0.3, 0, 0]).as_matrix(), np.array([0.0, 2.0, 0.0])
     part_rot, part_pos = np.stack([rb, ra]), np.stack([tb, ta])      # FK order [b, a]
     out = pose_cloud(cloud, part_rot, part_pos)
-    assert np.allclose(out[0], ra @ corr.offset_local[0] + ta, atol=1e-6)   # point 0 on "a"
-    assert np.allclose(out[1], rb @ corr.offset_local[1] + tb, atol=1e-6)   # point 1 on "b"
+    # link_idx[0]=1 -> link_names[1]="b" -> point 0 is on link "b"; link_idx[1]=0 -> point 1 on "a".
+    assert np.allclose(out[0], rb @ corr.offset_local[0] + tb, atol=1e-6)   # point 0 on "b"
+    assert np.allclose(out[1], ra @ corr.offset_local[1] + ta, atol=1e-6)   # point 1 on "a"
 
 
 def test_missing_link_raises():
