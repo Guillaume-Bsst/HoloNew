@@ -32,6 +32,7 @@ from .load.smpl import build_body_model, rest_body_model
 from .point_cloud import HumanCloudBuilder, ObjectCloudBuilder
 from .load.robot import build_robot_model
 from .point_cloud.correspondence import CorrespondenceBuilder, robot_point_cloud
+from .geodesic import GeodesicBuilder
 from .sdf import SdfBuilder, build_plane_sdf
 
 # The committed neutral correspondence ships under this fixed name (built by
@@ -84,18 +85,24 @@ def _build_channels(grounded: GroundedScene, spec: SceneSpec, config: PrepareCon
     is set; then one cached object SDF per object, ``object_idx`` aligned 0..N-1 with the scene's
     object order."""
     sdf_builder = SdfBuilder()
+    geo_builder = GeodesicBuilder()
     if spec.ground_mesh_path is None:
         xy_min, xy_max = _scene_xy_bounds(grounded)
         prof.event("ground plane (analytic)")
         ground_sdf = build_plane_sdf(xy_min, xy_max, config.sdf.spacing, config.sdf.margin,
                                      name="ground")
+        ground_geo = None                                       # sol PLAN → euclidien analytique
     else:
         gv, gf = load_mesh(spec.ground_mesh_path)
         ground_sdf = _load_or_build(
             sdf_builder, "sdf", sdf_builder.cache_key(config.sdf, gv, gf),
             lambda: sdf_builder.build(config.sdf, gv, gf, name="ground"),
             cache_dir, prof, force=force)
-    channels = [Channel("ground", None, ground_sdf)]
+        ground_geo = _load_or_build(
+            geo_builder, "geodesic", geo_builder.cache_key(config.cloud, config.geodesic, gv, gf),
+            lambda: geo_builder.build(config.cloud, config.geodesic, gv, gf, name="ground"),
+            cache_dir, prof, force=force)
+    channels = [Channel("ground", None, ground_sdf, geodesic=ground_geo)]
 
     for i, mesh_path in enumerate(grounded.object_mesh_paths):
         v, f = load_mesh(mesh_path)
@@ -103,7 +110,11 @@ def _build_channels(grounded: GroundedScene, spec: SceneSpec, config: PrepareCon
             sdf_builder, "sdf", sdf_builder.cache_key(config.sdf, v, f),
             lambda v=v, f=f, i=i: sdf_builder.build(config.sdf, v, f, name=f"obj{i}"),
             cache_dir, prof, force=force)
-        channels.append(Channel(f"obj{i}", i, sdf))
+        geo = _load_or_build(
+            geo_builder, "geodesic", geo_builder.cache_key(config.cloud, config.geodesic, v, f),
+            lambda v=v, f=f, i=i: geo_builder.build(config.cloud, config.geodesic, v, f, name=f"obj{i}"),
+            cache_dir, prof, force=force)
+        channels.append(Channel(f"obj{i}", i, sdf, geodesic=geo))
     return tuple(channels)
 
 
@@ -168,7 +179,7 @@ def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
         with prof.span("scene"):
             grounded = scene.assemble(raw, calib, body)
 
-        with prof.span("sdf", n=grounded.n_objects + 1):
+        with prof.span("sdf+geodesic", n=grounded.n_objects + 1):
             channels = _build_channels(grounded, spec, config, cache_dir, prof, force=force)
 
         with prof.span("correspondence"):
