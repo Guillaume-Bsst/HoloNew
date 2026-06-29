@@ -88,7 +88,8 @@ class PinRobot:
 
     def link_jacobians(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """World transforms + LOCAL_WORLD_ALIGNED translational/angular frame Jacobians per link.
-        ``dp_world = jac_lin @ v``, ``omega_world = jac_ang @ v`` (v in pinocchio tangent order)."""
+        ``dp_world = jac_lin @ v``, ``omega_world = jac_ang @ v`` (v in pinocchio tangent order).
+        Returns ``(rot (L,3,3), pos (L,3), jac_lin (L,3,nv), jac_ang (L,3,nv))``."""
         pin = self._pin
         qn = pin.normalize(self.model, np.asarray(q, np.float64))
         pin.computeJointJacobians(self.model, self.data, qn)

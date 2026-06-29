@@ -53,8 +53,8 @@ def test_link_jacobians_match_finite_differences():
 
     # finite-difference the WORLD position of a few links along each tangent direction.
     eps = 1e-6
-    test_links = [robot.link_names.index(n) for n in ("left_elbow_link", "pelvis")
-                  if n in robot.link_names]
+    test_links = [robot.link_names.index(lname) for lname in ("left_elbow_link", "pelvis")
+                  if lname in robot.link_names]
     assert test_links, "no FD test link resolved"
     for k in range(robot.nv):
         v = np.zeros(robot.nv); v[k] = eps
