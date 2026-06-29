@@ -1,6 +1,14 @@
 # Spec — Réévaluation des champs de contact pour `solve` (package online + références)
 
-**Date** : 2026-06-29 · **Étage** : `targets` (surface publique) + `prepare`/`targets` (contrats) · **Statut** : conçu
+**Date** : 2026-06-29 · **Étage** : `targets` (surface publique) + `prepare`/`targets` (contrats) · **Statut** : ⚠️ REMPLACÉ (superseded)
+
+> **⚠️ Ce spec est remplacé par `2026-06-29-targets-evaluator-seam-design.md`.**
+> Son socle « valeur seule » (kernels publics `pose_cloud`/`eval_fields`,
+> `InteractionContext.robot_cloud`/`robot`, `FrameTargets.object_rot/pos`) **est conservé et
+> réutilisé** par le nouveau spec, qui y ajoute : un évaluateur-objet exposé par `targets`, des
+> **jacobiennes analytiques** (q free-flyer pinocchio), `RobotModel.link_jacobians`, et la
+> **réorganisation** de `targets/`. Les décisions « jacobiennes différées » et « aucune
+> relocalisation » ci-dessous sont **caduques**. Conservé pour la trace des décisions.
 
 ## Problème
 
