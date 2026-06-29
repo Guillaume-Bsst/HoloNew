@@ -149,8 +149,11 @@ class GeodesicConfig:
     """Graphe géodésique sur le cloud objet (prepare/geodesic). La DENSITÉ/seed ne sont PAS ici : la
     géodésique réutilise l'échantillonnage du object_cloud (CloudConfig) → un seul sampling canonique."""
     k_neighbors: int = 8       # k du graphe k-NN de surface (Dijkstra all-pairs scipy)
-    normal_gate: float = 0.0   # arête i--j seulement si dot(n_i,n_j) > normal_gate ∈ [-1,1]
-                               # (coupe les arêtes "cross-gap" des plaques fines/concaves ; 0 = même hémisphère)
+    normal_gate: float = -0.5  # arête i--j seulement si dot(n_i,n_j) > normal_gate ∈ [-1,1].
+                               # DÉFAUT -0.5 : garde les faces perpendiculaires adjacentes (dot=0, ex.
+                               # arêtes d'un cube) ET coupe les arêtes quasi-opposées (dot≈-1, ex.
+                               # traversée d'une plaque fine). 0.0 déconnecterait toute arête à 90°
+                               # (un cube se scinderait en 6 faces) ; -1.0 ≈ aucun gating.
     max_points: int = 6000     # garde-fou : ValueError si P dépasse (stockage 4·P² o) →
                                # baisser object_density ou relever ce knob en conscience
 
