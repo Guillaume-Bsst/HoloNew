@@ -283,6 +283,33 @@ class SDF:
 
 
 @dataclass(frozen=True)
+class GeodesicTable:
+    """All-pairs géodésique (distance de graphe k-NN) sur les points de surface d'un mesh rigide, en
+    frame locale. AUTO-CONTENU : porte SES points + normales, donc consommable sans le ``object_cloud``.
+    La ligne ``geo[j]`` EST le champ géodésique mono-source depuis le point ``j`` (lookup O(1), ligne
+    contiguë) — c'est ce qu'on lit à un ``witness(q)`` continu pour le résidu witness (côté solve).
+    Géométrie rigide ⇒ pose-invariant (une translation/rotation préserve les géodésiques)."""
+
+    points: np.ndarray    # (P, 3) f32  échantillons de surface (= sampling object_cloud), frame locale
+    normals: np.ndarray   # (P, 3) f32  normale unitaire par point (gating snap/interp thin/concave)
+    geo: np.ndarray       # (P, P) f32  geo[i, j] = géodésique de graphe i->j (symétrique)
+    name: str             # nom de canal ("obj0"/"terrain") — provenance, aligné SDF/cloud
+    sampling_id: str = "" # identité du sampling (densité/seed/topo) — provenance/garde-fou
+
+    @property
+    def n_points(self) -> int:
+        return self.points.shape[0]
+
+    def __post_init__(self) -> None:
+        p = self.points.shape[0]
+        if self.geo.shape != (p, p):
+            raise ValueError(f"geo shape {self.geo.shape} != (P, P) with P={p}")
+        if self.normals.shape != self.points.shape:
+            raise ValueError(
+                f"normals shape {self.normals.shape} != points shape {self.points.shape}")
+
+
+@dataclass(frozen=True)
 class Channel:
     """One evaluation channel = a signed-distance source + its per-frame pose binding. Makes the
     ground/object alignment EXPLICIT (no implicit N vs N+1 offset). EVERY channel carries an ``sdf``
@@ -297,6 +324,10 @@ class Channel:
     name: str
     object_idx: int | None        # None = static ground (world) ; else index into object_poses/clouds
     sdf: SDF                       # the signed-distance grid (ground plane / terrain / object)
+    geodesic: "GeodesicTable | None" = None   # None = sol PLAN (le coût retombe sur l'euclidien
+                                              # analytique, qui EST la géodésique exacte d'un plan) ;
+                                              # sinon objet/terrain. Seule entorse au "jamais de None"
+                                              # du sdf, assumée : le plan est le seul cas à forme close.
 
 
 @dataclass(frozen=True)
