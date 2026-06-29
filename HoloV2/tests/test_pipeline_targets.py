@@ -5,6 +5,7 @@ fake 22-bone body + analytic plane SDFs (no SMPL, no trimesh, no robot URDF)."""
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from src.prepare.contracts import (Calibration, Channel, CorrespondenceTable, GroundedScene,
                                     InteractionContext, PointCloud, RobotSpec)
@@ -65,3 +66,21 @@ def test_frame_targets_carry_object_poses_from_frame_pose():
     assert np.allclose(ft.object_rot, pose.object_rot)
     assert np.allclose(ft.object_pos, pose.object_pos)
     assert np.allclose(ft.object_pos[0], [0.2, 0.3, 0.5])           # the grounded object position
+
+
+def test_frame_targets_rejects_object_pose_count_mismatch():
+    from src.targets.contracts import (EnvironmentInteractionTargets, FrameTargets,
+                                        MultiChannelField, RobotInteractionTargets, StyleTargets)
+
+    def _mcf(c, p):
+        return MultiChannelField(distance=np.zeros((c, p)), direction=np.zeros((c, p, 3)),
+                                 witness=np.zeros((c, p, 3)), active=np.zeros((c, p), bool),
+                                 channels=tuple(f"ch{i}" for i in range(c)))
+
+    style = StyleTargets(link_names=(), position=np.zeros((0, 3)),
+                         weight_pos=np.zeros(0), weight_rot=np.zeros(0))
+    env = EnvironmentInteractionTargets(per_object=(_mcf(1, 3), _mcf(1, 3)))   # N=2
+    with pytest.raises(ValueError, match="per_object"):
+        FrameTargets(style=style, robot_interaction=RobotInteractionTargets(field=_mcf(1, 4)),
+                     env_interaction=env,
+                     object_rot=np.zeros((1, 3, 3)), object_pos=np.zeros((1, 3)))   # N=1 mismatch

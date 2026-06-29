@@ -36,7 +36,7 @@ def _pick() -> Path | None:
 
 
 _SEQ = _pick()
-_SKIP = pytest.mark.skipif(_SEQ is None, reason="HODome data / SMPL-X model / corr_neutral.npz absent")
+_SKIP = pytest.mark.skipif(_SEQ is None, reason="HODome data / SMPL-X model / corr_neutral.npz / g1_29dof.urdf absent")
 
 
 def _robot() -> RobotSpec:
@@ -47,7 +47,7 @@ def _robot() -> RobotSpec:
 def prepared(tmp_path_factory):
     """Run prepare TWICE against a tmp cache (cold build, then warm load) — shared by the cases."""
     if _SEQ is None:
-        pytest.skip("HODome data / SMPL-X model / corr_neutral.npz absent")
+        pytest.skip("HODome data / SMPL-X model / corr_neutral.npz / g1_29dof.urdf absent")
     cache = tmp_path_factory.mktemp("prep_cache")
     (cache / "correspondence").mkdir(parents=True, exist_ok=True)
     shutil.copy(_CORR, cache / "correspondence" / "corr_neutral.npz")   # reuse the committed default

@@ -126,7 +126,8 @@ def _validate(grounded: GroundedScene, channels: tuple[Channel, ...], human_clou
 
     Ground first, object channels/clouds aligned with the scene's object order, and the human cloud's
     sampling bound to the correspondence (else the transport gather silently points at another point
-    order)."""
+    order). The robot cloud must carry the SAME M points as the correspondence (else the online
+    re-eval addresses a different point set)."""
     if channels[0].object_idx is not None:
         raise ValueError("channels[0] must be the static ground (object_idx is None)")
     obj_channels = channels[1:]

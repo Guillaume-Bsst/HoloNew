@@ -125,6 +125,13 @@ class FrameTargets:
                                            # object-channel frame + the object-variable init/reference
     object_pos: np.ndarray                 # (N, 3)    per-frame object world positions
 
+    def __post_init__(self) -> None:
+        n = len(self.env_interaction.per_object)
+        if not (self.object_rot.shape[0] == self.object_pos.shape[0] == n):
+            raise ValueError(
+                f"object poses ({self.object_rot.shape[0]} rot, {self.object_pos.shape[0]} pos) "
+                f"must match env_interaction.per_object count ({n})")
+
 
 # =============================================================================
 # shared per-frame state + viz trace
