@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 
 from .config import SceneScaleConfig
+from .contracts import MultiChannelField
 
 
 def resolve_scale(cfg: SceneScaleConfig, ratio: float) -> tuple[float, float]:
@@ -30,3 +31,19 @@ def apply_scene_scale(points: np.ndarray, s_xy: float, s_z: float,
     out[..., 1] *= s_xy
     out[..., 2] = ground_height + (out[..., 2] - ground_height) * s_z
     return out
+
+
+def scale_ground_channels(field: MultiChannelField, ground_idx: tuple[int, ...],
+                          s_xy: float, s_z: float, ground_height: float = 0.0) -> MultiChannelField:
+    """Scale, pour les canaux SOL (frame monde, ``ground_idx``), le ``witness`` (similarité de scène)
+    et la ``distance`` (= hauteur, ``*= s_z``) là où ``active``. Les canaux OBJET (witness local,
+    qui suivent la pose objet scalée), ``direction`` et ``active`` sont inchangés. Retourne un nouveau
+    ``MultiChannelField`` (frozen)."""
+    distance = np.asarray(field.distance, np.float64).copy()           # (C, P)
+    witness = np.asarray(field.witness, np.float64).copy()             # (C, P, 3)
+    active = np.asarray(field.active, dtype=bool)                      # (C, P)
+    for c in ground_idx:
+        witness[c] = apply_scene_scale(witness[c], s_xy, s_z, ground_height)
+        distance[c] = np.where(active[c], distance[c] * s_z, distance[c])
+    return MultiChannelField(distance=distance, direction=field.direction, witness=witness,
+                             active=field.active, channels=field.channels)

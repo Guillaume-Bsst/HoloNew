@@ -116,6 +116,38 @@ def test_object_pos_scaled_by_scene():
     np.testing.assert_array_equal(ft_scaled.object_rot, ft_native.object_rot)   # rotation inchangée
 
 
+def test_ground_channel_scaled_in_robot_field():
+    """Wiring : le pipeline scale le canal SOL des refs. Corps près du sol -> canal sol actif ;
+    on vérifie distance(hauteur) *= s_z (le z du witness reste sur le plan, xy nuls ici)."""
+    from src.targets.config import TargetsConfig, SceneScaleConfig
+
+    class _BodyLow(_Body22):
+        def bone_transforms(self, params, t):
+            rot, pos = _Body22.bone_transforms(self, params, t)
+            pos = pos.copy(); pos[:, 2] = 0.05            # dans la marge (0.1) du plan sol z~0
+            return rot, pos
+
+    g0 = _grounded(n_obj=1)
+    g = GroundedScene(joint_pos=g0.joint_pos, joint_names=g0.joint_names, object_poses=g0.object_poses,
+                      object_mesh_paths=g0.object_mesh_paths, calibration=g0.calibration, fps=g0.fps,
+                      smpl_params=None, body=_BodyLow())
+    ctx = _ctx(n_obj=1)
+    robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=(), dof=29, height=1.3)
+    ft_id = process_frame(g, ctx, robot, f=0,
+                          cfg=TargetsConfig(scene_scale=SceneScaleConfig(scale_xy=1.0, scale_z=1.0)))
+    ft_sc = process_frame(g, ctx, robot, f=0,
+                          cfg=TargetsConfig(scene_scale=SceneScaleConfig(scale_xy=2.0, scale_z=2.0)))
+    a = np.asarray(ft_id.robot_interaction.field.active[0])           # canal sol = index 0
+    did = np.asarray(ft_id.robot_interaction.field.distance[0])
+    dsc = np.asarray(ft_sc.robot_interaction.field.distance[0])
+    assert a.any()                                                    # sol actif (corps dans la marge)
+    np.testing.assert_allclose(dsc[a], did[a] * 2.0, atol=1e-9)       # hauteur scalée par s_z
+    # z du witness reste sur le plan (ground_height 0) -> invariant
+    wid = np.asarray(ft_id.robot_interaction.field.witness[0])
+    wsc = np.asarray(ft_sc.robot_interaction.field.witness[0])
+    np.testing.assert_allclose(wsc[a][:, 2], wid[a][:, 2], atol=1e-9)
+
+
 def test_frame_targets_rejects_object_pose_count_mismatch():
     from src.targets.contracts import (EnvironmentInteractionTargets, FrameTargets,
                                         MultiChannelField, RobotInteractionTargets, StyleTargets)
