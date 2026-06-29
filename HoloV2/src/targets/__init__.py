@@ -7,7 +7,7 @@ Import these from the PACKAGE (``from ..targets import ...``), never from the in
 ``targets.interaction`` submodule. It consumes the upstream ``prepare`` contracts; ``solve`` and
 ``viz`` import their inputs from ``targets.contracts``.
 """
-from .interaction import eval_fields, pose_cloud
+from .interaction import eval_fields, pose_cloud, geo_value_grad, nearest_index
 from .contracts import MultiChannelField
 
-__all__ = ["pose_cloud", "eval_fields", "MultiChannelField"]
+__all__ = ["pose_cloud", "eval_fields", "MultiChannelField", "geo_value_grad", "nearest_index"]

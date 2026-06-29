@@ -5,6 +5,8 @@ from .pointclouds import pose_cloud
 from .eval import eval_fields
 from .transport import transport
 from .targets import environment_interaction_targets, robot_interaction_targets
+from .geodesic import geo_value_grad, nearest_index
 
 __all__ = ["pose_cloud", "eval_fields", "transport",
-           "robot_interaction_targets", "environment_interaction_targets"]
+           "robot_interaction_targets", "environment_interaction_targets",
+           "geo_value_grad", "nearest_index"]
