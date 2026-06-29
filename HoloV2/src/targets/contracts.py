@@ -103,7 +103,10 @@ class EnvironmentInteractionTargets:
 
     First-class solve input for the OBJECT-AS-VARIABLE terms: when the object is a decision variable,
     these scene-side contacts (object vs ground, object vs other objects, in object-local frame) drive
-    its consistency. Same eval matrix as the human side (cheap, homogeneous)."""
+    its consistency. Same eval matrix as the human side (cheap, homogeneous), with ONE extra term the
+    human side lacks: the DIAGONAL (object i vs its OWN channel i). The cloud sits on its own surface
+    there, so it is filled with the closed-form self-contact (distance 0, witness = the point itself;
+    see ``eval_fields`` ``self_idx``), NOT a real sample — the solve ignores that diagonal channel."""
 
     per_object: tuple[MultiChannelField, ...]  # one per object cloud
 

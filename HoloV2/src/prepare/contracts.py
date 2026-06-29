@@ -161,8 +161,8 @@ class RawMotion:
     """Output of a ``prepare/load/`` dataset loader — uniform across formats, BEFORE
     calibration. Every current loader is PARAMETRIC (fills ``smpl_params``); the ``| None`` is a
     structural provision for a future positions-only source, NOT an active path. When
-    ``smpl_params is None`` there is no body mesh to sample, so only the STYLE treatment would run
-    (no interaction) — see ``is_parametric``."""
+    ``smpl_params is None`` there is no body to pose, and the bone-based ``targets`` pipeline (style +
+    interaction both need the body's FK) does not run — see ``is_parametric``."""
 
     joint_pos: np.ndarray                 # (T, J_demo, 3) world joint positions (always present)
     joint_names: tuple[str, ...]          # (J_demo,)
@@ -229,9 +229,11 @@ class GroundedScene:
     ``BodyModel`` PROTOCOL, so ``targets`` calls it while staying torch-free at import (torch is
     hidden inside the instance, built once in ``prepare``). Object meshes stay mesh PATHS, NOT live
     geometry — the asymmetry is principled: the human DEFORMS (needs per-frame FK), objects are RIGID
-    (a pose7 + the pre-sampled object cloud suffice). ``style`` ignores the body (it tracks the demo
-    joints); ``solve`` never sees a ``GroundedScene`` (it consumes ``FrameTargets``) — so no heavy
-    object reaches them. ``body is None`` <=> a positions-only source (no SMPL params, style-only)."""
+    (a pose7 + the pre-sampled object cloud suffice). ``style`` also reads the body (it tracks the SMPL
+    BONES, not the demo joints); ``solve`` never sees a ``GroundedScene`` (it consumes ``FrameTargets``)
+    — so no heavy object reaches it. ``body is None`` <=> a positions-only source (no SMPL params): a
+    STRUCTURAL placeholder, not a wired path — the ``targets`` pipeline is bone-based (style + cloud
+    posing both need the body's FK) and raises on ``body is None``."""
 
     joint_pos: np.ndarray                  # (T, J_demo, 3) grounded demo joints — style
     joint_names: tuple[str, ...]           # (J_demo,)

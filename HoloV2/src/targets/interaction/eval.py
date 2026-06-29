@@ -8,6 +8,11 @@ flat-ground special case (the flat ground is an exact plane SDF) — and the con
 reconstructed from the trilinearly interpolated witness (stable at box edges/corners). Pure,
 array-oriented (axis = points), torch-free. Ported from HoloNew ``contact/contact_field`` +
 ``contact/combined`` + ``backends/floor``.
+
+The matrix diagonal (an OBJECT cloud vs its OWN channel) is the one exception: there the cloud sits on
+its own surface, a degenerate self-contact, so ``self_idx`` short-circuits it to the closed form
+(distance 0, witness = the point itself) WITHOUT sampling the SDF — keeping the ``(C, P)`` layout
+homogeneous while letting the downstream solve ignore that diagonal cheaply.
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from ...prepare.contracts import Channel, SDF
 
 
 def eval_fields(points: np.ndarray, channels: tuple[Channel, ...], object_rot: np.ndarray,
-                object_pos: np.ndarray, margin: float) -> MultiChannelField:
+                object_pos: np.ndarray, margin: float, self_idx: int | None = None) -> MultiChannelField:
     """``(C, P)`` field of ``points`` (``(P, 3)`` world) vs every ``Channel``.
 
     ``object_rot (N, 3, 3)`` / ``object_pos (N, 3)`` are the per-frame object world transforms (from
@@ -26,9 +31,16 @@ def eval_fields(points: np.ndarray, channels: tuple[Channel, ...], object_rot: n
     ``(object_rot[i], object_pos[i])`` as its frame, a channel with ``object_idx is None`` uses the
     world frame (ground). A probe is ``active`` within ``margin`` of the surface; inactive probes
     carry ``distance = +margin`` and zeroed direction/witness, so the output is homogeneous ``(C, P)``.
+
+    ``self_idx`` is the object index of the cloud being evaluated (its OWN object), or ``None`` for a
+    cloud that is no object (the human). When a channel's ``object_idx == self_idx`` the cloud sits on
+    its OWN surface, so the field is closed-form — distance 0, witness = the point itself (object-local),
+    zero normal, active everywhere — and is filled DIRECTLY without sampling that SDF (skipping the
+    degenerate self round-trip). The diagonal of the object×channel matrix; the human side has none.
     """
     pts = np.asarray(points, np.float64)                            # (P, 3) world probe positions
     margin = float(margin)
+    p = len(pts)
 
     dist_ch, dir_ch, wit_ch, act_ch = [], [], [], []
     for ch in channels:
@@ -39,15 +51,27 @@ def eval_fields(points: np.ndarray, channels: tuple[Channel, ...], object_rot: n
             pos = np.asarray(object_pos[ch.object_idx], np.float64)  # (3,)   object world position
             probe = (pts - pos) @ rot                              # (P, 3) = R.T @ (p - t), object-local
 
+        if self_idx is not None and ch.object_idx == self_idx:
+            # Self channel: this cloud IS object ``self_idx``, so every probe lies on its own surface.
+            # Closed-form fill (no SDF sample): distance 0, witness = the probe itself (object-local),
+            # no contact normal, active everywhere (on-surface => within margin).
+            dist_ch.append(np.zeros(p))                            # (P,)
+            dir_ch.append(np.zeros((p, 3)))                       # (P, 3) no normal on self
+            wit_ch.append(probe)                                  # (P, 3) own point, object-local
+            act_ch.append(np.ones(p, bool))                       # (P,)
+            continue
+
         dist, witness, in_grid = _sample(ch.sdf, probe)            # (P,), (P, 3), (P,) — local frame
         active = in_grid & (dist < margin)                         # (P,) within the band AND in grid
 
         delta = probe - witness                                    # (P, 3) surface -> point, channel frame
         norm = np.linalg.norm(delta, axis=1, keepdims=True)        # (P, 1)
         # Direction from the (interpolated) stored witness, NOT a distance gradient: a true unit
-        # vector even at box edges/corners. The 1e-6 guard zeroes it where probe == witness
-        # (on-surface) and absorbs the float32 witness round-trip residual there.
-        direction = np.where(norm > 1e-6, delta / norm, 0.0)       # (P, 3) unit contact normal
+        # vector even at box edges/corners. The guarded denominator (1.0 where on-surface) avoids a
+        # 0/0 warning; ``where`` still zeroes the direction where probe == witness (on-surface) and
+        # absorbs the float32 witness round-trip residual there.
+        den = np.where(norm > 1e-6, norm, 1.0)                     # (P, 1) safe divisor
+        direction = np.where(norm > 1e-6, delta / den, 0.0)        # (P, 3) unit contact normal
 
         # Homogenise the (C, P) layout: inactive probes carry distance=+margin, zeroed dir/witness.
         dist_ch.append(np.where(active, dist, margin))             # (P,)

@@ -6,6 +6,8 @@ IN that local frame (no world round-trip).
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
@@ -104,6 +106,56 @@ def test_inactive_probe_is_zeroed():
     assert field.distance[0, 1] == margin             # inactive distance clamps to +margin
     assert np.allclose(field.direction[0, 1], 0.0)    # zeroed
     assert np.allclose(field.witness[0, 1], 0.0)      # zeroed
+
+
+def test_self_channel_is_short_circuited_not_sampled():
+    """A cloud evaluated against ITS OWN object channel (``self_idx``) sits on its own surface: the
+    field is the closed form (distance 0, witness = the point itself in object-local, zero normal,
+    active everywhere) WITHOUT sampling the SDF. Proof the SDF is bypassed: place the object FAR from
+    the self-SDF grid, so a real trilinear sample would be out-of-grid -> inactive (distance=margin).
+    Getting distance=0 / active instead can only mean the short-circuit ran."""
+    margin = 0.1
+    sdf = build_plane_sdf([-0.5, -0.5], [0.5, 0.5], spacing=0.1, margin=margin, name="obj0")
+    ch = Channel("obj0", 0, sdf)
+    rot = R.from_rotvec([0.2, -0.5, 0.9]).as_matrix()       # arbitrary object world rotation
+    pos = np.array([10.0, -7.0, 3.0])                       # object FAR from the self-SDF grid
+    object_rot, object_pos = rot[None], pos[None]
+
+    # rest cloud (object-local), pushed to world via the object pose.
+    p_local = np.array([[0.1, 0.2, 0.05], [-0.3, 0.0, 0.4], [0.0, 0.0, 0.0]])
+    p_world = p_local @ rot.T + pos
+    field = eval_fields(p_world, (ch,), object_rot, object_pos, margin, self_idx=0)
+
+    assert np.allclose(field.distance[0], 0.0)              # on its own surface
+    assert np.allclose(field.witness[0], p_local, atol=1e-6)  # own point, in object-local frame
+    assert np.allclose(field.direction[0], 0.0)            # no contact normal on self
+    assert field.active[0].all()                            # on-surface => within margin
+
+
+def test_non_self_object_channel_still_sampled_with_self_idx():
+    """With ``self_idx`` set, a DIFFERENT object channel (idx != self_idx) is still sampled normally —
+    only the matching diagonal is short-circuited."""
+    margin = 0.1
+    sdf = build_plane_sdf([-0.5, -0.5], [0.5, 0.5], spacing=0.1, margin=margin, name="obj1")
+    ch = Channel("obj1", 1, sdf)                            # channel 1, but we evaluate cloud self_idx=0
+    object_rot = np.tile(np.eye(3), (2, 1, 1))
+    object_pos = np.zeros((2, 3))
+    p_world = np.array([[0.1, 0.2, 0.05]])                  # z=0.05 < margin over the z=0 plane
+    field = eval_fields(p_world, (ch,), object_rot, object_pos, margin, self_idx=0)
+    assert np.isclose(field.distance[0, 0], 0.05, atol=1e-5)   # sampled, not short-circuited
+    assert np.allclose(field.witness[0, 0], [0.1, 0.2, 0.0], atol=1e-5)
+
+
+def test_on_surface_probe_emits_no_divide_warning():
+    """On-surface probes (probe == witness) must not trigger a 0/0 RuntimeWarning in the direction
+    reconstruction (the denominator is guarded). Direction is zeroed there as before."""
+    margin = 0.1
+    ch = _ground_channel(margin)
+    points = np.array([[0.1, 0.2, 0.0], [0.0, 0.0, 0.0]])   # exactly on the z=0 surface
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")                     # any warning becomes an error
+        field = eval_fields(points, (ch,), _NO_OBJ_ROT, _NO_OBJ_POS, margin)
+    assert np.allclose(field.direction[0], 0.0)            # on-surface -> zero normal
 
 
 def test_output_is_channel_first():

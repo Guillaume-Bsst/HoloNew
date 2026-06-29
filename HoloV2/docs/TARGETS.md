@@ -8,9 +8,10 @@ sont statiques (prepare) → coût minimal.
 Les types de l'étage `targets` vivent dans **`targets/contracts.py`** (ContactField, MultiChannelField,
 StyleTargets, Robot/EnvironmentInteractionTargets, FrameTargets, FramePose, FrameTrace). Ce module
 **importe la sortie publique de prepare** (`from ..prepare.contracts import GroundedScene,
-InteractionContext`) — jamais les sous-modules internes de `prepare/`. `pipeline` prend exactement
-`(grounded, ctx, f)` (pas de bundle `prepared`, pas de `config` — le seul knob per-frame, `margin`,
-est dans le context). Ce que `targets` consomme en entrée :
+InteractionContext, RobotSpec`) — jamais les sous-modules internes de `prepare/`. `pipeline` prend
+`(grounded, ctx, robot, f)` (pas de bundle `prepared`, pas de `config`) : `robot` (`RobotSpec`) clé la
+table de style (`robot.name`, non atteignable via `ctx.robot` qui est un `RobotModel`) ; le seul knob
+per-frame, `margin`, est dans le context. Ce que `targets` consomme en entrée :
 - `GroundedScene` : motion calibrée (joints démo + params + poses objets / frame) + **`body`** (moteur
   de posage : `body.bone_transforms` → bone (R,t)) + `calibration` (provenance, via `grounded.calibration`)
 - `InteractionContext` : assets statiques (channels, human_cloud, object_clouds, correspondence ; + `scale`
@@ -42,11 +43,14 @@ GroundedScene[f] ─► FramePose(f) = bone (R,t)  +  object (R,t)   [calculé U
   monde de chaque part (humain : `BodyModel.bone_transforms` ; objet : sa pose `(R[None],t[None])` ;
   robot : FK des liens). MÊME fonction pour humain (K~4, parts=os) et objets (K=1, parts=corps).
   **Implémentée** (`targets/interaction/pointclouds.py`), vectorisée einsum, torch-free.
-- `eval_fields(points, channels, object_poses, margin) -> MultiChannelField` : pour chaque
-  `Channel`, transforme les points dans le frame du champ (identité si `object_idx is None`
-  = sol, sinon `object_poses[object_idx]`), puis `channel.field.sample_local(...)` -> empile.
+- `eval_fields(points, channels, object_rot, object_pos, margin, self_idx=None) -> MultiChannelField` :
+  pour chaque `Channel`, transforme les points dans le frame du champ (identité si `object_idx is None`
+  = sol, sinon `(object_rot[i], object_pos[i])`), puis échantillonne le SDF (trilinéaire) -> empile.
   MÊME fonction pour le nuage humain ET chaque nuage objet (matrice clouds×channels). La
-  liaison canal→pose est EXPLICITE (pas d'offset N vs N+1).
+  liaison canal→pose est EXPLICITE (pas d'offset N vs N+1). `self_idx` = l'index de l'objet du nuage
+  évalué (`None` pour l'humain) : la **diagonale** (nuage objet `i` vs SON canal `i`) est un
+  self-contact dégénéré, court-circuité à la forme close (distance 0, witness = le point lui-même)
+  SANS échantillonner le SDF — le `solve` ignorera cette diagonale à moindre coût.
 - `transport(human_field, correspondence) -> field` : gather des valeurs humaines sur les M
   points G1 (`smpl_idx`). Uniquement pour l'humain. (`RobotInteractionTargets` = field SEUL ;
   la liaison points↔liens, statique, est dans `InteractionContext.correspondence`.)

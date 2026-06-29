@@ -59,6 +59,13 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
     instrumentation (spans) lives here, in the orchestrator — the pure ops stay clean. ``robot`` keys
     the style table (and carries the robot identity); the morphological scale uses the subject's
     ``body.stature``."""
+    if grounded.body is None:
+        # The pipeline is bone-based: ``style`` tracks the SMPL bones and ``interaction`` poses the
+        # human cloud, both via the body's FK. A positions-only source (``body is None``) is a
+        # structural placeholder in the contract, not a wired path — fail explicitly here rather than
+        # with a bare ``AttributeError`` on ``grounded.body.stature``.
+        raise ValueError("targets pipeline requires a parametric body (GroundedScene.body): style is "
+                         "bone-based and interaction poses the SMPL cloud; positions-only is not wired")
     with prof.span("frame", f=f):
         with prof.span("pose"):
             pose = frame_pose(grounded, f)
@@ -72,8 +79,8 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
         with prof.span("interaction.eval", n_channels=len(ctx.channels), n_points=ctx.human_cloud.n_points):
             human_field = eval_fields(human_world, ctx.channels, pose.object_rot, pose.object_pos, ctx.margin)
             object_fields = tuple(
-                eval_fields(ow, ctx.channels, pose.object_rot, pose.object_pos, ctx.margin)
-                for ow in object_worlds)
+                eval_fields(ow, ctx.channels, pose.object_rot, pose.object_pos, ctx.margin, self_idx=i)
+                for i, ow in enumerate(object_worlds))
         with prof.span("interaction.transport"):
             robot_field = transport(human_field, ctx.correspondence)
         targets = FrameTargets(

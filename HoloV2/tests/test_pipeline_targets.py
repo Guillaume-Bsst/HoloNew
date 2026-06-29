@@ -26,7 +26,7 @@ class _Body22:
         return rot, pos
 
 
-def _ctx(n_obj):
+def _ctx(n_obj, obj_off_z=0.0):
     margin = 0.1
     channels = [Channel("ground", None,
                         build_plane_sdf([-1.0, -1.0], [1.0, 1.0], spacing=0.1, margin=margin,
@@ -37,8 +37,11 @@ def _ctx(n_obj):
                                                 name=f"obj{i}")))
     human = PointCloud(parts=np.zeros((5, 1), np.int64), weights=np.ones((5, 1), np.float32),
                        offsets=np.zeros((5, 1, 3), np.float32), sampling_id="s")
+    # obj_off_z lifts the object cloud OFF its own (thin, z~0) plane SDF: with a real sample the self
+    # channel would fall out of grid (inactive), so only the short-circuit yields distance 0 / active.
+    obj_off = np.zeros((3, 1, 3), np.float32); obj_off[:, :, 2] = obj_off_z
     obj_clouds = tuple(PointCloud(parts=np.zeros((3, 1), np.int64), weights=np.ones((3, 1), np.float32),
-                                  offsets=np.zeros((3, 1, 3), np.float32)) for _ in range(n_obj))
+                                  offsets=obj_off.copy()) for _ in range(n_obj))
     corr = CorrespondenceTable(smpl_idx=np.array([0, 1, 2, 3]), link_idx=np.zeros(4, np.int64),
                                offset_local=np.zeros((4, 3)), link_names=("root",),
                                smpl_sampling_id="s")
@@ -66,6 +69,36 @@ def test_frame_targets_carry_object_poses_from_frame_pose():
     assert np.allclose(ft.object_rot, pose.object_rot)
     assert np.allclose(ft.object_pos, pose.object_pos)
     assert np.allclose(ft.object_pos[0], [0.2, 0.3, 0.5])           # the grounded object position
+
+
+def test_process_frame_requires_parametric_body():
+    """The targets pipeline is bone-based (style + cloud posing both need the SMPL body), so a
+    positions-only scene (``body is None``) is rejected with an explicit contract error — not a bare
+    ``AttributeError`` on ``grounded.body.stature``."""
+    g = _grounded(n_obj=1)
+    g = GroundedScene(joint_pos=g.joint_pos, joint_names=g.joint_names, object_poses=g.object_poses,
+                      object_mesh_paths=g.object_mesh_paths, calibration=g.calibration, fps=g.fps,
+                      smpl_params=None, body=None)          # positions-only
+    robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=(), dof=29, height=1.3)
+    with pytest.raises(ValueError, match="parametric body"):
+        process_frame(g, _ctx(n_obj=1), robot, f=0)
+
+
+def test_self_channel_short_circuited_in_env_targets():
+    """``_build_frame`` must pass ``self_idx=i`` so object cloud ``i``'s SELF channel (object_idx == i)
+    is the on-surface fill (distance 0, active), not an SDF sample. The clouds sit OFF their own SDF
+    grid (``obj_off_z``), so a real sample would be out-of-grid/inactive — only the wired short-circuit
+    gives distance 0."""
+    g, ctx = _grounded(n_obj=2), _ctx(n_obj=2, obj_off_z=5.0)
+    robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=(), dof=29, height=1.3)
+    ft = process_frame(g, ctx, robot, f=0)
+    # channels are (ground, obj0, obj1); object 0's self channel is index 1, object 1's is index 2.
+    f0 = ft.env_interaction.per_object[0]
+    assert np.allclose(f0.distance[1], 0.0) and f0.active[1].all()      # obj0 vs obj0 = self
+    f1 = ft.env_interaction.per_object[1]
+    assert np.allclose(f1.distance[2], 0.0) and f1.active[2].all()      # obj1 vs obj1 = self
+    # and a NON-self object channel is still a real sample: obj0's channel-2 (obj1) is off-grid -> inactive.
+    assert not f0.active[2].any()
 
 
 def test_frame_targets_rejects_object_pose_count_mismatch():
