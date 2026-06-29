@@ -1,4 +1,6 @@
-"""Style treatment: demo-joint posture tracking -> ``StyleTargets`` (provisional). See ``build.py``."""
+"""Style treatment: reference (``build``: demo joints -> StyleTargets) + evaluation
+(``style_eval``: robot FK @ q -> StyleEval). See ``build.py`` / ``eval.py``."""
 from .build import build
+from .eval import style_eval
 
-__all__ = ["build"]
+__all__ = ["build", "style_eval"]
