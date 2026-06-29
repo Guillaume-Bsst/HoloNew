@@ -89,6 +89,4 @@ def build(pose: FramePose, robot: RobotSpec, stature: float,
         position[i] = world_pos
         orientation[i] = _R_to_quat_wxyz(updated_rot)
 
-    for a in (position, orientation):
-        a.flags.writeable = False
     return StyleTargets(link_names=links, position=position, orientation=orientation)

@@ -34,6 +34,10 @@ class ContactField:
     witness: np.ndarray    # (P, 3)  nearest surface point
     active: np.ndarray     # (P,)    bool, within margin
 
+    def __post_init__(self) -> None:
+        for name in ("distance", "direction", "witness", "active"):
+            getattr(self, name).flags.writeable = False
+
 
 @dataclass(frozen=True)
 class MultiChannelField:
@@ -53,11 +57,22 @@ class MultiChannelField:
     channels: tuple[str, ...]    # (C,) channel names
 
     def __post_init__(self) -> None:
-        c = len(self.channels)
+        C = len(self.channels)
         for name in ("distance", "direction", "witness", "active"):
             got = getattr(self, name).shape[0]
-            if got != c:
-                raise ValueError(f"{name} has {got} channels, expected {c}")
+            if got != C:
+                raise ValueError(f"{name} has {got} channels, expected {C}")
+        if self.distance.ndim != 2:
+            raise ValueError(f"distance must be 2-D (C, P), got shape {self.distance.shape}")
+        P = self.distance.shape[1]
+        if self.active.shape != (C, P):
+            raise ValueError(f"active shape {self.active.shape} != ({C}, {P})")
+        if self.direction.shape != (C, P, 3):
+            raise ValueError(f"direction shape {self.direction.shape} != ({C}, {P}, 3)")
+        if self.witness.shape != (C, P, 3):
+            raise ValueError(f"witness shape {self.witness.shape} != ({C}, {P}, 3)")
+        for name in ("distance", "direction", "witness", "active"):
+            getattr(self, name).flags.writeable = False
 
     @property
     def n_channels(self) -> int:
@@ -85,6 +100,16 @@ class StyleTargets:
     link_names: tuple[str, ...]            # (L,)
     position: np.ndarray                   # (L, 3) world target per link
     orientation: np.ndarray | None = None  # (L, 4) wxyz, or None if position-only
+
+    def __post_init__(self) -> None:
+        L = len(self.link_names)
+        if self.position.shape != (L, 3):
+            raise ValueError(f"position shape {self.position.shape} != ({L}, 3)")
+        if self.orientation is not None and self.orientation.shape != (L, 4):
+            raise ValueError(f"orientation shape {self.orientation.shape} != ({L}, 4)")
+        self.position.flags.writeable = False
+        if self.orientation is not None:
+            self.orientation.flags.writeable = False
 
 
 @dataclass(frozen=True)
@@ -133,6 +158,8 @@ class FrameTargets:
             raise ValueError(
                 f"object poses ({self.object_rot.shape[0]} rot, {self.object_pos.shape[0]} pos) "
                 f"must match env_interaction.per_object count ({n})")
+        self.object_rot.flags.writeable = False
+        self.object_pos.flags.writeable = False
 
 
 # =============================================================================
@@ -148,6 +175,20 @@ class FramePose:
     bone_pos: np.ndarray    # (J_bones, 3)    SMPL bone world origins
     object_rot: np.ndarray  # (N, 3, 3) object world rotations
     object_pos: np.ndarray  # (N, 3)    object world positions
+
+    def __post_init__(self) -> None:
+        J = self.bone_rot.shape[0]
+        if self.bone_pos.shape != (J, 3):
+            raise ValueError(
+                f"bone_pos shape {self.bone_pos.shape} != ({J}, 3) — "
+                f"must match bone_rot leading dim")
+        N = self.object_rot.shape[0]
+        if self.object_pos.shape != (N, 3):
+            raise ValueError(
+                f"object_pos shape {self.object_pos.shape} != ({N}, 3) — "
+                f"must match object_rot leading dim")
+        for name in ("bone_rot", "bone_pos", "object_rot", "object_pos"):
+            getattr(self, name).flags.writeable = False
 
 
 @dataclass(frozen=True)
@@ -192,6 +233,8 @@ class StyleEval:
         nv = self.jac_pos.shape[2]
         if self.jac_rot.shape != (L, 3, nv):
             raise ValueError(f"jac_rot shape {self.jac_rot.shape} != jac_pos ({L}, 3, {nv})")
+        for name in ("position", "rotation", "jac_pos", "jac_rot"):
+            getattr(self, name).flags.writeable = False
 
 
 @dataclass(frozen=True)
@@ -211,6 +254,8 @@ class ContactEnvEval:
             raise ValueError(f"cloud_jac_self shape {self.cloud_jac_self.shape} != ({P}, 3, 6)")
         if self.probe_jac_obj.shape != (C, P, 3, 6):
             raise ValueError(f"probe_jac_obj shape {self.probe_jac_obj.shape} != ({C}, {P}, 3, 6)")
+        self.cloud_jac_self.flags.writeable = False
+        self.probe_jac_obj.flags.writeable = False
 
 
 @dataclass(frozen=True)
@@ -232,3 +277,5 @@ class ContactEval:
             raise ValueError(f"point_jac shape {self.point_jac.shape} != ({M}, 3, nv)")
         if self.probe_jac_obj.shape != (C, M, 3, 6):
             raise ValueError(f"probe_jac_obj shape {self.probe_jac_obj.shape} != ({C}, {M}, 3, 6)")
+        self.point_jac.flags.writeable = False
+        self.probe_jac_obj.flags.writeable = False

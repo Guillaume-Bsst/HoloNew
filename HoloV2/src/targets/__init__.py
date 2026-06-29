@@ -6,8 +6,11 @@ references ``FrameTargets``/``FrameTrace`` + eval ``StyleEval``/``ContactEval``/
 ``targets.config`` (its knobs — ``TargetsConfig`` / ``StyleConfig``), the pure interaction kernel
 reused by ``solve`` (``pose_cloud`` / ``eval_fields`` -> ``MultiChannelField``, plus the geodesic
 readers), AND the ``Evaluator`` (built once from ``InteractionContext``, evaluates ``(q, object_poses)``
--> current geometry + Jacobians). Import these from the PACKAGE (``from ..targets import ...``), never
-from the internal ``targets.interaction`` submodule. It consumes the upstream ``prepare`` contracts;
+-> current geometry + Jacobians). Import the pure kernels, ``Evaluator``, and the data types from the
+PACKAGE (``from ..targets import ...``), rather than from the internal ``targets.interaction``
+submodule. ``targets.pipeline`` (``process_frame`` / ``trace_frame`` / ``run_sequence``) is the
+per-frame orchestrator entry point — a legitimate consumer target for ``viz`` (which imports
+``trace_frame`` directly) and the top-level run loop. It consumes the upstream ``prepare`` contracts;
 ``solve`` and ``viz`` import their inputs from ``targets.contracts``.
 """
 from .interaction import eval_fields, pose_cloud, geo_value_grad, nearest_index

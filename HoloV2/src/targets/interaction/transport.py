@@ -33,7 +33,5 @@ def transport(human_field: MultiChannelField, correspondence: CorrespondenceTabl
     witness = np.asarray(human_field.witness)[:, smpl_idx]           # (C, M, 3)
     active = np.asarray(human_field.active, dtype=bool)[:, smpl_idx]  # (C, M)
 
-    for a in (distance, direction, witness, active):
-        a.flags.writeable = False
     return MultiChannelField(distance=distance, direction=direction, witness=witness,
                              active=active, channels=human_field.channels)

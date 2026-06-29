@@ -31,6 +31,11 @@ class Evaluator:
         self._ctx = ctx
         self._robot = ctx.robot
         self._style_links: tuple[str, ...] = tuple(style_table(robot_name).keys())  # = StyleTargets order
+        missing = [n for n in self._style_links if n not in ctx.robot.link_names]
+        if missing:
+            raise ValueError(
+                f"style links absent de robot.link_names : {missing!r} — "
+                f"vérifier que robot_name={robot_name!r} correspond au bon modèle")
 
     def style(self, q: np.ndarray) -> StyleEval:
         """État courant (FK) + jacobiennes des links suivis à ``q``."""
