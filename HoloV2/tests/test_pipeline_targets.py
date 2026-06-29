@@ -112,6 +112,7 @@ def test_object_pos_scaled_by_scene():
     ft_native = process_frame(g, ctx, robot, f=0, cfg=identity)
     ft_scaled = process_frame(g, ctx, robot, f=0)                            # défaut None,None -> ratio
     np.testing.assert_allclose(ft_native.object_pos[0], [0.2, 0.3, 0.5], atol=1e-9)
+    # z scale uniforme par ratio car StyleConfig().ground_height == 0.0 (ancre sol = origine)
     np.testing.assert_allclose(ft_scaled.object_pos[0], np.array([0.2, 0.3, 0.5]) * ratio, atol=1e-9)
     np.testing.assert_array_equal(ft_scaled.object_rot, ft_native.object_rot)   # rotation inchangée
 

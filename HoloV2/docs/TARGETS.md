@@ -49,10 +49,14 @@ corrompue — une boîte scalée passerait sous la table → faux contact sol).
 - `style` : placement du root (`targets/scale.resolve_scale`) ; le morphologique `0.9/0.8` reste interne.
 - `interaction` : `object_pos` (trajectoire) + witness du canal **sol** (`targets/scale.apply_scene_scale`
   / `scale_ground_channels`) ; witness objet en frame local → suit la pose objet scalée.
+  **Note sol-plat :** le scale du witness sol est exact pour le plan SDF par défaut et pour un scale
+  isotrope ; pour un TERRAIN avec `s_xy != s_z`, le witness scalé devient approximatif — à revoir
+  quand le terrain sera câblé.
 - Défaut `None,None` → `ratio` partout ; `scale_xy=1.0, scale_z=None` = comportement natif.
 - Les packages d'**éval** (`evaluator`, `interaction/eval`, `style/eval`) ne sont PAS touchés
   (refs = sortie parallèle, cf. `evaluator.py`). Limitation : résidu de contact `(1-scale)·offset_objet`
-  (objet gardé à taille réelle).
+  (objet gardé à taille réelle) ; même résidu `(1-scale)·(offset inter-objet)` pour les contacts
+  objet↔objet (les objets gardent leur taille ET leur espacement relatif en frames locaux).
 
 ## 3 fonctions pures, réutilisées partout (homogénéité = anti-spaghetti)
 - `pose_cloud(PointCloud, part_rot, part_pos) -> (P,3)` :

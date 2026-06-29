@@ -38,7 +38,13 @@ def scale_ground_channels(field: MultiChannelField, ground_idx: tuple[int, ...],
     """Scale, pour les canaux SOL (frame monde, ``ground_idx``), le ``witness`` (similarité de scène)
     et la ``distance`` (= hauteur, ``*= s_z``) là où ``active``. Les canaux OBJET (witness local,
     qui suivent la pose objet scalée), ``direction`` et ``active`` sont inchangés. Retourne un nouveau
-    ``MultiChannelField`` (frozen)."""
+    ``MultiChannelField`` (frozen).
+
+    Hypothèse : SOL PLAT horizontal (witness sur le plan, normale +z). Exact pour le plan SDF par
+    défaut, et pour un scale isotrope autour de l'origine/sol même sur terrain. Pour un TERRAIN avec
+    un scale ANISOTROPE (``s_xy != s_z``), le witness scalé ne reste pas sur la surface et
+    ``distance *= s_z`` / ``direction`` inchangée deviennent approximatifs — à revoir quand le
+    terrain sera câblé."""
     distance = np.asarray(field.distance, np.float64).copy()           # (C, P)
     witness = np.asarray(field.witness, np.float64).copy()             # (C, P, 3)
     active = np.asarray(field.active, dtype=bool)                      # (C, P)
