@@ -121,6 +121,9 @@ class FrameTargets:
     style: StyleTargets
     robot_interaction: RobotInteractionTargets
     env_interaction: EnvironmentInteractionTargets
+    object_rot: np.ndarray                 # (N, 3, 3) per-frame object world rotations — solve's
+                                           # object-channel frame + the object-variable init/reference
+    object_pos: np.ndarray                 # (N, 3)    per-frame object world positions
 
 
 # =============================================================================

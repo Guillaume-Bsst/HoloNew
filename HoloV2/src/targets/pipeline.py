@@ -80,6 +80,8 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
             style=style_t,
             robot_interaction=robot_interaction_targets(robot_field),
             env_interaction=environment_interaction_targets(object_fields),
+            object_rot=pose.object_rot,
+            object_pos=pose.object_pos,
         )
         return pose, human_world, object_worlds, human_field, targets
 

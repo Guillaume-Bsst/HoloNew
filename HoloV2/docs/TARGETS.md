@@ -29,7 +29,11 @@ GroundedScene[f] ─► FramePose(f) = bone (R,t)  +  object (R,t)   [calculé U
                                           -> RobotInteractionTargets + EnvironmentInteractionTargets
         └──────────────────────────┬───────────────────────────┘
                                     ▼
-                               FrameTargets(style, robot_interaction, env_interaction)
+                               FrameTargets(style, robot_interaction, env_interaction,
+                                           object_rot, object_pos)
+                                   + object_rot/object_pos (poses objets de la frame)
+                                   pour que solve repose les canaux objets et initialise
+                                   les variables objet.
 ```
 
 ## 3 fonctions pures, réutilisées partout (homogénéité = anti-spaghetti)
