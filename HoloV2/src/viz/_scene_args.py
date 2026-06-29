@@ -29,14 +29,28 @@ def add_scene_args(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--object-names", default=None, help="comma-separated subset of objects to load")
 
 
+def _g1_robot() -> RobotSpec:
+    """Default G1 RobotSpec for the viz entry points (single-sourced URDF/DOF/height)."""
+    return RobotSpec(name="g1", urdf_path=paths.HOLOV2_ROOT / "models" / "g1" / "g1_29dof.urdf",
+                     link_names=("pelvis",), dof=29, height=1.3)
+
+
 def scene_from_args(a: argparse.Namespace, *, paths_file: Path | None = None) -> SceneSpec:
     """Build a fully-resolved SceneSpec, filling missing paths from paths.toml.
 
     Explicit CLI args always win; paths.toml is read only when a default is needed (so fully
     explicit, absolute invocations work even without a paths.toml).
     """
-    need_cfg = (a.model_dir is None) or (a.dataset_root is None) or (not Path(a.motion_path).is_absolute())
-    cfg = paths.load_paths(paths_file) if need_cfg else {}
+    # paths.toml is only HARD-required when a default must come from it: a missing model-dir
+    # or a relative motion path. A missing --dataset-root degrades to None (see below), so it
+    # must NOT force the file — absolute invocations work with no paths.toml present.
+    hard_need = (a.model_dir is None) or (not Path(a.motion_path).is_absolute())
+    try:
+        cfg = paths.load_paths(paths_file)
+    except FileNotFoundError:
+        if hard_need:
+            raise
+        cfg = {}
 
     model_dir = a.model_dir if a.model_dir is not None else paths.smplx_dir(cfg)
     motion = paths.resolve_motion(a.dataset, a.motion_path, cfg)
@@ -48,8 +62,7 @@ def scene_from_args(a: argparse.Namespace, *, paths_file: Path | None = None) ->
             droot = None   # datasets without a configured root (e.g. hoim3) keep dataset_root unset
 
     objs = tuple(a.object_names.split(",")) if a.object_names else None
-    robot = RobotSpec(name="g1", urdf_path=paths.HOLOV2_ROOT / "models" / "g1" / "g1_29dof.urdf",
-                      link_names=("pelvis",), dof=29, height=1.3)
+    robot = _g1_robot()
     return SceneSpec(dataset=a.dataset, motion_path=motion, robot=robot,
                      smpl_model_dir=model_dir, dataset_root=droot,
                      person_id=a.person_id, object_names=objs)

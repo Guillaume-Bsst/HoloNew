@@ -46,3 +46,18 @@ def test_robot_urdf_is_real_repo_model(tmp_path):
     spec = scene_from_args(a, paths_file=_toml(tmp_path))
     assert spec.robot.urdf_path.name == "g1_29dof.urdf"
     assert spec.robot.urdf_path.is_absolute()
+
+
+def test_works_without_paths_toml_all_explicit():
+    a = _parse(["--dataset", "hodome", "--motion-path", "/abs/seq.npz",
+                "--model-dir", "/m", "--dataset-root", "/r"])
+    spec = scene_from_args(a, paths_file=Path("/nonexistent/paths.toml"))
+    assert spec.motion_path == Path("/abs/seq.npz")
+
+
+def test_works_without_paths_toml_when_dataset_root_omitted():
+    # absolute motion + explicit model-dir, no --dataset-root: must NOT require paths.toml
+    a = _parse(["--dataset", "hodome", "--motion-path", "/abs/seq.npz", "--model-dir", "/m"])
+    spec = scene_from_args(a, paths_file=Path("/nonexistent/paths.toml"))
+    assert spec.dataset_root is None
+    assert spec.smpl_model_dir == Path("/m")
