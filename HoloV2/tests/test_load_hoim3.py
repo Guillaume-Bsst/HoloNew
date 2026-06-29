@@ -7,12 +7,9 @@ import pytest
 from scipy.spatial.transform import Rotation as R
 
 from src.prepare.contracts import RobotSpec, SceneSpec
+from datapaths import HOIM3, SMPLX_MODELS as _SMPLX, SMPL2SMPLX as _DEFTRAFO
 
-_HUMAN = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/mocap_ground/"
-              "office_data05_human.npz")
-_SMPLX = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx")
-_DEFTRAFO = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/model_transfer/"
-                 "smpl2smplx_deftrafo_setup.pkl")
+_HUMAN = HOIM3 / "office_data05_human.npz"
 _YUP_TO_ZUP = np.array([[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]])
 
 

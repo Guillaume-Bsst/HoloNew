@@ -1,0 +1,23 @@
+# TEMPLATE — copy to `paths.toml` (gitignored) and edit for your machine. The single source of truth
+# for EXTERNAL dataset & model paths used by the test/eval suite. `~` is expanded. Repo-internal paths
+# (the V1 `HoloNew/src/test_socp` source, `HoloNew/demo_data`) are NOT here — they resolve relative to
+# the repo. Datasets you don't have on disk can stay as-is: the tests that need them skip when the path
+# is absent. Loaded by tests/datapaths.py.
+
+[models]
+smplx = "~/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx"
+smplh = "~/Documents/wbt_rl/data/00_raw_datasets/models/smplh"
+# smpl2smplx = "~/Documents/wbt_rl/data/00_raw_datasets/models/model_transfer/smpl2smplx_deftrafo_setup.pkl"  # HOI-M3
+
+[datasets.hodome]
+motion = "~/Documents/wbt_rl/data/00_raw_datasets/HODome"
+
+[datasets.sfu]
+motion = "~/Documents/wbt_rl/data/00_raw_datasets/SFU/SFU"
+
+[datasets.omomo]
+motion = "~/Documents/wbt_rl/data/00_raw_datasets/OMOMO_new/OMOMO_new"
+meta   = "~/Documents/wbt_rl/data/00_raw_datasets/OMOMO"
+
+[datasets.hoim3]
+motion = "~/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/mocap_ground"

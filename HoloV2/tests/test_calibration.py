@@ -12,6 +12,7 @@ from src.prepare import scene
 from src.prepare.calibration import (CalibrationBuilder, build_calibration,
                                         foot_floor_offset, object_floor_offset)
 from src.prepare.calibration.build import _foot_indices
+from datapaths import DEMO_DATA, SMPLX_MODELS as _SMPLX
 
 
 def _write_cube_obj(path: Path, half: float = 0.5) -> None:
@@ -142,9 +143,7 @@ def test_assemble_non_parametric_scene():
 
 
 # --------------------------------------------------------------------------- real data (skip if absent)
-_NPZ = Path("/home/vboxuser/Documents/wbt_rl/modules/01_retargeting/HoloNew/HoloNew/demo_data/"
-            "SFU/0005_2FeetJump001.npz")
-_SMPLX = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx")
+_NPZ = DEMO_DATA / "SFU" / "0005_2FeetJump001.npz"
 
 
 @pytest.mark.skipif(not (_NPZ.exists() and _SMPLX.is_dir()), reason="SFU data / SMPL-X model absent")

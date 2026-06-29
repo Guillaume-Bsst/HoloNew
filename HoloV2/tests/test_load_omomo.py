@@ -7,11 +7,9 @@ import numpy as np
 import pytest
 
 from src.prepare.contracts import RobotSpec, SceneSpec
+from datapaths import OMOMO_NEW, OMOMO as _ROOT, SMPLX_MODELS as _SMPLX
 
-_PT = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/OMOMO_new/OMOMO_new/"
-           "sub16_largetable_008.pt")
-_ROOT = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/OMOMO")
-_SMPLX = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx")
+_PT = OMOMO_NEW / "sub16_largetable_008.pt"
 
 
 def _spec() -> SceneSpec:

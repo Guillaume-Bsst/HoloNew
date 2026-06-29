@@ -6,10 +6,9 @@ import numpy as np
 import pytest
 
 from src.prepare.contracts import RobotSpec, SceneSpec
+from datapaths import DEMO_DATA, SMPLX_MODELS as _SMPLX
 
-_NPZ = Path("/home/vboxuser/Documents/wbt_rl/modules/01_retargeting/HoloNew/HoloNew/demo_data/"
-            "SFU/0005_2FeetJump001.npz")
-_SMPLX = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets/models/models_smplx_v1_1/models/smplx")
+_NPZ = DEMO_DATA / "SFU" / "0005_2FeetJump001.npz"
 
 
 @pytest.mark.skipif(not (_NPZ.exists() and _SMPLX.is_dir()), reason="SFU data / SMPL-X model absent")

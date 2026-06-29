@@ -11,9 +11,7 @@ from src.prepare.config import PrepareConfig
 from src.prepare.point_cloud.correspondence import build_correspondence
 from src.prepare.point_cloud.correspondence.segments import (
     link_to_segment, point_segments, seg_index)
-
-_DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
-_SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
+from datapaths import SMPLX_MODELS as _SMPLX
 _URDF = Path(__file__).resolve().parent.parent / "models" / "g1" / "g1_29dof.urdf"
 
 

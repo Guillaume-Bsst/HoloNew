@@ -25,6 +25,7 @@ from src.prepare.contracts import RobotSpec
 from src.targets.config import SMPL_BODY_INDEX, StyleConfig, style_table
 from src.targets.contracts import FramePose
 from src.targets import style
+from datapaths import HODOME as _HODOME, SMPLX_MODELS as _SMPLX, V1_TEST_SOCP as _V1
 
 _G1_LINKS = tuple(style_table("g1").keys())
 _CFG = StyleConfig()   # defaults: the morphological SCALE values + reference heights the test recomputes
@@ -112,7 +113,6 @@ def test_style_unknown_robot_raises():
 
 
 # --------------------------------------------------------------------------- V1 parity
-_V1 = Path(__file__).resolve().parents[2] / "HoloNew" / "src" / "test_socp"  # repo-relative (was hardcoded)
 
 
 def _load_v1_preprocess():
@@ -157,9 +157,6 @@ def test_style_matches_v1_scale_offset():
 
 
 # --------------------------------------------------------------------------- real-data structural
-_DATA = Path.home() / "Documents" / "wbt_rl" / "data" / "00_raw_datasets"  # machine-agnostic (was hardcoded)
-_HODOME = _DATA / "HODome"
-_SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
 _CORR = Path(__file__).resolve().parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
 
 

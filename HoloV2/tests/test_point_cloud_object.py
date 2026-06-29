@@ -12,10 +12,7 @@ from src.prepare.point_cloud import (assemble_rigid_cloud, build_object_cloud,
                                         sample_object_surface)
 from src.prepare.point_cloud.objects import ObjectCloudBuilder
 from src.targets.interaction import pose_cloud
-
-_DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
-_HODOME = _DATA / "HODome"
-_SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
+from datapaths import HODOME as _HODOME, SMPLX_MODELS as _SMPLX
 
 
 def test_assemble_rigid_cloud_is_k1_and_poses_rigidly():

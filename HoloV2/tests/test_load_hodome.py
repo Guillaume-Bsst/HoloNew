@@ -6,10 +6,7 @@ import numpy as np
 import pytest
 
 from src.prepare.contracts import RobotSpec, SceneSpec
-
-_DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
-_HODOME = _DATA / "HODome"
-_SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
+from datapaths import HODOME as _HODOME, SMPLX_MODELS as _SMPLX
 
 
 def _pick_sequence() -> Path | None:

@@ -14,10 +14,7 @@ from src.prepare.config import CloudConfig
 from src.prepare.point_cloud import HumanCloudBuilder, build_human_cloud
 from src.prepare.point_cloud.correspondence import load_correspondence
 from src.targets.interaction import pose_cloud
-
-_DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
-_HODOME = _DATA / "HODome"
-_SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
+from datapaths import HODOME as _HODOME, SMPLX_MODELS as _SMPLX
 _CORR = Path(__file__).resolve().parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
 
 

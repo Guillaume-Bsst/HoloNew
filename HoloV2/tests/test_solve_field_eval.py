@@ -13,10 +13,7 @@ from src.prepare.contracts import RobotSpec, SceneSpec
 from src.prepare.runner import prepare
 from src.targets import MultiChannelField, eval_fields, pose_cloud
 from src.targets.pipeline import process_frame
-
-_DATA = Path.home() / "Documents" / "wbt_rl" / "data" / "00_raw_datasets"  # machine-agnostic (was hardcoded)
-_HODOME = _DATA / "HODome"
-_SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
+from datapaths import HODOME as _HODOME, SMPLX_MODELS as _SMPLX
 _CORR = Path(__file__).resolve().parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
 _URDF = Path(__file__).resolve().parent.parent / "models" / "g1" / "g1_29dof.urdf"
 
