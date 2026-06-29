@@ -115,7 +115,8 @@ def main() -> None:
     try:
         cfg = paths.load_paths()
     except FileNotFoundError:
-        if a.model_dir is None:
+        # paths.toml only HARD-required for a default: missing model-dir or a relative motion.
+        if a.model_dir is None or not Path(a.motion_path).is_absolute():
             raise
         cfg = {}
     model_dir = a.model_dir if a.model_dir is not None else paths.smplx_dir(cfg)
