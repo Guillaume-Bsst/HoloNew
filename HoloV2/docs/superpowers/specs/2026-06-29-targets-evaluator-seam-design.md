@@ -153,8 +153,9 @@ class ContactEval:
     `field` suit la convention MultiChannelField (sol en monde, canal objet en objet-local)."""
     field: MultiChannelField   # (C, M) : distance/witness/direction/active courants
     point_jac: np.ndarray    # (M, 3, nv) ∂(point robot monde)/∂v
-    probe_jac_obj: np.ndarray  # (C, M, 6) ∂(probe dans le frame canal)/∂(tangente de l'objet du canal) ;
-                               #   lignes du canal sol = 0 ; canal c → objet channels[c].object_idx (creux)
+    probe_jac_obj: np.ndarray  # (C, M, 3, 6) ∂(probe dans le frame canal)/∂(tangente SE(3) de l'objet
+                               #   du canal) ; lignes du canal sol = 0 ; canal c → objet
+                               #   channels[c].object_idx (creux). Tangente (δt, δθ) world-aligned.
     env: tuple["ContactEnvEval", ...]  # côté environnement, un par nuage objet
 
 @dataclass(frozen=True)
@@ -163,7 +164,7 @@ class ContactEnvEval:
     Diagonale self-contact déjà neutralisée par eval_fields (self_idx)."""
     field: MultiChannelField   # (C, P_i)
     cloud_jac_self: np.ndarray # (P_i, 3, 6) ∂(point du nuage objet i, monde)/∂(tangente objet i)
-    probe_jac_obj: np.ndarray  # (C, P_i, 6) ∂(probe dans le frame canal)/∂(tangente de l'objet du canal)
+    probe_jac_obj: np.ndarray  # (C, P_i, 3, 6) ∂(probe dans le frame canal)/∂(tangente SE(3) de l'objet du canal)
 ```
 
 **Convention de repère** (le point critique côté coûts) : `field` (donc `direction` = normale,
@@ -173,10 +174,15 @@ référence** (`FrameTargets`), donc directement comparable canal-par-canal. `po
 (jacobienne géométrique correspondante)` — contraction triviale faite par `solve`, qui choisit la
 forme exacte du résidu (scalaire distance, witness-plane, contact dur…).
 
-> **Note d'implémentation (raffinée dans le plan)** : la convention de tangente `SE(3)` (body/LOCAL
-> vs spatial) suit pinocchio (`LOCAL` free-flyer), appliquée **uniformément** à la base robot et aux
-> objets. Les formules exactes `∂x/∂δξ` (probe dans frame canal) et `point_jac` (link Jac translatée
-> au point de contrôle : `J_lin − [R·offset]_× J_ang`) sont figées dans le plan.
+> **Note d'implémentation (figée)** : convention de tangente **world-aligned**, cohérente avec
+> pinocchio `LOCAL_WORLD_ALIGNED` (axes monde). Formules :
+> - **Robot** (point de contrôle, offset `o` local sur link `R,t`) : `point_jac = J_lin − [R·o]_× J_ang`.
+> - **Objet, probe** `x = R_iᵀ(p − t_i)` vs tangente `δξ_i = (δt, δθ)` monde :
+>   `∂x/∂δt = −R_iᵀ`, `∂x/∂δθ = R_iᵀ [p − t_i]_×`.
+> - **Objet, nuage propre** `p = t_i + R_i o` : `∂p/∂δt = I₃`, `∂p/∂δθ = −[p − t_i]_×`.
+>
+> (`[a]_×` = matrice antisymétrique de `a`.) Le `∂distance/∂var = direction(field)ᵀ · (jac géométrique)`
+> reste une contraction côté `solve`.
 
 ## Changements `prepare`
 
