@@ -56,18 +56,33 @@ class BodyModel(Protocol):
 
 @runtime_checkable
 class RobotModel(Protocol):
-    """Robot kinematics. Rest transforms (q-independent) are used by ``prepare`` to sample
-    the G1 surface / build the correspondence; full FK (q-dependent) is used by ``solve``.
-    Concrete impl in a kinematics module."""
+    """Robot kinematics. Rest transforms (q-independent) are used by ``prepare`` to sample the G1
+    surface / build the correspondence; full FK + Jacobians (q-dependent) are used by ``solve`` via the
+    ``targets`` evaluator. Configuration ``q`` is a pinocchio FREE-FLYER vector
+    ``[pelvis(7: pos + quat xyzw), joints]`` of length ``nq``; the tangent ``v`` has dim
+    ``nv = 6 + n_joints``. Concrete impl in ``prepare/load/robot.py`` (pinocchio)."""
 
     link_names: tuple[str, ...]
-    dof: int
+    dof: int          # actuated joints (= nv - 6)
+    nq: int           # configuration dim (free-flyer)
+    nv: int           # tangent dim (= 6 + dof)
 
-    def link_transforms(self, qpos: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """(L,3,3) rotations, (L,3) positions: world transform of each link for ``qpos``."""
+    def link_transforms(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """(L,3,3) rotations, (L,3) positions: WORLD transform of each link for ``q`` (free-flyer)."""
 
     def rest_transforms(self) -> tuple[np.ndarray, np.ndarray]:
-        """Link transforms at the rest configuration."""
+        """Link transforms at the neutral configuration (base identity, joints 0)."""
+
+    def neutral(self) -> np.ndarray:
+        """Neutral configuration ``(nq,)`` (base identity with unit quaternion, joints 0)."""
+
+    def integrate(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
+        """Manifold step ``q ⊕ v`` ``(nq,)`` (keeps the base quaternion unit)."""
+
+    def link_jacobians(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """For ``q``: (rot (L,3,3), pos (L,3), jac_lin (L,3,nv), jac_ang (L,3,nv)) in the WORLD frame,
+        aligned with ``link_names``. ``jac_lin``/``jac_ang`` are the LOCAL_WORLD_ALIGNED translational
+        / angular frame Jacobians: ``dp_world = jac_lin @ v``, ``omega_world = jac_ang @ v``."""
 
 
 class AssetBuilder(Protocol):
