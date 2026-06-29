@@ -134,3 +134,27 @@ def test_prepare_output_flows_through_interaction_ops(prepared):
     assert robot_field.active.shape == (C, M)
     assert np.isfinite(robot_field.distance).all()
     assert np.isfinite(robot_field.direction).all()
+
+
+# --------------------------------------------------------------------------- case 4: mesh loaded once
+@_SKIP
+def test_prepare_loads_each_object_mesh_once(tmp_path, monkeypatch):
+    """Each object mesh is read exactly ONCE per prepare (shared by the SDF/geodesic channel build and
+    the object-cloud build), not twice. ``load_mesh`` runs even on a warm cache (it feeds the geometry
+    cache key), so the count holds regardless of cache state. Flat ground => no ground mesh load."""
+    from src.prepare import runner as _runner
+    calls = []
+    real = _runner.load_mesh
+    monkeypatch.setattr(_runner, "load_mesh", lambda p: (calls.append(Path(p)), real(p))[1])
+
+    cache = tmp_path / "c"
+    (cache / "correspondence").mkdir(parents=True, exist_ok=True)
+    shutil.copy(_CORR, cache / "correspondence" / "corr_neutral.npz")
+    spec = SceneSpec(dataset="hodome", motion_path=_SEQ, robot=_robot(),
+                     smpl_model_dir=_SMPLX, cache_dir=cache)
+    g, _ = prepare(spec, PrepareConfig())
+
+    obj_paths = {Path(p) for p in g.object_mesh_paths}
+    obj_calls = [p for p in calls if p in obj_paths]
+    assert len(obj_calls) == g.n_objects                  # one load per object (not 2x)
+    assert len(set(obj_calls)) == g.n_objects             # each distinct path read once

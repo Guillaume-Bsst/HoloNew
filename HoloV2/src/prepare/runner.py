@@ -79,11 +79,14 @@ def _scene_xy_bounds(grounded: GroundedScene) -> tuple[np.ndarray, np.ndarray]:
 
 
 def _build_channels(grounded: GroundedScene, spec: SceneSpec, config: PrepareConfig,
-                    cache_dir: Path, prof, *, force: bool) -> tuple[Channel, ...]:
+                    cache_dir: Path, prof, *, force: bool,
+                    object_meshes: list[tuple[np.ndarray, np.ndarray]]) -> tuple[Channel, ...]:
     """The evaluation channels, ground FIRST (``channels[0]``): a flat plane SDF over the scene
     extent by default (analytic, NOT cached), or a cached terrain SDF when ``spec.ground_mesh_path``
     is set; then one cached object SDF per object, ``object_idx`` aligned 0..N-1 with the scene's
-    object order."""
+    object order. ``object_meshes`` (``(verts, faces)`` per object, loaded ONCE by the caller and
+    aligned with ``grounded.object_mesh_paths``) feeds both this build and the object-cloud build, so
+    each mesh is read once per ``prepare`` (the SDF and geodesic of one object share its geometry)."""
     sdf_builder = SdfBuilder()
     geo_builder = GeodesicBuilder()
     if spec.ground_mesh_path is None:
@@ -104,8 +107,7 @@ def _build_channels(grounded: GroundedScene, spec: SceneSpec, config: PrepareCon
             cache_dir, prof, force=force)
     channels = [Channel("ground", None, ground_sdf, geodesic=ground_geo)]
 
-    for i, mesh_path in enumerate(grounded.object_mesh_paths):
-        v, f = load_mesh(mesh_path)
+    for i, (v, f) in enumerate(object_meshes):
         sdf = _load_or_build(
             sdf_builder, "sdf", sdf_builder.cache_key(config.sdf, v, f),
             lambda v=v, f=f, i=i: sdf_builder.build(config.sdf, v, f, name=f"obj{i}"),
@@ -179,8 +181,13 @@ def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
         with prof.span("scene"):
             grounded = scene.assemble(raw, calib, body)
 
+        # Object meshes loaded ONCE here, then shared by the SDF/geodesic channel build AND the
+        # object-cloud build below — so each mesh file is read once per prepare (not twice).
+        object_meshes = [load_mesh(p) for p in grounded.object_mesh_paths]
+
         with prof.span("sdf+geodesic", n=grounded.n_objects + 1):
-            channels = _build_channels(grounded, spec, config, cache_dir, prof, force=force)
+            channels = _build_channels(grounded, spec, config, cache_dir, prof, force=force,
+                                       object_meshes=object_meshes)
 
         with prof.span("correspondence"):
             corr_table, sampling = _correspondence(spec, config, cache_dir, prof, force=force)
@@ -194,8 +201,7 @@ def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
                 cache_dir, prof, force=force)
             obj_builder = ObjectCloudBuilder()
             object_clouds = []
-            for mesh_path in grounded.object_mesh_paths:
-                v, f = load_mesh(mesh_path)
+            for v, f in object_meshes:
                 object_clouds.append(_load_or_build(
                     obj_builder, "cloud/object", obj_builder.cache_key(config.cloud, v, f),
                     lambda v=v, f=f: obj_builder.build(config.cloud, v, f),
