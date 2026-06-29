@@ -19,6 +19,7 @@ from ..obs import NULL
 from ..prepare.contracts import GroundedScene, InteractionContext, RobotSpec
 from .config import TargetsConfig
 from .contracts import FramePose, FrameTargets, FrameTrace
+from .scale import apply_scene_scale, resolve_scale
 from .interaction import (environment_interaction_targets, eval_fields, pose_cloud,
                           robot_interaction_targets, transport)
 from . import style
@@ -86,12 +87,16 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
                 for i, ow in enumerate(object_worlds))
         with prof.span("interaction.transport"):
             robot_field = transport(human_field, ctx.correspondence)
+        ratio = grounded.body.stature / cfg.style.human_height_assumption
+        s_xy, s_z = resolve_scale(cfg.scene_scale, ratio)
+        ground_h = cfg.style.ground_height
+        scaled_object_pos = apply_scene_scale(pose.object_pos, s_xy, s_z, ground_h)  # (N, 3) centre objet
         targets = FrameTargets(
             style=style_t,
             robot_interaction=robot_interaction_targets(robot_field),
             env_interaction=environment_interaction_targets(object_fields),
             object_rot=pose.object_rot,
-            object_pos=pose.object_pos,
+            object_pos=scaled_object_pos,
         )
         return pose, human_world, object_worlds, human_field, targets
 

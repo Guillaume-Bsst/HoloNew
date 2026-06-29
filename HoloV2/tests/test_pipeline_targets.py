@@ -61,9 +61,11 @@ def _grounded(n_obj, T=3):
 
 
 def test_frame_targets_carry_object_poses_from_frame_pose():
+    from src.targets.config import TargetsConfig, SceneScaleConfig
     g, ctx = _grounded(n_obj=2), _ctx(n_obj=2)
     robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=(), dof=29, height=1.3)
-    ft = process_frame(g, ctx, robot, f=1)
+    identity = TargetsConfig(scene_scale=SceneScaleConfig(scale_xy=1.0, scale_z=1.0))   # no-op
+    ft = process_frame(g, ctx, robot, f=1, cfg=identity)
     pose = frame_pose(g, f=1)
     assert ft.object_rot.shape == (2, 3, 3) and ft.object_pos.shape == (2, 3)
     assert np.allclose(ft.object_rot, pose.object_rot)
@@ -99,6 +101,19 @@ def test_self_channel_short_circuited_in_env_targets():
     assert np.allclose(f1.distance[2], 0.0) and f1.active[2].all()      # obj1 vs obj1 = self
     # and a NON-self object channel is still a real sample: obj0's channel-2 (obj1) is off-grid -> inactive.
     assert not f0.active[2].any()
+
+
+def test_object_pos_scaled_by_scene():
+    from src.targets.config import StyleConfig, TargetsConfig, SceneScaleConfig
+    g, ctx = _grounded(n_obj=1), _ctx(n_obj=1)
+    robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=(), dof=29, height=1.3)
+    ratio = g.body.stature / StyleConfig().human_height_assumption          # 1.7 / 1.8
+    identity = TargetsConfig(scene_scale=SceneScaleConfig(scale_xy=1.0, scale_z=1.0))
+    ft_native = process_frame(g, ctx, robot, f=0, cfg=identity)
+    ft_scaled = process_frame(g, ctx, robot, f=0)                            # défaut None,None -> ratio
+    np.testing.assert_allclose(ft_native.object_pos[0], [0.2, 0.3, 0.5], atol=1e-9)
+    np.testing.assert_allclose(ft_scaled.object_pos[0], np.array([0.2, 0.3, 0.5]) * ratio, atol=1e-9)
+    np.testing.assert_array_equal(ft_scaled.object_rot, ft_native.object_rot)   # rotation inchangée
 
 
 def test_frame_targets_rejects_object_pose_count_mismatch():
