@@ -91,12 +91,13 @@ def test_style_scale_and_offset_hand_computed():
     exp_knee = (pose.bone_pos[SMPL_BODY_INDEX["left_knee"]] - root) * s_knee + scaled_root
     np.testing.assert_allclose(st.position[idx["left_knee_link"]], exp_knee, atol=1e-9)
 
-    # left_toe: nonzero pos_offset (0, 0.02, 0) rotated into the re-oriented (rot_offset) body frame.
+    # left foot (ankle_roll link): nonzero pos_offset (0, 0.02, 0) rotated into the re-oriented
+    # (rot_offset) body frame. The GMR "toe" frame is remapped to the G1 foot link ``ankle_roll``.
     s_foot = _CFG.scale_torso_legs * ratio                          # foot is torso/legs
     scaled_foot = (pose.bone_pos[SMPL_BODY_INDEX["left_foot"]] - root) * s_foot + scaled_root
     rot = _quat_wxyz_to_mat((0.5, -0.5, -0.5, -0.5))                 # identity src_rot on left_foot
-    exp_toe = scaled_foot + rot @ np.array([0.0, 0.02, 0.0])
-    np.testing.assert_allclose(st.position[idx["left_toe_link"]], exp_toe, atol=1e-9)
+    exp_foot = scaled_foot + rot @ np.array([0.0, 0.02, 0.0])
+    np.testing.assert_allclose(st.position[idx["left_ankle_roll_link"]], exp_foot, atol=1e-9)
 
 
 def test_style_unknown_robot_raises():
@@ -193,8 +194,8 @@ def test_style_on_real_data(tmp_path, capsys):
     smpl_pelvis = pose.bone_pos[SMPL_BODY_INDEX["pelvis"]]
     np.testing.assert_allclose(st.position[pelvis_i][:2], smpl_pelvis[:2], atol=1e-6)
 
-    # min foot-target z over the toe links: does dropping the clip-wide FLOOR stage float the feet?
-    foot_z = [st.position[st.link_names.index(n)][2] for n in ("left_toe_link", "right_toe_link")]
+    # min foot-target z over the foot (ankle_roll) links: does dropping the clip-wide FLOOR stage float the feet?
+    foot_z = [st.position[st.link_names.index(n)][2] for n in ("left_ankle_roll_link", "right_ankle_roll_link")]
     min_foot_z = float(min(foot_z))
     with capsys.disabled():
         print(f"\n[style real-data] min foot-target z = {min_foot_z:.4f} m "
