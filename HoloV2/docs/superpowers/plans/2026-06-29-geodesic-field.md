@@ -345,7 +345,7 @@ git commit -m "feat(holov2): prepare/geodesic — persistance .npz (save_geo/loa
 `tests/test_geodesic_build.py` :
 ```python
 """prepare/geodesic build (fonctions pures) : parité du sampling avec le object_cloud, géométrie
-géodésique sur formes connues (plan ≈ euclidien, cylindre ≫ euclidien), invariants matrice, et les
+géodésique sur formes connues (plan ≈ euclidien, sphère ≫ euclidien), invariants matrice, et les
 garde-fous (graphe disconnecté, max_points, gating normales au niveau du graphe)."""
 import numpy as np
 import pytest
@@ -393,15 +393,16 @@ def test_plane_geodesic_close_to_euclidean():
     assert np.median(ratio) < 1.2                                    # sur-estime modérément
 
 
-def test_cylinder_geodesic_exceeds_euclidean():
-    # Paire la plus écartée sur un cylindre : la géodésique fait le tour ≫ corde euclidienne.
-    m = trimesh.creation.cylinder(radius=0.2, height=0.05, sections=64)
-    v, f = np.asarray(m.vertices, np.float64), np.asarray(m.faces, np.int64)
-    pts, nrm = sample_surface_with_normals(v, f, density=4000.0, seed=0)
+def test_sphere_geodesic_exceeds_euclidean():
+    # Sphère (convexe, SANS raccourci) : la paire ~antipodale a une géodésique ≈ grand cercle (π·r)
+    # ≫ la corde euclidienne (2r). NB un cylindre PLEIN ne marche pas : ses capuchons plats offrent un
+    # raccourci à travers la face (ratio ~1.1), donc on prend une sphère.
+    v, f = _sphere(sub=3, r=0.2)
+    pts, nrm = sample_surface_with_normals(v, f, density=1500.0, seed=0)
     D = all_pairs_geodesic(build_knn_graph(pts, nrm, k=10, normal_gate=-1.0))
     eucl = np.linalg.norm(pts[:, None, :] - pts[None, :, :], axis=-1)
-    i, j = np.unravel_index(np.argmax(eucl), eucl.shape)            # paire la plus écartée
-    assert D[i, j] > 1.3 * eucl[i, j]                               # le chemin fait le tour
+    i, j = np.unravel_index(np.argmax(eucl), eucl.shape)            # paire la plus écartée (~antipodale)
+    assert D[i, j] > 1.3 * eucl[i, j]                               # le chemin suit la surface (grand cercle)
 
 
 def test_matrix_invariants():
