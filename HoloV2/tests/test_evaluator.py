@@ -16,7 +16,7 @@ from src.targets import eval_fields, pose_cloud
 from src.targets.config import style_table
 from src.targets.pipeline import process_frame
 
-_DATA = Path("/home/vboxuser/Documents/wbt_rl/data/00_raw_datasets")
+_DATA = Path.home() / "Documents" / "wbt_rl" / "data" / "00_raw_datasets"  # machine-agnostic (was hardcoded)
 _HODOME = _DATA / "HODome"
 _SMPLX = _DATA / "models" / "models_smplx_v1_1" / "models" / "smplx"
 _CORR = Path(__file__).resolve().parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
