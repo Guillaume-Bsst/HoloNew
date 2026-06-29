@@ -161,3 +161,74 @@ class FrameTrace:
     object_clouds_world: tuple[np.ndarray, ...]    # per object, (P_i, 3)
     human_field: MultiChannelField                 # on the human cloud (PRE-transport)
     targets: FrameTargets                          # final outputs (style + robot + env)
+
+
+# =============================================================================
+# EVAL (q-dependent) — current geometric state + analytic Jacobians (targets.Evaluator)
+# =============================================================================
+# Mirror of the references above for the SAME conceptual op (pose a config, read style + contact),
+# applied to the OPTIMISED config (robot @ q + objects @ SE(3)). Reference-free, cost-free: the
+# residual (cur - ref) and the cost live in ``solve``. Tangent convention: pinocchio v
+# (nv = 6 + n_joints) for q; world-aligned (δt, δθ) for each object (LOCAL_WORLD_ALIGNED).
+@dataclass(frozen=True)
+class StyleEval:
+    """État courant des links suivis à ``q`` (FK), + jacobiennes géométriques. Reference-free,
+    cost-free. Ordre = ``StyleTargets.link_names`` (mêmes links que la référence de style)."""
+
+    position: np.ndarray         # (L, 3)      position monde courante du link
+    rotation: np.ndarray         # (L, 3, 3)   rotation monde courante du link
+    jac_pos: np.ndarray          # (L, 3, nv)  ∂position/∂v   (monde)
+    jac_rot: np.ndarray          # (L, 3, nv)  ∂ω/∂v          (jac angulaire géométrique, monde)
+    link_names: tuple[str, ...]  # (L,)
+
+    def __post_init__(self) -> None:
+        L = len(self.link_names)
+        if self.position.shape != (L, 3):
+            raise ValueError(f"position shape {self.position.shape} != ({L}, 3)")
+        if self.rotation.shape != (L, 3, 3):
+            raise ValueError(f"rotation shape {self.rotation.shape} != ({L}, 3, 3)")
+        if self.jac_pos.ndim != 3 or self.jac_pos.shape[:2] != (L, 3):
+            raise ValueError(f"jac_pos shape {self.jac_pos.shape} != ({L}, 3, nv)")
+        nv = self.jac_pos.shape[2]
+        if self.jac_rot.shape != (L, 3, nv):
+            raise ValueError(f"jac_rot shape {self.jac_rot.shape} != jac_pos ({L}, 3, {nv})")
+
+
+@dataclass(frozen=True)
+class ContactEnvEval:
+    """Côté env : nuage objet ``i`` vs canaux. Dépend des poses objets seules (pas de ``q``).
+    Diagonale self-contact déjà neutralisée par ``eval_fields`` (``self_idx``) côté ``field`` ;
+    ``probe_jac_obj`` y est rempli par la formule générique (inoffensif, la diagonale est ignorée
+    par ``solve``). Tangente objet world-aligned ``(δt, δθ)``."""
+
+    field: MultiChannelField   # (C, P_i)
+    cloud_jac_self: np.ndarray  # (P_i, 3, 6)    ∂(point du nuage objet i, monde)/∂(tangente objet i)
+    probe_jac_obj: np.ndarray  # (C, P_i, 3, 6) ∂(probe dans le frame canal)/∂(tangente SE(3) objet du canal)
+
+    def __post_init__(self) -> None:
+        C, P = self.field.n_channels, self.field.n_points
+        if self.cloud_jac_self.shape != (P, 3, 6):
+            raise ValueError(f"cloud_jac_self shape {self.cloud_jac_self.shape} != ({P}, 3, 6)")
+        if self.probe_jac_obj.shape != (C, P, 3, 6):
+            raise ValueError(f"probe_jac_obj shape {self.probe_jac_obj.shape} != ({C}, {P}, 3, 6)")
+
+
+@dataclass(frozen=True)
+class ContactEval:
+    """Géométrie de contact courante (robot) + jacobiennes géométriques pour ``(q, object_poses)``.
+    Reference-free, cost-free. Canal-first ``(C, M)`` sur les M points de contrôle robot. ``field``
+    suit la convention ``MultiChannelField`` (sol en monde, canal objet en objet-local) ; ``point_jac``
+    est en MONDE. ``probe_jac_obj`` : lignes du canal sol = 0 ; canal ``c`` -> objet
+    ``channels[c].object_idx`` (creux). Tangente objet world-aligned ``(δt, δθ)``."""
+
+    field: MultiChannelField   # (C, M)
+    point_jac: np.ndarray      # (M, 3, nv)     ∂(point robot monde)/∂v
+    probe_jac_obj: np.ndarray  # (C, M, 3, 6)   ∂(probe dans le frame canal)/∂(tangente SE(3) objet du canal)
+    env: tuple[ContactEnvEval, ...]  # côté environnement, un par nuage objet
+
+    def __post_init__(self) -> None:
+        C, M = self.field.n_channels, self.field.n_points
+        if self.point_jac.ndim != 3 or self.point_jac.shape[:2] != (M, 3):
+            raise ValueError(f"point_jac shape {self.point_jac.shape} != ({M}, 3, nv)")
+        if self.probe_jac_obj.shape != (C, M, 3, 6):
+            raise ValueError(f"probe_jac_obj shape {self.probe_jac_obj.shape} != ({C}, {M}, 3, 6)")
