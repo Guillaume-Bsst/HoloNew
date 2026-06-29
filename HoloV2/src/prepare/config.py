@@ -90,12 +90,37 @@ class CorrespondenceConfig:
 
 
 @dataclass(frozen=True)
+class GeodesicConfig:
+    """Graphe géodésique sur le cloud objet (``prepare/geodesic``). La DENSITÉ/seed ne sont PAS ici :
+    la géodésique réutilise l'échantillonnage du ``object_cloud`` (``CloudConfig``) — un seul sampling
+    canonique partagé par le cloud ET la table géodésique."""
+
+    k_neighbors: int = 8       # k du graphe k-NN de surface (Dijkstra all-pairs scipy)
+    normal_gate: float = -0.5  # arête i--j seulement si dot(n_i, n_j) > normal_gate, dans [-1, 1].
+                               # DÉFAUT -0.5 : garde les faces perpendiculaires adjacentes (dot=0, ex.
+                               # arêtes d'un cube) ET coupe les arêtes quasi-opposées (dot≈-1, ex.
+                               # traversée d'une plaque fine). 0.0 scinderait un cube en 6 faces ;
+                               # -1.0 ≈ aucun gating.
+    max_points: int = 6000     # garde-fou : ValueError si P dépasse (stockage 4*P^2 octets) —
+                               # baisser object_density ou relever ce knob en conscience
+
+    def __post_init__(self) -> None:
+        if self.k_neighbors < 1:
+            raise ValueError(f"k_neighbors must be >= 1, got {self.k_neighbors}")
+        if not -1.0 <= self.normal_gate <= 1.0:
+            raise ValueError(f"normal_gate must be in [-1, 1], got {self.normal_gate}")
+        if self.max_points < 1:
+            raise ValueError(f"max_points must be >= 1, got {self.max_points}")
+
+
+@dataclass(frozen=True)
 class PrepareConfig:
     """All knobs of the ``prepare`` step, composed — the single object ``runner.prepare`` receives;
-    each builder reads only its sub-config. ``cloud`` feeds BOTH the human cloud and the
-    correspondence (their dependency chain)."""
+    each builder reads only its sub-config. ``cloud`` feeds the human cloud, the correspondence,
+    and the geodesic table (one canonical sampling shared by all three)."""
 
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     sdf: SdfConfig = field(default_factory=SdfConfig)
     cloud: CloudConfig = field(default_factory=CloudConfig)
     correspondence: CorrespondenceConfig = field(default_factory=CorrespondenceConfig)
+    geodesic: GeodesicConfig = field(default_factory=GeodesicConfig)
