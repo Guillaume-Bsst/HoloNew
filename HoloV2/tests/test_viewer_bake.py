@@ -34,8 +34,13 @@ _SEQ = _pick()
 _SKIP = pytest.mark.skipif(_SEQ is None, reason="HODome data / SMPL-X model / corr_neutral.npz absent")
 
 
+_URDF = Path(__file__).resolve().parent.parent / "models" / "g1" / "g1_29dof.urdf"
+
+
 def _robot() -> RobotSpec:
-    return RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=("pelvis",), dof=29, height=1.3)
+    # real URDF: the real-data bake runs prepare() which loads the URDF eagerly (pinocchio) —
+    # a fake path would fail there.
+    return RobotSpec(name="g1", urdf_path=_URDF, link_names=("pelvis",), dof=29, height=1.3)
 
 
 @pytest.fixture(scope="module")
