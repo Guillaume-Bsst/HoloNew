@@ -1,15 +1,38 @@
 # HoloV2 machine-local path registry, read at the CLI edge by src/paths.py.
 # Setup: `cp paths.example.toml paths.toml` then edit the paths for your machine.
-# A relative --motion-path on the CLI resolves against the dataset's [roots] entry;
-# an absolute --motion-path is used as-is (use absolute for OMOMO — see note below).
+# Only MACHINE-LOCAL external files live here. In-repo assets (robot URDF/meshes under
+# HoloV2/models/) and the regenerable HoloV2/cache/ are intentionally NOT configured here.
 
-smplx = "/abs/path/to/models_smplx_v1_1/models/smplx"   # folder holding SMPLX_NEUTRAL.npz
+# ===== SMPL-family model assets =====
+[models]
+# SMPL-X model dir holding SMPLX_{NEUTRAL,MALE,FEMALE}.npz. Used by EVERY dataset. REQUIRED.
+smplx      = "/abs/path/to/models_smplx_v1_1/models/smplx"
+# SMPL-H model dir holding <gender>/model.npz (the SMPL body template). HOI-M3 only — used by
+# the SMPL->SMPL-X shape transfer. OPTIONAL: if unset, derived from `smplx` by convention
+# (the standard layout puts smplh as a sibling of the SMPL-X release under .../models/).
+smplh      = "/abs/path/to/models/smplh"
+# SMPL->SMPL-X deformation-transfer file (vchoutas/smplx transfer_model:
+# smpl2smplx_deftrafo_setup.pkl). HOI-M3 only. OPTIONAL: if unset, derived from `smplx`
+# (.../models/model_transfer/smpl2smplx_deftrafo_setup.pkl).
+smpl2smplx = "/abs/path/to/models/model_transfer/smpl2smplx_deftrafo_setup.pkl"
 
-[roots]
-# Dataset release roots. Used as the default --dataset-root (object/betas metadata)
-# AND as the base for relative --motion-path.
-hodome = "/abs/path/to/HODome"     # motion: smplx/<seq>.npz lives under this root
-sfu    = "/abs/path/to/SFU/SFU"    # motion: <subject>/<seq>.npz lives under this root
-omomo  = "/abs/path/to/OMOMO"      # metadata release (betas/scales/meshes).
-# NOTE: OMOMO InterMimic .pt motion files live in a SEPARATE OMOMO_new/ tree, NOT under
-# this root — pass an absolute --motion-path for OMOMO; roots.omomo stays the metadata root.
+# ===== Dataset roots =====
+# `motion` = base dir for a RELATIVE --motion-path. `meta` = release root for betas/scales/object
+# meshes (fills SceneSpec.dataset_root); OPTIONAL, defaults to `motion` when omitted.
+
+[datasets.hodome]
+# smplx/<seq>.npz here; object/ and scaned_object/ are siblings under this root (meta defaults here).
+motion = "/abs/path/to/HODome"
+
+[datasets.sfu]
+# <subject>/<seq>.npz here; SFU has no objects, so no meta is needed.
+motion = "/abs/path/to/SFU/SFU"
+
+[datasets.omomo]
+# InterMimic <seq>.pt motion files live in a SEPARATE tree from the betas/object metadata:
+motion = "/abs/path/to/OMOMO_new/OMOMO_new"   # the .pt sequences
+meta   = "/abs/path/to/OMOMO"                  # data/ pickles (betas/scales) + captured_objects/
+
+[datasets.hoim3]
+# <seq>_human.npz here; <seq>_object.npz and scanned_object/ are derived relative to the motion file.
+motion = "/abs/path/to/HOI-M3/mocap_ground"
