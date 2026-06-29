@@ -14,6 +14,7 @@ dépendances**, et tout dépend d'une **`PrepareConfig`** (schéma + sous-config
 | **SDF objet** | mesh objet (hash géom) | `sdf` | — | toutes scènes avec cet objet |
 | **Ground (plat)** | emprise XY scène (défaut) | `sdf` | — | **non caché** (SDF de plan exact, rebuild instantané) |
 | **Ground (terrain)** | mesh terrain (hash géom) | `sdf` | — | toutes scènes avec ce terrain |
+| **Géodésique objet/terrain** | mesh (hash géom) + sampling (densité/seed) + knobs graphe (k, normal_gate) | `geodesic` | — | toutes scènes avec ce mesh |
 | **Nuage objet** | mesh objet (hash géom) | `cloud` | — | toutes scènes avec cet objet |
 | **Nuage humain** | sujet (betas, genre, body-model) | `cloud` | — | par sujet |
 | **Correspondance** | robot (id) + template + surface G1 | `correspondence` **+ `cloud`** | nuage (échantillonnage) | (robot, template) |
@@ -64,6 +65,7 @@ cache_key(item) = hash( sous-config pertinente  +  inputs pertinents  +  clés d
 HoloV2/cache/
   calibration/    <subject>_<take>_<cfg>.npz
   sdf/            <geom_hash>_<cfg>.npz            (objets/terrain ; sol plat = SDF de plan, non caché)
+  geodesic/       <geom_hash>_<cfg>.npz            (objets/terrain ; sol plat = aucune table)
   cloud/
     human/        <subject>_<cfg>.npz
     object/       <geom_hash>_<cfg>.npz
@@ -91,7 +93,8 @@ Les `targets/` (per-frame) peuvent être recalculées en ligne depuis les assets
 
 ## Invalidation — résumé
 - changer `sdf` → rebuild SDF seulement.
+- changer `geodesic` ou `cloud` (densité/seed) → rebuild table géodésique seulement (la clé géodésique inclut sampling densité/seed + knobs k/normal_gate + géométrie).
 - changer `cloud` → rebuild nuages **et** correspondance (aval).
 - changer `calibration` → rebuild calibration seulement.
 - changer betas (sujet) → rebuild nuage humain + calibration ; SDF/correspondance(template) intacts.
-- changer un objet (géométrie) → rebuild SDF + nuage de cet objet ; reste intact.
+- changer un objet (géométrie) → rebuild SDF + nuage + table géodésique de cet objet ; reste intact.

@@ -77,6 +77,12 @@ targets/
     eval.py            eval_fields (sample chaque Channel : SDF trilinéaire — chemin unique, sol plat inclus)
     transport.py       transport (gather via correspondence)
     targets.py         assemble RobotInteractionTargets + EnvironmentInteractionTargets
+    geodesic.py        geo_value_grad / nearest_index — lecture différentiable (MLS degré-1, valeur +
+                       gradient tangent) du champ géodésique précalculé prepare.GeodesicTable à un
+                       witness(q) continu, pour le résidu witness côté solve/utilisateur. nearest_index
+                       snappe witness_ref sur sa source offline. Numpy-only, torch-free. Ré-exportés
+                       sur la surface publique targets (targets/__init__.py, __all__) et sur
+                       targets.interaction (__init__.py).
   pipeline.py          process_frame : FramePose -> style + interaction -> FrameTargets
                        run_sequence : boucle online OU batch vectorisé
 ```

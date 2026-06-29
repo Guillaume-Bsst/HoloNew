@@ -62,13 +62,14 @@ HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · 
 
     prepare/         ÉTAPE 1 — offline ; SEUL endroit qui instancie SMPL/meshes/robot     [PREPARE.md]
       contracts.py     types de DONNÉES de prepare (SORTIE PUBLIQUE) : RobotSpec/SceneSpec · SmplParams/RawMotion ·
-                       ObjectMesh/Calibration/GroundedScene · SDF/Channel · PointCloud/CorrespondenceTable ·
+                       ObjectMesh/Calibration/GroundedScene · SDF/Channel · GeodesicTable · PointCloud/CorrespondenceTable ·
                        InteractionContext + protocols BodyModel/RobotModel/AssetBuilder — pas la config — numpy-only
-      config.py        knobs de prepare : CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig/PrepareConfig
+      config.py        knobs de prepare : CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig/GeodesicConfig/PrepareConfig
       load/            base · datasets/ (1/dataset -> RawMotion) · smpl (-> BodyModel) · smpl2smplx · mesh (-> verts/faces) · robot (-> RobotModel) · frames
       calibration/     LIVRABLE : grounding scène (humain + objet)
       sdf/             LIVRABLE : SDF objets/terrain/sol (sol plat = SDF de plan exact, non caché)
       point_cloud/     LIVRABLE : nuages (human, objects) + correspondence (SMPL<->G1)
+      geodesic/        LIVRABLE : table all-pairs géodésique par mesh (objets/terrain ; sol plat = aucune table)
       scene.py · runner.py   (prepare(scene_spec, config) : load-or-build + assemble)
 
     targets/         ÉTAPE 2 — construction ONLINE des cibles                          [TARGETS.md]

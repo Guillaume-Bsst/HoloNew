@@ -93,7 +93,7 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
     contracts.py         SORTIE PUBLIQUE — types de DONNÉES de prepare (protocols BodyModel/RobotModel/AssetBuilder ;
                          SceneSpec/RobotSpec, RawMotion/SmplParams, ObjectMesh/Calibration/GroundedScene, SDF/Channel,
                          PointCloud/CorrespondenceTable, InteractionContext) — pas la config — numpy-only
-    config.py            knobs : PrepareConfig + sous-configs CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig
+    config.py            knobs : PrepareConfig + sous-configs CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig/GeodesicConfig
     load/                loaders OFFLINE (sous-package)
       base.py              protocol MotionLoader + registre
       datasets/            un loader par dataset (omomo, hodome, sfu, hoim3) -> RawMotion (params + chemins)
@@ -102,7 +102,7 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
       mesh.py              chemin -> (verts, faces) local (trimesh ; poses ajoutées à l'assemblage scène)
       robot.py             RobotSpec -> RobotModel (FK yourdfpy, AGNOSTIQUE) + pose de repos correspondance (keyée par robot)
       frames.py            conventions de frame partagées
-    # --- les 3 LIVRABLES (build-once) ; persistance UNIFORME : save_<asset>/load_<asset> co-localisés, le builder délègue ---
+    # --- les 4 LIVRABLES (build-once) ; persistance UNIFORME : save_<asset>/load_<asset> co-localisés, le builder délègue ---
     calibration/         grounding ROBOT-FREE & BODY-FREE : human_offset (foot-joint pct) + object_offset (objets partagé) + root
                          ; expose save_calibration/load_calibration (CalibrationBuilder délègue)
     sdf/                 meshes objets/terrain -> SDF (caché) ; sol plat -> SDF de plan (build_plane_sdf, non caché)
@@ -119,8 +119,16 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
         build.py             CorrespondenceBuilder : génère sampling + source humaine neutre + OT
                              -> (CorrespondenceTable, SurfaceSampling) ; regenerate() régénère corr_neutral.npz
         cache.py             save+load .npz de la correspondance, ensemble -> (CorrespondenceTable, SurfaceSampling)
+    geodesic/            meshes objets/terrain -> table géodésique all-pairs (cachée) ; sol plat -> aucune table
+                         ; expose save_geo/load_geo (GeodesicBuilder délègue). Réutilise le sampling du
+                         object_cloud (même densité/seed → points bit-identiques), scopé géométrie.
+      build.py             GeodesicBuilder + build_geodesic_table : k-NN gaté normales + Dijkstra all-pairs (scipy)
+      cache.py             save_geo/load_geo — sérialisation .npz de GeodesicTable (points+normals+geo)
     scene.py             applique la calibration -> GroundedScene
     runner.py            prepare(scene_spec, config) : load-or-build + assemble ; build_all()
+                         Les meshes objets sont chargés UNE FOIS dans _run(), puis partagés par le build
+                         SDF/géodésique (_build_channels) ET le build object_cloud — chaque fichier mesh
+                         est lu une seule fois par prepare.
     # sorties : Calibration + SDF(objets/terrain) + PointClouds(+corr) -> GroundedScene + InteractionContext
 
   targets/             ÉTAPE 2 — construction ONLINE des 2 canaux de cibles
@@ -159,9 +167,9 @@ sur un humain NEUTRE) qui **génère** le `SurfaceSampling` et l'**embarque** da
 `correspondence/cache.py` le relit, et `human.py` le réutilise sur le mesh du SUJET. Garde-fou
 `sampling_id == smpl_sampling_id` asserté au runner (cf. `CACHE.md`).
 
-**Contrat commun des builders offline** — **3 livrables** (calibration, sdf, point_cloud) produits par
-**5 builders** : `CalibrationBuilder`, `SdfBuilder`, `HumanCloudBuilder`, `ObjectCloudBuilder`,
-`CorrespondenceBuilder` (le livrable point_cloud en regroupe 3). Tous suivent le même protocol ; la
+**Contrat commun des builders offline** — **4 livrables** (calibration, sdf, point_cloud, geodesic) produits par
+**6 builders** : `CalibrationBuilder`, `SdfBuilder`, `HumanCloudBuilder`, `ObjectCloudBuilder`,
+`CorrespondenceBuilder` (le livrable point_cloud en regroupe 3), `GeodesicBuilder`. Tous suivent le même protocol ; la
 persistance est co-localisée (`save_<asset>`/`load_<asset>` module-level, le builder délègue) :
 ```python
 class AssetBuilder(Protocol):
@@ -187,7 +195,8 @@ Inventaire, par module.
 - **scène / calib** : `ObjectMesh` (+ `static`), `Calibration` (grounding seul, body-free), `GroundedScene`
   (porte `body` = moteur de posage live + `calibration` ; meshes objets = PATHS)
 - **champs (assets)** : `SDF` (grille, objets/terrain) · `Channel` (`object_idx` + `sdf` TOUJOURS
-  présent ; sol plat = SDF de plan)
+  présent ; `geodesic: GeodesicTable | None`, `None` = sol plan → coût euclidien analytique exact) ·
+  `GeodesicTable` (table all-pairs (P,P), objets/terrain ; points + normales + matrice géodésique)
 - **nuages** : `PointCloud` (skinning creux + `sampling_id`), `CorrespondenceTable`
   (`smpl_idx`/`link_idx`/`offset_local` + `smpl_sampling_id` qui doit matcher `sampling_id`)
 - **contexte** : `InteractionContext` (`channels` = ground + objets ; invariants documentés). `InteractionContext` porte aussi `robot_cloud` (M points de correspondance en nuage K=1, ordre FK) + `robot` (moteur FK, symétrique à `GroundedScene.body`) pour la réévaluation online dans `solve`.
