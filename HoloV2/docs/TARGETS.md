@@ -74,23 +74,36 @@ targets/
   config.py            knobs de targets (StyleConfig échelle morpho + hauteurs / TargetsConfig) ET la
                        recette de style robot-keyed (DATA : SMPL_BODY_INDEX, ARM_BODIES, _STYLE_TABLE
                        lien->corps/poids/offsets, style_table()) — tout le style hors math en un fichier.
+  contracts.py         RÉFS  : ContactField, MultiChannelField, StyleTargets, Robot/EnvironmentInteractionTargets,
+                       FrameTargets, FramePose, FrameTrace.  ÉVAL : StyleEval, ContactEval, ContactEnvEval
+                       (état géométrique courant + jacobiennes analytiques ; reference-free, cost-free).
+  evaluator.py         ÉVALUATEUR q-dépendant (orchestrateur) : Evaluator(ctx, robot_name), construit 1×.
+                         .style(q)                       -> StyleEval   (FK links suivis + J_pos/J_rot)
+                         .contacts(q, object_rot, object_pos) -> ContactEval (field courant + point_jac
+                                                                + probe_jac_obj + env)
   style/               OBJECTIF DE STYLE (ex-"body") — posture, ignore l'objet.
-                       FramePose -> StyleTargets (recette GMR par lien).
-                       build.py = la math SEULE (SCALE puis OFFSET) ; il lit knobs + recette via config.
+    build.py           (réf) FramePose démo -> StyleTargets (recette GMR : SCALE puis OFFSET).
+    eval.py            (éval) style_eval : robot FK @ q -> StyleEval (config-free ; gather des links suivis).
   interaction/
-    pointclouds.py     pose_cloud — pose tout nuage (humain K~4 / objet·robot K=1) [FAIT]
-    eval.py            eval_fields (sample chaque Channel : SDF trilinéaire — chemin unique, sol plat inclus)
-    transport.py       transport (gather via correspondence)
-    targets.py         assemble RobotInteractionTargets + EnvironmentInteractionTargets
-    geodesic.py        geo_value_grad / nearest_index — lecture différentiable (MLS degré-1, valeur +
-                       gradient tangent) du champ géodésique précalculé prepare.GeodesicTable à un
-                       witness(q) continu, pour le résidu witness côté solve/utilisateur. nearest_index
-                       snappe witness_ref sur sa source offline. Numpy-only, torch-free. Ré-exportés
-                       sur la surface publique targets (targets/__init__.py, __all__) et sur
-                       targets.interaction (__init__.py).
-  pipeline.py          process_frame : FramePose -> style + interaction -> FrameTargets
-                       run_sequence : boucle online OU batch vectorisé
+    pointclouds.py     pose_cloud — pose tout nuage (humain K~4 / objet·robot K=1) [noyau partagé]
+    fields.py          eval_fields (sample chaque Channel : SDF trilinéaire — chemin unique) [noyau, ex-eval.py]
+    eval.py            (éval) contact_eval : robot_cloud @FK(q) + objets @SE(3) -> ContactEval
+                       (field courant + jacobiennes : point_jac monde, probe_jac_obj/cloud_jac_self objet)
+    transport.py       transport (gather via correspondence) [réf]
+    refs.py            robot_interaction_targets / environment_interaction_targets [réf, ex-targets.py]
+    geodesic.py        geo_value_grad / nearest_index — lecture différentiable du champ géodésique. [noyau]
+  pipeline.py          RÉFÉRENCES : process_frame / trace_frame -> FrameTargets ; run_sequence.
 ```
+
+## Symétrie référence / évaluation
+`targets` fait UNE opération (poser une config, lire son état style + contact) sur DEUX configs :
+- **Référence** (`pipeline.py`, q-indép., 1×/frame, bakée) : humain/démo -> `FrameTargets` (style +
+  contact refs transportés). Pas de jacobienne.
+- **Évaluation** (`evaluator.py`, q-dép., par itération) : robot @ `q` + objets @ `SE(3)` ->
+  `StyleEval` / `ContactEval` (état courant + jacobiennes analytiques). Les MÊMES noyaux purs
+  (`pose_cloud`, `fields.eval_fields`) servent les deux ; seul le côté cible porte une jacobienne.
+Le résidu (`cur - ref`) et le coût se font **dans `solve`** à partir de ces deux sorties.
+`Evaluator` est construit UNE fois (assets statiques de `ctx`) ; entrées par itération = `(q, object_poses)`.
 
 ## Règles anti-spaghetti
 - `pipeline` orchestre et calcule l'état partagé (`FramePose`).
