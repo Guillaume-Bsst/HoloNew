@@ -95,7 +95,14 @@ targets/  ──► FrameTargets        from ..prepare.contracts import Grounded
 viz/      ──► (lit FrameTrace)    from ..prepare.contracts / ..targets.contracts import …
 solve/    ──► qpos                from ..targets.contracts import FrameTargets
 ```
-Aucun cycle (deps aval seulement) ; SMPL/meshes ne sont jamais touchés hors `prepare/`.
+Aucun cycle (deps aval seulement). **`viz` est un consommateur, pas un étage du pipeline** : la règle
+« sortie publique seulement » contraint le pipeline linéaire (prepare→targets→solve), pas le visu. Le
+viewer de PROD (`viz/viewer.py`, le `FrameTrace`) respecte la seam (`runner.prepare` + `.contracts`),
+mais les viewers de DEBUG *par étage* (`viz/scene`=load, `viz/cloud`=point_cloud, `viz/sdf`=sdf,
+`viz/hoim3_multiperson`) pilotent **délibérément le builder interne de l'étage qu'ils visualisent**
+(`load.mesh`, `load.smpl`, `sdf.build`, `point_cloud.*`, `calibration`…) pour montrer des intermédiaires
+absents des contrats. SMPL/meshes ne sont donc touchés QUE dans `prepare/` **et** ces viewers de debug
+(jamais dans `targets`/`solve`).
 
 ---
 

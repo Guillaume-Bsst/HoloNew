@@ -46,7 +46,10 @@ redupliquer ici**). En bref : `SceneSpec`+`PrepareConfig` → **prepare/** (offl
 - **Poids des imports** : chaque `<étage>/contracts.py` + `<étage>/config.py` et `src/obs.py` =
   **numpy-only** (la config = stdlib-only, dataclasses) — tous légers, importables partout.
   torch/smplx/trimesh/coal/pinocchio **uniquement** dans `src/prepare/load/` et les builders
-  `src/prepare/`. `targets`/`solve`/`viz` ne dépendent jamais de torch.
+  `src/prepare/`. `targets`/`solve`/`viz` ne dépendent jamais de torch. **Exception assumée** : les
+  viewers de DEBUG par étage (`viz/{scene,cloud,sdf,hoim3_multiperson}`) importent `trimesh` en LAZY
+  (dans la fonction, pour le rendu mesh) et pilotent les internes de l'étage qu'ils visualisent — ils
+  sont des consommateurs, pas le pipeline (cf. `docs/ARCHITECTURE.md`). Le viewer prod reste sur la seam.
 - **Imports** : relatifs DANS `src/` ; chaque étage importe la **sortie publique** de l'amont
   (`from ..prepare.contracts import X`, `from ..prepare.config import PrepareConfig`), jamais un
   sous-module interne. Tests : absolus (`from src.… import …`).
