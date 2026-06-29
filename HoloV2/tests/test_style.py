@@ -22,13 +22,14 @@ import pytest
 from scipy.spatial.transform import Rotation as R
 
 from src.prepare.contracts import RobotSpec
-from src.targets.config import SMPL_BODY_INDEX, StyleConfig, style_table
+from src.targets.config import SMPL_BODY_INDEX, SceneScaleConfig, StyleConfig, style_table
 from src.targets.contracts import FramePose
 from src.targets import style
 from datapaths import HODOME as _HODOME, SMPLX_MODELS as _SMPLX, V1_TEST_SOCP as _V1
 
 _G1_LINKS = tuple(style_table("g1").keys())
 _CFG = StyleConfig()   # defaults: the morphological SCALE values + reference heights the test recomputes
+_NATIVE = SceneScaleConfig(scale_xy=1.0, scale_z=None)   # reproduit le comportement natif (xy brut)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -82,7 +83,7 @@ def test_style_scale_and_offset_hand_computed():
     base = _CFG.scale_torso_legs * ratio                             # 0.45 (pelvis is torso/legs)
     root = pose.bone_pos[SMPL_BODY_INDEX["pelvis"]]
     scaled_root = np.array([root[0], root[1], root[2] * base])        # sx=sy=1, sz=base
-    st = style.build(pose, _robot(), stature=stature)
+    st = style.build(pose, _robot(), stature=stature, scene=_NATIVE)
     idx = {n: i for i, n in enumerate(st.link_names)}
 
     # pelvis: pos_offset 0 -> world target == scaled_root (scale applied, x/y native, z*base).
@@ -146,7 +147,7 @@ def test_style_matches_v1_scale_offset():
         human_data[body] = (pose.bone_pos[idx].astype(float), q_xyzw[[3, 0, 1, 2]].astype(float))
     od = _V1PP.offset(_V1PP.scale(human_data, ratio, scale_xy=1.0, scale_z=None))
 
-    st = style.build(pose, _robot(), stature=stature)
+    st = style.build(pose, _robot(), stature=stature, scene=_NATIVE)
     table = style_table("g1")
     for i, link in enumerate(st.link_names):
         body = table[link][0]
@@ -185,7 +186,7 @@ def test_style_on_real_data(tmp_path, capsys):
     grounded, _ = prepare(spec, PrepareConfig())
 
     pose = frame_pose(grounded, 0)
-    st = style.build(pose, _robot(), grounded.body.stature)
+    st = style.build(pose, _robot(), grounded.body.stature, scene=_NATIVE)
 
     assert st.link_names == _G1_LINKS
     assert np.isfinite(st.position).all() and np.isfinite(st.orientation).all()
@@ -203,3 +204,20 @@ def test_style_on_real_data(tmp_path, capsys):
         print(f"\n[style real-data] min foot-target z = {min_foot_z:.4f} m "
               f"(left={foot_z[0]:.4f}, right={foot_z[1]:.4f}); subject stature={grounded.body.stature:.3f}")
     assert np.isfinite(min_foot_z)
+
+
+def test_style_default_scales_root_xy_by_ratio():
+    """Défaut SceneScaleConfig() = None,None -> ratio partout : le xy du root (pelvis) est scalé par
+    ratio (alors que le natif le garde brut)."""
+    pose = _synthetic_pose()
+    stature = 0.9
+    ratio = stature / _CFG.human_height_assumption                    # 0.5
+    st_default = style.build(pose, _robot(), stature=stature)         # SceneScaleConfig() défaut
+    st_native = style.build(pose, _robot(), stature=stature, scene=SceneScaleConfig(scale_xy=1.0))
+    i = st_default.link_names.index("pelvis")
+    root = pose.bone_pos[SMPL_BODY_INDEX["pelvis"]]
+    # défaut : pelvis xy = ratio * root_xy ; natif : pelvis xy = root_xy
+    np.testing.assert_allclose(st_default.position[i][:2], root[:2] * ratio, atol=1e-9)
+    np.testing.assert_allclose(st_native.position[i][:2], root[:2], atol=1e-9)
+    # z identique dans les deux (z = scale_torso_legs * ratio * root_z, scale_z=None dans les deux)
+    np.testing.assert_allclose(st_default.position[i][2], st_native.position[i][2], atol=1e-9)

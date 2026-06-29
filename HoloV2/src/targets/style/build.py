@@ -21,6 +21,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 from ..config import ARM_BODIES, ROOT_BODY, SMPL_BODY_INDEX, SceneScaleConfig, StyleConfig, style_table
+from ..scale import resolve_scale
 from ..contracts import FramePose, StyleTargets
 from ...prepare.contracts import RobotSpec
 
@@ -58,8 +59,13 @@ def build(pose: FramePose, robot: RobotSpec, stature: float,
     # defaults: scale_xy = 1.0 (x, y kept native) and scale_z = None (z scaled morphologically by the
     # root's ``SCALE[pelvis] * ratio``). Body proportions (pelvis-local) are unchanged otherwise.
     root_pos = bone_pos[SMPL_BODY_INDEX[ROOT_BODY]]                    # (3,)
-    base = cfg.scale_torso_legs * ratio                               # pelvis is a torso/legs body
-    scaled_root = np.array([root_pos[0], root_pos[1], root_pos[2] * base])   # sx = sy = 1.0, sz = base
+    # PLACEMENT du root via l'échelle de scène (None -> ratio) ; xy autour de l'origine, z autour du
+    # sol. Le morphologique du pelvis (scale_torso_legs, le pelvis est torse/jambes) reste sur z.
+    # scale_xy=1.0, scale_z=None reproduit le natif : xy brut, z = scale_torso_legs * ratio.
+    s_xy, s_z = resolve_scale(scene, ratio)
+    base_z = cfg.scale_torso_legs * s_z
+    scaled_root = np.array([root_pos[0] * s_xy, root_pos[1] * s_xy,
+                            cfg.ground_height + (root_pos[2] - cfg.ground_height) * base_z])
     ground = np.array([0.0, 0.0, cfg.ground_height])
 
     links = tuple(table.keys())
