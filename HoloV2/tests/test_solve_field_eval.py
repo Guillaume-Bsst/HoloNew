@@ -51,7 +51,7 @@ def test_online_package_evaluates_robot_cloud_against_channels(tmp_path):
     assert ref.distance.shape == (C, M)
 
     # ONLINE: pose the robot_cloud at the rest config via ctx.robot, eval against the same channels.
-    q = np.zeros(ctx.robot.dof)
+    q = ctx.robot.neutral()                                # free-flyer neutral config (nq,)
     pts = pose_cloud(ctx.robot_cloud, *ctx.robot.link_transforms(q))    # (M, 3) world
     assert pts.shape == (M, 3)
     cur = eval_fields(pts, ctx.channels, ft.object_rot, ft.object_pos, ctx.margin)
