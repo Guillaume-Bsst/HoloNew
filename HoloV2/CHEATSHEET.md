@@ -21,6 +21,14 @@ export DATA=/home/gbesset/Documents/wbt_rl/data/00_raw_datasets
 export SMPLX=$DATA/models/models_smplx_v1_1/models/smplx   # contient SMPLX_NEUTRAL.npz
 ```
 
+> 💡 Plutôt que `$DATA`/`$SMPLX` à la main, copie une fois `paths.example.toml` → `paths.toml`
+> (gitignoré) et édite tes chemins. Les viewers liront `--model-dir`/`--dataset-root` depuis là,
+> et `--motion-path` peut alors être **relatif** à la racine du dataset.
+
+```bash
+cp paths.example.toml paths.toml      # une fois, puis éditer les chemins de ta machine
+```
+
 Vérif rapide que l'env est bon :
 
 ```bash
@@ -37,6 +45,15 @@ Tous les viewers partagent les mêmes flags : `--dataset`, `--motion-path`, `--m
 `--person-id`, `--object-names a,b`. **Garde `--max-frames` bas** (debug : 3–30) — un bake long est lent.
 
 ### Viewer principal — `FrameTrace` (humain + cibles style/interaction)
+
+```bash
+# Forme courte (lit smplx + racine depuis paths.toml ; motion relative à la racine du dataset)
+$PY -m src.viz.viewer --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 30
+$PY -m src.viz.viewer --dataset sfu    --motion-path 0005/0005_Jogging001_stageii.npz --max-frames 30
+# OMOMO : motion en chemin ABSOLU (les .pt vivent dans OMOMO_new/, hors racine metadata)
+$PY -m src.viz.viewer --dataset omomo \
+    --motion-path $DATA/OMOMO_new/OMOMO_new/sub10_clothesstand_000.pt --max-frames 30
+```
 
 ```bash
 # HODome (objets) — exemple complet
