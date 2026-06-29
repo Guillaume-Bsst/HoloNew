@@ -22,11 +22,30 @@ export SMPLX=$DATA/models/models_smplx_v1_1/models/smplx   # contient SMPLX_NEUT
 ```
 
 > 💡 Plutôt que `$DATA`/`$SMPLX` à la main, copie une fois `paths.example.toml` → `paths.toml`
-> (gitignoré) et édite tes chemins. Les viewers liront `--model-dir`/`--dataset-root` depuis là,
-> et `--motion-path` peut alors être **relatif** à la racine du dataset.
+> (gitignoré) et édite tes chemins. C'est le registre **central** de tous les fichiers externes
+> machine-local : section `[models]` (`smplx` requis ; `smplh`, `smpl2smplx` deftrafo optionnels,
+> HOI-M3) et une section `[datasets.<nom>]` par dataset avec `motion` (base d'un `--motion-path`
+> relatif) et `meta` (release betas/scales/objets ; défaut = `motion`). Les viewers remplissent
+> `--model-dir`/`--dataset-root` depuis là, et `--motion-path` peut être **relatif** à `motion`.
 
 ```bash
 cp paths.example.toml paths.toml      # une fois, puis éditer les chemins de ta machine
+```
+
+Exemple `paths.toml` (extrait) :
+
+```toml
+[models]
+smplx = "/abs/.../models_smplx_v1_1/models/smplx"   # requis (tous datasets)
+smplh = "/abs/.../models/smplh"                      # HOI-M3 (sinon dérivé de smplx)
+# smpl2smplx = "/abs/.../model_transfer/smpl2smplx_deftrafo_setup.pkl"  # HOI-M3 (.pkl deftrafo)
+[datasets.hodome]
+motion = "/abs/.../HODome"
+[datasets.omomo]
+motion = "/abs/.../OMOMO_new/OMOMO_new"   # les .pt
+meta   = "/abs/.../OMOMO"                  # betas/scales + captured_objects/
+[datasets.hoim3]
+motion = "/abs/.../HOI-M3/mocap_ground"
 ```
 
 Vérif rapide que l'env est bon :
@@ -47,12 +66,11 @@ Tous les viewers partagent les mêmes flags : `--dataset`, `--motion-path`, `--m
 ### Viewer principal — `FrameTrace` (humain + cibles style/interaction)
 
 ```bash
-# Forme courte (lit smplx + racine depuis paths.toml ; motion relative à la racine du dataset)
+# Forme courte (lit [models].smplx + [datasets.<nom>] depuis paths.toml ; motion relative à `motion`)
 $PY -m src.viz.viewer --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 30
 $PY -m src.viz.viewer --dataset sfu    --motion-path 0005/0005_Jogging001_stageii.npz --max-frames 30
-# OMOMO : motion en chemin ABSOLU (les .pt vivent dans OMOMO_new/, hors racine metadata)
-$PY -m src.viz.viewer --dataset omomo \
-    --motion-path $DATA/OMOMO_new/OMOMO_new/sub10_clothesstand_000.pt --max-frames 30
+# OMOMO : motion relative à [datasets.omomo].motion (= OMOMO_new) — plus besoin d'absolu
+$PY -m src.viz.viewer --dataset omomo  --motion-path sub10_clothesstand_000.pt --max-frames 30
 ```
 
 ```bash
