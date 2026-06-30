@@ -7,6 +7,8 @@ import pytest
 
 from src.viz.core.layer import Layer, UiState
 from src.viz.layers.ghost import GhostLayer
+from src.viz.layers.human_cloud import HumanCloudLayer
+from src.viz.layers.objects import ObjectsLayer
 from src.viz.layers.skeleton import SkeletonLayer
 
 
@@ -16,6 +18,7 @@ class FakeHandle:
         self.visible = True
         self.points = None
         self.colors = None
+        self.point_size = 0.012
 
 
 class FakeCheckbox:
@@ -38,6 +41,10 @@ class FakeScene:
         """Retourne un fake handle pour le mesh."""
         return FakeHandle()
 
+    def add_point_cloud(self, *args, **kwargs):
+        """Retourne un fake handle pour le nuage de points."""
+        return FakeHandle()
+
 
 class FakeServer:
     """Fake viser server."""
@@ -56,6 +63,35 @@ class FakeContext:
     """Fake VizContext avec données minimales."""
     smpl_parents = np.array([0, 0, 1, 2, 2, 3, 4, 5, 6, 7, 7, 8, 9, 10, 11, 12, 13, 13, 14, 15, 16, 17, 17, 18], dtype=np.int32)
     smpl_faces = np.array([[0, 1, 2], [2, 3, 4]], dtype=np.int32)
+    channel_names = ("ground", "obj0")
+    margin = 0.1
+    n_objects = 1
+
+
+class FakeField:
+    """Fake MultiChannelField avec distance et active."""
+    def __init__(self, n_channels=2, n_points=10):
+        self.distance = np.random.randn(n_channels, n_points).astype(np.float32)
+        self.active = np.random.rand(n_channels, n_points) > 0.5
+
+
+class FakeContactEval:
+    """Fake ContactEval avec distance et active."""
+    def __init__(self, n_channels=2, n_points=10):
+        self.distance = np.random.randn(n_channels, n_points).astype(np.float32)
+        self.active = np.random.rand(n_channels, n_points) > 0.5
+
+
+class FakeEnvInteraction:
+    """Fake env_interaction avec per_object."""
+    def __init__(self, n_objects=1, n_channels=2, n_points=10):
+        self.per_object = [FakeContactEval(n_channels, n_points) for _ in range(n_objects)]
+
+
+class FakeTargets:
+    """Fake FrameTargets avec env_interaction."""
+    def __init__(self, n_objects=1, n_channels=2, n_points=10):
+        self.env_interaction = FakeEnvInteraction(n_objects, n_channels, n_points)
 
 
 class FakePose:
@@ -66,19 +102,29 @@ class FakePose:
 
 class FakeFrame:
     """Fake VizFrame avec pose et vertices."""
-    def __init__(self, bone_pos=None, smpl_verts_world=None):
+    def __init__(self, bone_pos=None, smpl_verts_world=None, human_cloud_world=None,
+                 object_clouds_world=None, human_field=None, targets=None):
         self.pose = FakePose(bone_pos)
         self.smpl_verts_world = smpl_verts_world
+        self.human_cloud_world = human_cloud_world if human_cloud_world is not None else np.random.randn(10, 3).astype(np.float32)
+        self.object_clouds_world = object_clouds_world if object_clouds_world is not None else [np.random.randn(10, 3).astype(np.float32)]
+        self.human_field = human_field if human_field is not None else FakeField(2, 10)
+        self.targets = targets if targets is not None else FakeTargets(1, 2, 10)
 
 
 class FakeUiState:
-    """Fake UiState (vide pour test)."""
-    pass
+    """Fake UiState avec défauts pour test."""
+    def __init__(self, channel="ground", color_mode="uniform", point_size=0.012):
+        self.channel = channel
+        self.color_mode = color_mode
+        self.point_size = point_size
 
 
 @pytest.mark.parametrize("cls, folder", [
     (GhostLayer, "Static"),
     (SkeletonLayer, "Skeleton"),
+    (HumanCloudLayer, "Interaction - human"),
+    (ObjectsLayer, "Static"),
 ])
 def test_layer_structural(cls, folder):
     """Vérifie que chaque couche est une Layer avec le dossier GUI correct."""
