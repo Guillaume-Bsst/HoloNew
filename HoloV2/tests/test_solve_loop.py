@@ -54,3 +54,33 @@ def test_solve_frame_cost_decreases_with_budget(monkeypatch):
     costs = [_run(n_iter=k)[2].cost for k in (1, 2, 3)]
     assert costs[0] >= costs[1] >= costs[2] - 1e-9         # coût final non croissant avec le budget
     assert costs[2] < costs[0]                             # strictement amélioré
+
+
+def test_evaluate_converts_object_poses_wxyz():
+    # evaluate (op pur) : poses (N,7) -> object_pos (N,3) + object_rot (N,3,3) via wxyz->mat, puis appelle
+    # evaluator.style(q) et evaluator.contacts(q, object_rot, object_pos). Vérifié sur des quats connus.
+    captured = {}
+
+    class _FakeEval:
+        def style(self, q):
+            captured["q_style"] = q
+            return "STYLE"
+
+        def contacts(self, q, object_rot, object_pos):
+            captured["q_contacts"], captured["rot"], captured["pos"] = q, object_rot, object_pos
+            return "CONTACT"
+
+    q = np.array([0.1, 0.2, 0.3])
+    c = np.cos(np.pi / 4)                                  # obj1 = 90° autour de z : wxyz [c,0,0,c]
+    poses = np.array([[1, 2, 3, 1, 0, 0, 0],              # obj0 = identité
+                      [4, 5, 6, c, 0, 0, c]], np.float64)
+    fe = L.evaluate(_FakeEval(), q, poses)
+
+    assert fe.style == "STYLE" and fe.contact == "CONTACT"
+    assert captured["q_style"] is q and captured["q_contacts"] is q
+    assert captured["rot"].shape == (2, 3, 3) and captured["pos"].shape == (2, 3)
+    assert np.allclose(captured["pos"], [[1, 2, 3], [4, 5, 6]])
+    assert np.allclose(captured["rot"][0], np.eye(3))
+    assert np.allclose(captured["rot"][1], [[0, -1, 0], [1, 0, 0], [0, 0, 1]], atol=1e-9)
+    for R in captured["rot"]:                              # orthonormales
+        assert np.allclose(R @ R.T, np.eye(3), atol=1e-9)

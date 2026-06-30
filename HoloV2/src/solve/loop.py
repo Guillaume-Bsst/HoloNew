@@ -59,9 +59,10 @@ def solve_frame(evaluator, frame_targets_f, geo, robot, backend, cfg, q0, poses0
             problem = assemble(evals, frame_targets_f, geo, robot, cfg)
             step = backend.solve(problem)
             status, cost = step.status, step.value
-            cost_by_term = cost_breakdown(problem, step)
             if step.dv is None or not np.all(np.isfinite(step.dv)):
-                break                                       # backend non-optimal -> arrêt + diagnostic
+                break                                       # backend non-optimal -> arrêt (avant cost_breakdown,
+                                                            # qui ferait np.asarray(None) sur un dv manquant)
+            cost_by_term = cost_breakdown(problem, step)    # seulement sur un pas valide
             q, poses = retract(q, poses, step, robot)
             if float(np.max(np.abs(step.dv))) < cfg.step_tol:
                 break
