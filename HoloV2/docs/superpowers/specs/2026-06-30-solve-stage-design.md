@@ -28,7 +28,7 @@ Résidus v1 (cf. mémoire) : `S-pos, S-rot, C-D, C-X(géodésique), CO-D, CO-X(g
 solve.runner.solve(grounded, ctx, frame_targets, config) -> SolveTrajectory
   evaluator = targets.Evaluator(ctx, robot_name)          # construit 1×
   pour chaque frame f :
-    q, poses = warm_start(f)                               # f>0 : depuis f-1 ; f=0 : robot.neutral() (cold)
+    q, poses = warm_start(f)                               # f>0 : depuis f-1 ; f=0 : joints neutres + base à la cible pelvis
     répéter (SQP/trust-region) :
       evals    = evaluator.evaluate(q, poses)              # géométrie courante + jacobiennes (1 appel)
       problem  = assemble(evals, frame_targets[f], geo, config)  # ResidualBlocks + box constraints
@@ -152,7 +152,9 @@ Rappel : `ResidualBlock = ‖A·δv + A_obj·δξ + c‖²`, **poids repliés**.
   propre de l'objet : objet vs sol/autres objets).
 - **O** : `A = 0`, `A_obj = w_obj · I`, `c = w_obj · e_ξ` (écart pose courante ↔ `object_ref`).
 
-**`reg.py`** : `A = w_reg · I (nv)`, `c = 0` (damping posture, bonne condition du QP).
+**`reg.py`** : `A = w_reg · I (nv)`, `c = 0` (damping de pas, bonne condition du QP). *Variante notée (cf.
+Holosoma `q_nominal`)* : régularisation de **posture** `‖(q ⊕ δv) − q_nominal‖²` vers une pose nominale
+(p.ex. neutre ou la pose de style) plutôt qu'un simple damping — incrément simple si le damping seul dérive.
 
 **`constraints.py`** (← `RobotModel` + config) : limites articulaires (box sur les DOF de `δv`),
 trust-region **box** par-DOF. [non-pénétration `d ≥ 0` = incrément suivant.]
@@ -170,10 +172,12 @@ trust-region **box** par-DOF. [non-pénétration `d ≥ 0` = incrément suivant.
 
 ## Boucle + rétraction
 
-- `loop.py` : l'itéré SQP par frame (voir Flux). Warm-start frame `f>0` depuis `f-1` ; `f=0` =
-  `robot.neutral()` (cold start absorbé par `n_iter_first` ; un init plus malin — base flottante à la
-  cible pelvis de style — est une optimisation notée, pas v1). Convergence `‖dv‖ < step_tol` ou `n_iter`.
-  Trust-region **fixe** (adaptatif = incrément suivant). `prof.span` ici.
+- `loop.py` : l'itéré SQP par frame (voir Flux). Warm-start frame `f>0` depuis `f-1` ; **`f=0` = joints
+  neutres + base flottante placée à la cible pelvis de style** (`StyleTargets` pelvis : position +
+  orientation) — c'est l'**init natif de Holosoma** (`q_init = [human pelvis pos, human root quat,
+  joints=0]`), bien meilleur qu'une base à l'origine (seuls les joints convergent ; `n_iter_first`
+  absorbe ce raffinement). Convergence `‖dv‖ < step_tol` ou `n_iter`. Trust-region **fixe** (adaptatif =
+  incrément suivant). `prof.span` ici.
 - `retract.py` : `q ⊕ dv` via `robot.integrate` (Protocol, pinocchio-free) ; `pose_objet ⊕ dξ` via exp SE(3)
   numpy (quaternion exp + translation). Pur.
 - `runner.py` : entrée publique `solve(grounded, ctx, frame_targets, config) -> SolveTrajectory` ; construit
