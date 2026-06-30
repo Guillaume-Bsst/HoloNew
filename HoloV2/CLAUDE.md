@@ -65,7 +65,9 @@ redupliquer ici**). En bref : `SceneSpec`+`PrepareConfig` → **prepare/** (offl
 - Sol = canal `ground` : **toujours un `SDF`** — plan exact par défaut (`build_plane_sdf`, non caché)
   OU **terrain** (escalier/pente/climbing). `Channel.sdf` jamais `None` ⇒ éval homogène (chemin unique).
 - SMPL/meshes/robot instanciés **uniquement dans `prepare/`**.
-- **Commentaires autonomes** (pas de réf. à une discussion ; acronymes locaux définis).
+- **Commentaires autonomes** (pas de réf. à une discussion ; acronymes locaux définis), **rédigés en
+  anglais** (docstrings + commentaires inline). Le français reste pour CLAUDE.md, les messages de commit
+  et les échanges — JAMAIS dans le code.
 
 ## Tests & vérification (obligatoire)
 
