@@ -5,10 +5,12 @@ import numpy as np
 import pytest
 
 from src.viz.core.layer import Layer, UiState
+from src.viz.layers.fields import FieldsLayer
 from src.viz.layers.ghost import GhostLayer
 from src.viz.layers.human_cloud import HumanCloudLayer
 from src.viz.layers.objects import ObjectsLayer
 from src.viz.layers.skeleton import SkeletonLayer
+from src.viz.layers.style import StyleLayer
 
 
 class FakeHandle:
@@ -18,6 +20,7 @@ class FakeHandle:
         self.points = None
         self.colors = None
         self.point_size = 0.012
+        self.position = (0.0, 0.0, 0.0)
 
 
 class FakeCheckbox:
@@ -44,6 +47,10 @@ class FakeScene:
         """Retourne un fake handle pour le nuage de points."""
         return FakeHandle()
 
+    def add_label(self, *args, **kwargs):
+        """Retourne un fake handle pour une étiquette texte (StyleLayer)."""
+        return FakeHandle()
+
 
 class FakeServer:
     """Fake viser server."""
@@ -65,13 +72,17 @@ class FakeContext:
     channel_names = ("ground", "obj0")
     margin = 0.1
     n_objects = 1
+    style_link_names = ("link_a", "link_b")   # pour StyleLayer
 
 
 class FakeField:
-    """Fake MultiChannelField avec distance et active."""
+    """Fake MultiChannelField avec distance, active, witness et direction (pour FieldsLayer)."""
     def __init__(self, n_channels=2, n_points=10):
         self.distance = np.random.randn(n_channels, n_points).astype(np.float32)
         self.active = np.random.rand(n_channels, n_points) > 0.5
+        # Requis par FieldsLayer.update() : witness/direction en local canal
+        self.witness = np.random.randn(n_channels, n_points, 3).astype(np.float32)
+        self.direction = np.random.randn(n_channels, n_points, 3).astype(np.float32)
 
 
 class FakeContactEval:
@@ -87,16 +98,28 @@ class FakeEnvInteraction:
         self.per_object = [FakeContactEval(n_channels, n_points) for _ in range(n_objects)]
 
 
+class FakeStyleTargets:
+    """Fake StyleTargets avec position et orientation (quaternions wxyz identité)."""
+    def __init__(self, n_links=2):
+        self.position = np.random.randn(n_links, 3).astype(np.float32)
+        # Quaternions identité wxyz (w=1, x=y=z=0) pour éviter des rotations dégénérées
+        self.orientation = np.tile(np.array([1.0, 0.0, 0.0, 0.0]), (n_links, 1)).astype(np.float64)
+
+
 class FakeTargets:
-    """Fake FrameTargets avec env_interaction."""
-    def __init__(self, n_objects=1, n_channels=2, n_points=10):
+    """Fake FrameTargets avec env_interaction et style (pour StyleLayer)."""
+    def __init__(self, n_objects=1, n_channels=2, n_points=10, n_links=2):
         self.env_interaction = FakeEnvInteraction(n_objects, n_channels, n_points)
+        self.style = FakeStyleTargets(n_links)
 
 
 class FakePose:
-    """Fake pose avec bone_pos optionnel."""
-    def __init__(self, bone_pos=None):
+    """Fake pose avec bone_pos optionnel + object_rot/object_pos pour FieldsLayer."""
+    def __init__(self, bone_pos=None, n_objects=1):
         self.bone_pos = bone_pos
+        # Requis par FieldsLayer.update() pour la projection local objet -> monde
+        self.object_rot = np.tile(np.eye(3, dtype=np.float64), (n_objects, 1, 1))
+        self.object_pos = np.zeros((n_objects, 3), dtype=np.float64)
 
 
 # Sentinelle pour distinguer « non fourni » de « explicitement None »
@@ -132,6 +155,8 @@ class FakeUiState:
     (SkeletonLayer, "Skeleton"),
     (HumanCloudLayer, "Interaction - human"),
     (ObjectsLayer, "Static"),
+    (FieldsLayer, "Interaction - human"),
+    (StyleLayer, "Style targets"),
 ])
 def test_layer_structural(cls, folder):
     """Vérifie que chaque couche est une Layer avec le dossier GUI correct."""
@@ -338,3 +363,135 @@ def test_objects_update_happy_path():
     assert layer._handles[0].points is not None
     assert layer._handles[0].colors is not None
     assert layer._handles[0].visible == True
+
+
+# ---------------------------------------------------------------------------
+# FieldsLayer — gardes no-op + chemin nominal
+# ---------------------------------------------------------------------------
+
+def test_fields_update_human_field_none():
+    """Garde no-op : human_field=None → update() ne lève pas ET masque les deux handles."""
+    layer = FieldsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(human_field=None)
+    layer.update(frame, FakeUiState())
+
+    assert layer._wit.visible == False
+    assert layer._nrm.visible == False
+
+
+def test_fields_update_unknown_channel():
+    """Garde no-op : canal inconnu → update() ne lève pas (pas de ValueError) ET masque les handles."""
+    layer = FieldsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame()
+    ui = FakeUiState(channel="canal_inexistant")
+    layer.update(frame, ui)
+
+    assert layer._wit.visible == False
+    assert layer._nrm.visible == False
+
+
+def test_fields_update_happy_path_ground():
+    """Chemin nominal canal ground : sondes actives forcées → segments mis à jour, handles visibles.
+    Canal 0 = ground, witness/direction déjà en monde (pas de transformation locale->monde)."""
+    layer = FieldsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    # Forcer quelques sondes actives pour garantir que len(idx) > 0
+    rng = np.random.default_rng(42)
+    n_points = 10
+    field = FakeField(n_channels=2, n_points=n_points)
+    field.active[0, :5] = True   # 5 sondes actives sur le canal ground
+
+    pts_world = rng.random((n_points, 3)).astype(np.float32)
+    frame = FakeFrame(human_cloud_world=pts_world, human_field=field)
+    ui = FakeUiState(channel="ground")
+    layer.update(frame, ui)
+
+    # FakeCheckbox.value = True → les deux handles doivent être visibles et avoir des points
+    assert layer._wit.points is not None
+    assert layer._nrm.points is not None
+    assert layer._wit.visible == True
+    assert layer._nrm.visible == True
+
+
+def test_fields_update_happy_path_object_channel():
+    """Chemin nominal canal objet (c=1) : witness/direction projetés local->monde via (R, t)."""
+    layer = FieldsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    rng = np.random.default_rng(7)
+    n_points = 10
+    field = FakeField(n_channels=2, n_points=n_points)
+    field.active[1, :8] = True   # sondes actives sur le canal obj0
+
+    pts_world = rng.random((n_points, 3)).astype(np.float32)
+    frame = FakeFrame(human_cloud_world=pts_world, human_field=field)
+    ui = FakeUiState(channel="obj0")
+    layer.update(frame, ui)
+
+    # Doit avoir mis à jour les segments sans lever
+    assert layer._wit.points is not None
+    assert layer._wit.visible == True
+
+
+# ---------------------------------------------------------------------------
+# StyleLayer — gardes no-op + chemin nominal
+# ---------------------------------------------------------------------------
+
+def test_style_update_targets_none():
+    """Garde no-op : targets=None → update() ne lève pas ET masque points + repères + étiquettes."""
+    layer = StyleLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(targets=None)
+    layer.update(frame, FakeUiState())
+
+    assert layer._pts.visible == False
+    assert layer._frames.visible == False
+    for h in layer._labels:
+        assert h.visible == False
+
+
+def test_style_update_happy_path():
+    """Chemin nominal : style.position valide → points mis à jour et visibles ; repères visibles
+    avec orientation non-None ; étiquettes positionnées (cb_l=True dans FakeCheckbox)."""
+    layer = StyleLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    # FakeTargets inclut FakeStyleTargets (2 liens, quaternions identité)
+    frame = FakeFrame(targets=FakeTargets(n_objects=1, n_channels=2, n_points=10, n_links=2))
+    ui = FakeUiState()
+    layer.update(frame, ui)
+
+    # Points de position mis à jour et handle visible (FakeCheckbox.value = True)
+    assert layer._pts.points is not None
+    assert layer._pts.visible == True
+    # Repères d'orientation calculés (orientation non-None + cb_f=True)
+    assert layer._frames.points is not None
+    assert layer._frames.visible == True
+    # Étiquettes positionnées
+    for h in layer._labels:
+        assert h.position is not None
+
+
+def test_style_update_style_none():
+    """Garde no-op : frame.targets.style=None → masquer tous les handles sans lever."""
+    layer = StyleLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    # Construire un fake targets sans attribut style valide
+    class FakeTargetsNoStyle:
+        style = None
+        env_interaction = FakeEnvInteraction(1, 2, 10)
+
+    frame = FakeFrame(targets=FakeTargetsNoStyle())
+    layer.update(frame, FakeUiState())
+
+    assert layer._pts.visible == False
+    assert layer._frames.visible == False
+    for h in layer._labels:
+        assert h.visible == False
