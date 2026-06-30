@@ -47,3 +47,24 @@ def test_trust_region_bad_var_and_radius():
 def test_step_shapes():
     s = Step(dv=np.zeros(5), dxi=np.zeros((1, 6)), value=0.0, status="optimal")
     assert s.dv.shape == (5,) and s.dxi.shape == (1, 6)
+
+
+def test_linear_constraint_ub_row_mismatch_raises():
+    with pytest.raises(ValueError):                       # lb ok (3 rows), ub wrong (4)
+        Problem(nv=5, n_obj=0, residuals=(),
+                constraints=(LinearConstraint(A=np.zeros((3, 5)), lb=np.zeros(3),
+                                              ub=np.zeros(4), A_obj=None, name="c"),),
+                trust_regions=())
+
+
+def test_linear_constraint_bad_A_cols_raises():
+    with pytest.raises(ValueError):                       # A cols 4 != nv 5
+        Problem(nv=5, n_obj=0, residuals=(),
+                constraints=(LinearConstraint(A=np.zeros((2, 4)), lb=np.zeros(2),
+                                              ub=None, A_obj=None, name="c"),),
+                trust_regions=())
+
+
+def test_trust_region_bad_norm_raises():
+    with pytest.raises(ValueError):
+        TrustRegion(var="dv", radius=np.ones(3), norm=0)

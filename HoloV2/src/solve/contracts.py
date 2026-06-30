@@ -69,10 +69,11 @@ class Problem:
                 raise ValueError(f"{type(blk).__name__} {blk.name!r}: A has shape {blk.A.shape}, "
                                  f"expected (m, nv={self.nv})")
             m = blk.A.shape[0]
-            ref = blk.c if isinstance(blk, ResidualBlock) else (blk.lb if blk.lb is not None else blk.ub)
-            if ref is not None and ref.shape[0] != m:
-                raise ValueError(f"{type(blk).__name__} {blk.name!r}: A has {m} rows but a "
-                                 f"vector has {ref.shape[0]}")
+            vecs = [blk.c] if isinstance(blk, ResidualBlock) else [blk.lb, blk.ub]
+            for vec in vecs:
+                if vec is not None and vec.shape[0] != m:
+                    raise ValueError(f"{type(blk).__name__} {blk.name!r}: A has {m} rows but a "
+                                     f"vector has {vec.shape[0]}")
             if blk.A_obj is not None:
                 if self.n_obj == 0:
                     raise ValueError(f"{type(blk).__name__} {blk.name!r}: A_obj set but n_obj=0")
