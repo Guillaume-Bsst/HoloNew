@@ -95,3 +95,57 @@ class Step:
     dxi: np.ndarray | None    # (n_obj, 6)
     value: float
     status: str
+
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:                       # annotations only -> contracts stays numpy-only at runtime
+    from ..targets import StyleEval, ContactEval
+
+
+@dataclass(frozen=True)
+class FrameEval:
+    """Combined per-frame evaluator output: the style FK + the contact field/Jacobians at the current
+    ``(q, object_poses)``. Produced by the ``evaluate`` wrapper (``solve/loop.py``), consumed by
+    ``assemble``. A plain container (no shape logic) — the two members validate themselves."""
+
+    style: "StyleEval"
+    contact: "ContactEval"
+
+
+@dataclass(frozen=True)
+class FrameInfo:
+    """Per-frame solve diagnostic (weight tuning + benchmark). ``cost_by_term`` is the squared residual
+    norm per term (``S-pos`` / ``C-D`` / …) at the converged step — the #1 tuning tool."""
+
+    n_iters: int
+    status: str
+    cost: float
+    cost_by_term: dict[str, float]
+
+
+@dataclass(frozen=True)
+class SolveTrajectory:
+    """Runner output: the retargeted ``qpos`` trajectory + the per-frame object poses + diagnostics.
+    ``object_poses`` is ``(T, N, 7)`` (pos + quat wxyz) ; ``N = 0`` keeps the ``(T, 0, 7)`` shape."""
+
+    qpos: np.ndarray          # (T, nq)
+    object_poses: np.ndarray  # (T, N, 7)  pos + quat wxyz
+    info: tuple[FrameInfo, ...]
+
+    def __post_init__(self) -> None:
+        if self.qpos.ndim != 2:
+            raise ValueError(f"qpos must be 2-D (T, nq), got shape {self.qpos.shape}")
+        T = self.qpos.shape[0]
+        if self.object_poses.ndim != 3 or self.object_poses.shape[2] != 7:
+            raise ValueError(
+                f"object_poses must be (T, N, 7), got shape {self.object_poses.shape}")
+        if self.object_poses.shape[0] != T:
+            raise ValueError(
+                f"object_poses has {self.object_poses.shape[0]} frames but qpos has {T}")
+        if len(self.info) != T:
+            raise ValueError(f"info has {len(self.info)} entries but qpos has {T} frames")
+
+    @property
+    def n_frames(self) -> int:
+        return self.qpos.shape[0]
