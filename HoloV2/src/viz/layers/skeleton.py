@@ -28,8 +28,12 @@ class SkeletonLayer:
 
     def update(self, frame: VizFrame, ui: UiState) -> None:
         """Rafraîchit les points des segments depuis les positions d'os du frame courant."""
-        if self._pairs:
+        if self._pairs and frame.pose.bone_pos is not None:
             bp = np.asarray(frame.pose.bone_pos, np.float32)
             seg = np.stack([np.stack([bp[a], bp[b]]) for a, b in self._pairs]).astype(np.float32)
             self._handle.points = seg
-        self._handle.visible = self._cb.value
+            self._handle.visible = self._cb.value
+        else:
+            # Masquer le handle si les données ne sont pas disponibles
+            if self._handle is not None:
+                self._handle.visible = False
