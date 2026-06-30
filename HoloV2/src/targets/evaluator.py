@@ -30,7 +30,7 @@ class Evaluator:
     def __init__(self, ctx: InteractionContext, robot_name: str) -> None:
         self._ctx = ctx
         self._robot = ctx.robot
-        self._style_links: tuple[str, ...] = tuple(style_table(robot_name).keys())  # = StyleTargets order
+        self._style_links: tuple[str, ...] = tuple(style_table(robot_name).keys())  # = ordre StyleTargets
         missing = [n for n in self._style_links if n not in ctx.robot.link_names]
         if missing:
             raise ValueError(

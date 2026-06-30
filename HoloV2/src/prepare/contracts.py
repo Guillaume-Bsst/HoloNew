@@ -1,24 +1,27 @@
-"""Data contracts of the ``prepare`` stage — its PUBLIC type surface.
+"""Contrats de données de l'étape ``prepare`` — sa surface publique de TYPES.
 
-Every artifact ``prepare`` produces or consumes that crosses a module boundary is a FROZEN
-dataclass of numpy arrays (Structure-of-Arrays) or an interface PROTOCOL. DATA + PROTOCOLS only —
-no logic, no I/O, no heavy deps (numpy-only), so this module is importable everywhere.
+Chaque artefact que ``prepare`` produit ou consomme en franchissant une limite de module est une
+dataclass GELÉE de tableaux numpy (Structure-of-Arrays) ou un PROTOCOLE d'interface. DONNÉES +
+PROTOCOLES uniquement — pas de logique, pas d'I/O, pas de dépendances lourdes (numpy-only), donc
+ce module est importable partout.
 
-This is the stage's contract: downstream stages import their inputs FROM HERE (e.g. ``targets`` does
-``from ..prepare.contracts import GroundedScene, InteractionContext``), never from ``prepare``'s
-internal submodules. Knobs (the HOW) live apart in ``prepare/config.py``; this holds only the data
-(the WHAT) that flows. The pipeline is linear (prepare -> targets -> solve), so each stage owns its
-own contracts and depends only on the public types of the stage upstream — the dependency graph
-stays acyclic.
+C'est le contrat de l'étape : les étapes aval importent leurs entrées D'ICI (par ex. ``targets`` fait
+``from ..prepare.contracts import GroundedScene, InteractionContext``), jamais des sous-modules
+internes de ``prepare``. Les knobs (le HOW) vivent à part dans ``prepare/config.py`` ; celui-ci ne
+tient que les données (le WHAT) qui circulent. Le pipeline est linéaire (prepare → targets → solve),
+chaque étage possède ses propres contrats et ne dépend que des types publics de l'étage amont — le
+graphe de dépendances reste acyclique.
 
 Conventions
 -----------
-- Per-frame is the canonical unit. The current target is OFFLINE replay (``process_frame`` indexes a
-  loaded ``GroundedScene`` at frame ``f``); live teleoperation is a future variant on the same ops.
-- Two joint sets, kept distinct: ``J_demo`` (the dataset's joints, used by ``style``) and
-  ``J_bones`` (the SMPL skeleton, used to pose clouds). Never conflate them.
-- Quaternions are wxyz. Rigid poses are ``(x, y, z, qw, qx, qy, qz)``.
-- Arrays are read-only by convention (``frozen`` freezes the binding, not the buffer).
+- Per-frame est l'unité canonique. La cible actuelle est OFFLINE replay (``process_frame`` indexe une
+  ``GroundedScene`` chargée au frame ``f``) ; la téléopération en direct est une variante future des
+  mêmes opérations.
+- Deux ensembles de joints, maintenus distincts : ``J_demo`` (les joints du dataset, utilisés par
+  ``style``) et ``J_bones`` (le squelette SMPL, utilisé pour poser les nuages). Ne jamais les
+  confondre.
+- Les quaternions sont wxyz. Les poses rigides sont ``(x, y, z, qw, qx, qy, qz)``.
+- Les tableaux sont read-only par convention (``frozen`` gèle la liaison, pas le buffer).
 """
 from __future__ import annotations
 
@@ -30,144 +33,147 @@ import numpy as np
 
 
 # =============================================================================
-# Protocols (interfaces — concrete impls live in prepare/load/*)
+# Protocoles (interfaces — impls concrètes dans prepare/load/*)
 # =============================================================================
 @runtime_checkable
 class BodyModel(Protocol):
-    """Parametric human body (SMPL family). Concrete impl in ``prepare/load/smpl.py``.
-    Poses the body from per-frame params; ``bone_transforms`` gives the per-bone world
-    transforms used to pose the human cloud (mesh-free, via the sparse skinning)."""
+    """Corps humain paramétrique (famille SMPL). Impl concrète dans ``prepare/load/smpl.py``.
+    Pose le corps à partir de paramètres per-frame ; ``bone_transforms`` donne les transformations
+    monde per-os utilisées pour poser le nuage humain (mesh-free, via le skinning creux)."""
 
-    faces: np.ndarray  # (F, 3) int — topology, frame-invariant
+    faces: np.ndarray  # (F, 3) int — topologie, frame-invariant
     n_bones: int       # J_bones (52 SMPL-H / 55 SMPL-X)
-    stature: float     # subject rest stature (m), betas-FK — a pure rest-mesh property (no motion).
-                       # Lives on the body (its natural owner), NOT the calibration; feeds the
-                       # alimente le ratio du style : ``ratio = stature / StyleConfig.human_height_assumption``,
+    stature: float     # stature au repos du sujet (m), betas-FK — propriété pure rest-mesh (pas de mouvement).
+                       # Vit sur le corps (son propriétaire naturel), PAS sur la calibration ; alimente
+                       # le ratio du style : ``ratio = stature / StyleConfig.human_height_assumption``,
                        # appliqué dans ``targets`` via ``targets.config.SceneScaleConfig``.
 
     def posed_vertices(self, params: "SmplParams", t: int) -> np.ndarray:
-        """(V, 3) world mesh vertices at frame ``t`` (offline use: sampling, viz)."""
+        """(V, 3) sommets mesh monde au frame ``t`` (usage offline : sampling, viz)."""
 
     def bone_transforms(self, params: "SmplParams", t: int) -> tuple[np.ndarray, np.ndarray]:
-        """(J_bones,3,3) world rotations and (J_bones,3) world origins at frame ``t`` (FK)."""
+        """(J_bones,3,3) rotations monde et (J_bones,3) origines monde au frame ``t`` (FK)."""
 
     def rest_vertices(self, params: "SmplParams") -> np.ndarray:
-        """(V, 3) rest-pose vertices for the subject (sampling the cloud once)."""
+        """(V, 3) sommets en pose au repos pour le sujet (sampling du nuage une seule fois)."""
 
 
 @runtime_checkable
 class RobotModel(Protocol):
-    """Robot kinematics. Rest transforms (q-independent) are used by ``prepare`` to sample the G1
-    surface / build the correspondence; full FK + Jacobians (q-dependent) are used by ``solve`` via the
-    ``targets`` evaluator. Configuration ``q`` is a pinocchio FREE-FLYER vector
-    ``[pelvis(7: pos + quat xyzw), joints]`` of length ``nq``; the tangent ``v`` has dim
-    ``nv = 6 + n_joints``. Concrete impl in ``prepare/load/robot.py`` (pinocchio)."""
+    """Cinématique robot. Les transformations au repos (q-indépendantes) sont utilisées par ``prepare``
+    pour échantillonner la surface et construire la correspondance ; le FK complet + Jacobiens
+    (q-dépendants) sont utilisés par ``solve`` via l'évaluateur ``targets``. La configuration ``q``
+    est un vecteur free-flyer pinocchio ``[pelvis(7: pos + quat xyzw), joints]`` de longueur ``nq`` ;
+    la tangente ``v`` a pour dimension ``nv = 6 + n_joints``. Impl concrète dans ``prepare/load/robot.py``
+    (pinocchio)."""
 
     link_names: tuple[str, ...]
-    dof: int          # actuated joints (= nv - 6)
-    nq: int           # configuration dim (free-flyer)
-    nv: int           # tangent dim (= 6 + dof)
+    dof: int          # joints actionnés (= nv - 6)
+    nq: int           # dim configuration (free-flyer)
+    nv: int           # dim tangente (= 6 + dof)
 
     def link_transforms(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """(L,3,3) rotations, (L,3) positions: WORLD transform of each link for ``q`` (free-flyer)."""
+        """(L,3,3) rotations, (L,3) positions : transformation MONDE de chaque lien pour ``q`` (free-flyer)."""
 
     def rest_transforms(self) -> tuple[np.ndarray, np.ndarray]:
-        """Link transforms at the neutral configuration (base identity, joints 0)."""
+        """Transformations des liens à la configuration neutre (base identité, joints 0)."""
 
     def neutral(self) -> np.ndarray:
-        """Neutral configuration ``(nq,)`` (base identity with unit quaternion, joints 0)."""
+        """Configuration neutre ``(nq,)`` (base identité avec quaternion unitaire, joints 0)."""
 
     def integrate(self, q: np.ndarray, v: np.ndarray) -> np.ndarray:
-        """Manifold step ``q ⊕ v`` ``(nq,)`` (keeps the base quaternion unit)."""
+        """Pas variétal ``q ⊕ v`` ``(nq,)`` (préserve le quaternion base unitaire)."""
 
     def link_jacobians(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-        """For ``q``: (rot (L,3,3), pos (L,3), jac_lin (L,3,nv), jac_ang (L,3,nv)) in the WORLD frame,
-        aligned with ``link_names``. ``jac_lin``/``jac_ang`` are the LOCAL_WORLD_ALIGNED translational
-        / angular frame Jacobians: ``dp_world = jac_lin @ v``, ``omega_world = jac_ang @ v``."""
+        """Pour ``q`` : (rot (L,3,3), pos (L,3), jac_lin (L,3,nv), jac_ang (L,3,nv)) dans le repère
+        MONDE, alignés avec ``link_names``. ``jac_lin``/``jac_ang`` sont les Jacobiens de repère
+        translationnel/angulaire LOCAL_WORLD_ALIGNED : ``dp_world = jac_lin @ v``, ``omega_world = jac_ang @ v``."""
 
     def joint_pos_limits(self) -> tuple[np.ndarray, np.ndarray]:
-        """Actuated joint position limits ``(lower (dof,), upper (dof,))`` (rad), aligned with the
-        joint DOFs ``v[6:6+dof]`` / ``q[7:7+dof]``. Used by ``solve`` to box the joint step."""
+        """Limites de position des joints actionnés ``(lower (dof,), upper (dof,))`` (rad), alignées avec
+        les DOFs des joints ``v[6:6+dof]`` / ``q[7:7+dof]``. Utilisé par ``solve`` pour boxer le pas joint."""
 
 
 class AssetBuilder(Protocol):
-    """Common SHAPE of the offline deliverable builders (``prepare/``): calibration, sdf,
-    point_cloud. A NOMINAL guide (cache_key / build / load / save), NOT a strict polymorphic
-    interface: each concrete builder takes its OWN sub-config (a schema from ``prepare/config.py``)
-    plus its own specific inputs, so the real signatures differ. ``config``/inputs are typed
-    ``Any`` here for that reason, and ``@runtime_checkable`` is deliberately omitted — an
-    ``isinstance`` check over ``Any`` signatures would be a false guarantee. Each builder hashes
-    ONLY its relevant config subset (+ inputs + upstream keys), so a param change invalidates only
-    the affected items."""
+    """FORME commune des builders d'artefacts offline (``prepare/``) : calibration, sdf,
+    point_cloud. Un guide NOMINAL (cache_key / build / load / save), PAS une interface
+    polymorphique stricte : chaque builder concret prend sa propre sous-config (un schéma de
+    ``prepare/config.py``) plus ses propres entrées spécifiques, donc les vraies signatures
+    diffèrent. ``config``/inputs sont typés ``Any`` ici pour cette raison, et ``@runtime_checkable``
+    est intentionnellement omis — une vérification ``isinstance`` sur les signatures ``Any`` serait
+    une fausse garantie. Chaque builder hash UNIQUEMENT son sous-ensemble de config pertinent
+    (+ inputs + clés amont), donc un changement de param invalide seulement les éléments affectés."""
 
     def cache_key(self, config: Any, *inputs: Any) -> str:
-        """Stable key from the relevant config subset + inputs (geometry/subject hash)."""
+        """Clé stable du sous-ensemble de config pertinent + inputs (hash géométrie/sujet)."""
 
     def build(self, config: Any, *inputs: Any) -> Any:
-        """The heavy offline computation -> the asset."""
+        """Le calcul offline lourd → l'artefact."""
 
     def load(self, path: Path) -> Any: ...
     def save(self, asset: Any, path: Path) -> None: ...
 
 
 # =============================================================================
-# Entry: what to run (data identity) — distinct from the step config
+# Entrée : quoi exécuter (identité données) — distinct de la config d'étape
 # =============================================================================
 @dataclass(frozen=True)
 class RobotSpec:
-    """Identity of the target robot (drives loading, FK, cache keys)."""
+    """Identité du robot cible (détermine le chargement, FK, clés cache)."""
 
     name: str                      # "g1", "h1", "t1"
     urdf_path: Path
     link_names: tuple[str, ...]
     dof: int
-    height: float                  # nominal robot height (m); NOT used by the (robot-free) calibration.
-                                   # L'échelle de scène des refs n'utilise PAS ``robot_height/stature`` —
-                                   # elle utilise ``ratio = stature / StyleConfig.human_height_assumption``
+    height: float                  # hauteur robot nominale (m) ; NON utilisée par la calibration
+                                   # (robot-free). L'échelle de scène des refs n'utilise PAS
+                                   # ``robot_height/stature`` — elle utilise
+                                   # ``ratio = stature / StyleConfig.human_height_assumption``
                                    # (ratio du style), appliqué dans ``targets.config.SceneScaleConfig``.
 
 
 @dataclass(frozen=True)
 class SceneSpec:
-    """WHAT to run. The loader turns this into ``RawMotion``; cache keys mix this identity
-    with the relevant step-config subset (the schemas in ``prepare/config.py``)."""
+    """QUOI exécuter. Le loader transforme ceci en ``RawMotion`` ; les clés cache mélangent cette
+    identité avec le sous-ensemble pertinent de config d'étape (les schémas dans ``prepare/config.py``)."""
 
-    dataset: str                              # loader key (omomo/hodome/sfu/hoim3)
-    motion_path: Path                         # the sequence
+    dataset: str                              # clé loader (omomo/hodome/sfu/hoim3)
+    motion_path: Path                         # la séquence
     robot: RobotSpec
-    smpl_model_dir: Path | None = None        # parametric body model dir (None ok => style-only)
-    object_mesh_paths: tuple[Path, ...] = ()  # optional override; else resolved by the loader
-    ground_mesh_path: Path | None = None      # None => flat ground (plane SDF); else terrain mesh -> SDF
-    cache_dir: Path | None = None             # default: HoloV2/cache/
-    dataset_root: Path | None = None          # release root for auxiliary metadata kept apart from
-                                              # motion_path (OMOMO betas/scales + captured meshes)
-    person_id: int | None = None             # multi-person datasets: which person to retarget
-                                              # (None => the first present); ignored if single-person
-    object_names: tuple[str, ...] | None = None  # named-object datasets: subset to load
-                                              # (None => all); ignored if objects are unnamed
-    smplh_dir: Path | None = None             # HOI-M3 only: SMPL-H model dir (holds <gender>/model.npz);
-                                              # None => derive by convention from smpl_model_dir
-    smpl2smplx_pkl: Path | None = None        # HOI-M3 only: SMPL->SMPL-X deformation-transfer .pkl;
-                                              # None => derive by convention from smpl_model_dir
+    smpl_model_dir: Path | None = None        # répertoire modèle corps paramétrique (None ok => style-only)
+    object_mesh_paths: tuple[Path, ...] = ()  # override optionnel ; sinon résolu par le loader
+    ground_mesh_path: Path | None = None      # None => sol plat (SDF plan) ; sinon terrain mesh → SDF
+    cache_dir: Path | None = None             # défaut : HoloV2/cache/
+    dataset_root: Path | None = None          # racine release pour métadonnées auxiliaires séparées de
+                                              # motion_path (OMOMO betas/scales + meshes capturés)
+    person_id: int | None = None             # datasets multi-personne : quelle personne retargeter
+                                              # (None => la première présente) ; ignoré si mono-personne
+    object_names: tuple[str, ...] | None = None  # datasets objets nommés : sous-ensemble à charger
+                                              # (None => tous) ; ignoré si objets sans nom
+    smplh_dir: Path | None = None             # HOI-M3 uniquement : répertoire modèle SMPL-H
+                                              # (contient <gender>/model.npz) ; None => dériver par
+                                              # convention de smpl_model_dir
+    smpl2smplx_pkl: Path | None = None        # HOI-M3 uniquement : transfer deformation .pkl SMPL→SMPL-X ;
+                                              # None => dériver par convention de smpl_model_dir
 
 
 # =============================================================================
-# load/ — raw motion & parametric body params
+# load/ — mouvement brut et paramètres corps paramétrique
 # =============================================================================
 @dataclass(frozen=True)
 class SmplParams:
-    """Per-frame parameters of a parametric body (SMPL-H / SMPL-X). Includes the HANDS
-    (needed for grasp); SMPL-X face params are optional."""
+    """Paramètres per-frame d'un corps paramétrique (SMPL-H / SMPL-X). Inclut les MAINS
+    (nécessaires pour la préhension) ; les paramètres de face SMPL-X sont optionnels."""
 
-    betas: np.ndarray            # (B,)        subject shape (time-invariant)
-    global_orient: np.ndarray    # (T, 3)      root orientation, axis-angle
-    body_pose: np.ndarray        # (T, 21*3)   body joint rotations, axis-angle
+    betas: np.ndarray            # (B,)        forme sujet (time-invariant)
+    global_orient: np.ndarray    # (T, 3)      orientation racine, axis-angle
+    body_pose: np.ndarray        # (T, 21*3)   rotations joints corps, axis-angle
     left_hand_pose: np.ndarray   # (T, 15*3)
     right_hand_pose: np.ndarray  # (T, 15*3)
-    transl: np.ndarray           # (T, 3)      root translation
+    transl: np.ndarray           # (T, 3)      translation racine
     gender: str                  # "neutral" | "male" | "female"
     model_type: str              # "smplh" | "smplx"
-    jaw_pose: np.ndarray | None = None     # (T, 3)   SMPL-X only
+    jaw_pose: np.ndarray | None = None     # (T, 3)   SMPL-X uniquement
     leye_pose: np.ndarray | None = None    # (T, 3)
     reye_pose: np.ndarray | None = None    # (T, 3)
     expression: np.ndarray | None = None   # (T, E)
@@ -179,18 +185,19 @@ class SmplParams:
 
 @dataclass(frozen=True)
 class RawMotion:
-    """Output of a ``prepare/load/`` dataset loader — uniform across formats, BEFORE
-    calibration. Every current loader is PARAMETRIC (fills ``smpl_params``); the ``| None`` is a
-    structural provision for a future positions-only source, NOT an active path. When
-    ``smpl_params is None`` there is no body to pose, and the bone-based ``targets`` pipeline (style +
-    interaction both need the body's FK) does not run — see ``is_parametric``."""
+    """Sortie d'un dataset loader ``prepare/load/`` — uniforme entre formats, AVANT calibration.
+    Chaque loader courant est PARAMÉTRIQUE (remplit ``smpl_params``) ; le ``| None`` est une
+    provision structurelle pour une future source positions-only, PAS un chemin actif. Quand
+    ``smpl_params is None`` il n'y a pas de corps à poser, et le pipeline ``targets`` basé os
+    (style + interaction ont tous les deux besoin du FK du corps) ne s'exécute pas — voir
+    ``is_parametric``."""
 
-    joint_pos: np.ndarray                 # (T, J_demo, 3) world joint positions (always present)
+    joint_pos: np.ndarray                 # (T, J_demo, 3) positions joints monde (toujours présent)
     joint_names: tuple[str, ...]          # (J_demo,)
     fps: float
     source_format: str
-    object_poses_raw: tuple[np.ndarray, ...]  # one (T, 7) per object
-    object_mesh_paths: tuple[Path, ...]       # one per object, aligned with poses
+    object_poses_raw: tuple[np.ndarray, ...]  # un (T, 7) par objet
+    object_mesh_paths: tuple[Path, ...]       # un par objet, aligné avec poses
     smpl_params: SmplParams | None = None
 
     @property
@@ -203,68 +210,69 @@ class RawMotion:
 
 
 # =============================================================================
-# calibration — scene geometry & grounding
+# calibration — géométrie scène et ancrage
 # =============================================================================
 @dataclass(frozen=True)
 class ObjectMesh:
-    """A rigid object: geometry in its local frame + per-frame world pose. Built on demand
-    by ``prepare/load/mesh.py`` (offline only — never reaches the runtime/solve)."""
+    """Un objet rigide : géométrie dans son repère local + pose monde per-frame. Construit à la
+    demande par ``prepare/load/mesh.py`` (offline uniquement — n'atteint jamais le runtime/solve)."""
 
-    vertices: np.ndarray  # (V, 3) object-local frame
+    vertices: np.ndarray  # (V, 3) repère local objet
     faces: np.ndarray     # (F, 3) int
-    poses: np.ndarray     # (T, 7) world pose per frame [x,y,z,qw,qx,qy,qz]
+    poses: np.ndarray     # (T, 7) pose monde par frame [x,y,z,qw,qx,qy,qz]
     name: str
-    static: bool = False  # constant pose over T -> eval can skip the per-frame transform
+    static: bool = False  # pose constante sur T → eval peut ignorer la transformation per-frame
 
 
 @dataclass(frozen=True)
 class Calibration:
-    """Per-(subject, take) GROUNDING. ROBOT-FREE *and* BODY-FREE: built from the mocap demo joints
-    (human floor) and the object meshes/poses (object floor) alone — no betas/body needed — so it
-    caches per take independently of the target robot. The subject's ``stature`` lives on the
-    ``BodyModel`` (its natural rest-mesh owner), and the human->robot scale does NOT belong here —
-    l'échelle de scène des refs utilise ``ratio = stature / StyleConfig.human_height_assumption``
-    (le ratio du style), appliquée dans ``targets`` via ``targets.config.SceneScaleConfig``.
+    """ANCRAGE per-(sujet, prise). ROBOT-FREE *ET* BODY-FREE : construit à partir des joints démo mocap
+    (sol humain) et des meshes/poses objets (sol objet) seuls — pas de betas/body nécessaires — donc
+    cache par prise indépendamment du robot cible. La ``stature`` du sujet vit sur ``BodyModel`` (son
+    propriétaire naturel rest-mesh), et l'échelle human→robot n'y appartient PAS — l'échelle de scène
+    des refs utilise ``ratio = stature / StyleConfig.human_height_assumption`` (le ratio du style),
+    appliquée dans ``targets`` via ``targets.config.SceneScaleConfig``.
 
-    Single-human, multi-object: the human and the objects each ground by their OWN z-shift (the human
-    may float while the objects already rest on the floor, so one shared scene shift would push them
-    through it). ``human_offset`` grounds the human (its feet); ``object_offset`` is a SINGLE shift
-    shared by ALL objects (grounds the lowest-reaching object just above the floor, keeping
-    inter-object geometry). Offline asset, NOT a geometry cache: (subject, take).
+    Mono-humain, multi-objet : l'humain et les objets s'ancrent chacun par leur PROPRE décalage z
+    (l'humain peut flotter tandis que les objets reposent déjà au sol, donc un décalage scène partagé
+    les pousserait à travers). ``human_offset`` ancre l'humain (ses pieds) ; ``object_offset`` est UN
+    SEUL décalage partagé par TOUS les objets (ancre l'objet qui touche le sol juste au-dessus du sol,
+    gardant la géométrie inter-objets). Asset offline, PAS un cache géométrie : (sujet, prise).
 
-    TODO: a finer per-object / inter-object calibration could ground each object and jointly optimise
-    the object<->object & object<->floor contacts (then ``object_offset`` -> per-object offsets)."""
+    TODO : une calibration par-objet/inter-objets plus fine pourrait ancrer chaque objet et optimiser
+    conjointement les contacts objet↔objet & objet↔sol (alors ``object_offset`` → décalages par-objet)."""
 
-    human_offset: float                  # z-shift grounding the human (feet -> floor)
-    object_offset: float                 # z-shift shared by ALL objects (lowest-reaching object -> ~floor)
-    root_frame: np.ndarray               # (4, 4) world transform framing the root
+    human_offset: float                  # décalage z ancrant l'humain (pieds → sol)
+    object_offset: float                 # décalage z partagé par TOUS les objets (objet qui touche → ~sol)
+    root_frame: np.ndarray               # (4, 4) transformation monde encadrant la racine
 
 
 @dataclass(frozen=True)
 class GroundedScene:
-    """Output of ``prepare`` (loaded motion with calibration applied). The single input of both
-    treatments (style, interaction). The grounding ``Calibration`` rides inside (provenance/viz), so
-    ``prepare`` returns just ``(GroundedScene, InteractionContext)``.
+    """Sortie de ``prepare`` (mouvement chargé avec calibration appliquée). L'unique entrée des deux
+    traitements (style, interaction). L'ancrage ``Calibration`` voyage dedans (provenance/viz), donc
+    ``prepare`` retourne juste ``(GroundedScene, InteractionContext)``.
 
-    Carries the subject's ``body`` (the live posing engine): per frame, ``interaction`` poses the
-    human cloud via ``body.bone_transforms(smpl_params, f)``. The body is typed by the numpy-only
-    ``BodyModel`` PROTOCOL, so ``targets`` calls it while staying torch-free at import (torch is
-    hidden inside the instance, built once in ``prepare``). Object meshes stay mesh PATHS, NOT live
-    geometry — the asymmetry is principled: the human DEFORMS (needs per-frame FK), objects are RIGID
-    (a pose7 + the pre-sampled object cloud suffice). ``style`` also reads the body (it tracks the SMPL
-    BONES, not the demo joints); ``solve`` never sees a ``GroundedScene`` (it consumes ``FrameTargets``)
-    — so no heavy object reaches it. ``body is None`` <=> a positions-only source (no SMPL params): a
-    STRUCTURAL placeholder, not a wired path — the ``targets`` pipeline is bone-based (style + cloud
-    posing both need the body's FK) and raises on ``body is None``."""
+    Porte le ``body`` du sujet (le moteur de pose live) : per frame, ``interaction`` pose le nuage
+    humain via ``body.bone_transforms(smpl_params, f)``. Le body est typé par le PROTOCOLE numpy-only
+    ``BodyModel``, donc ``targets`` l'appelle tout en restant torch-free à l'import (torch est caché
+    à l'intérieur de l'instance, construit une fois dans ``prepare``). Les meshes objets restent des
+    CHEMINS mesh, PAS de géométrie live — l'asymétrie est justifiée : l'humain DEFORME (a besoin de FK
+    per-frame), les objets sont RIGIDES (une pose7 + le nuage objet pré-échantillonné suffisent).
+    ``style`` lit aussi le body (il suit les OS SMPL, pas les joints démo) ; ``solve`` ne voit jamais de
+    ``GroundedScene`` (consomme ``FrameTargets``) — donc aucun objet lourd ne l'atteint. ``body is None``
+    ⇔ source positions-only (pas de params SMPL) : un placeholder STRUCTUREL, pas un chemin câblé — le
+    pipeline ``targets`` est basé os (style + cloud posing ont tous deux besoin du FK du body) et lève sur
+    ``body is None``."""
 
-    joint_pos: np.ndarray                  # (T, J_demo, 3) grounded demo joints — style
+    joint_pos: np.ndarray                  # (T, J_demo, 3) joints démo ancrés — style
     joint_names: tuple[str, ...]           # (J_demo,)
-    object_poses: tuple[np.ndarray, ...]   # grounded world pose (T, 7) per object
-    object_mesh_paths: tuple[Path, ...]    # geometry pulled on demand by prepare
+    object_poses: tuple[np.ndarray, ...]   # pose monde ancrée (T, 7) par objet
+    object_mesh_paths: tuple[Path, ...]    # géométrie tirée à la demande par prepare
     calibration: Calibration
     fps: float
-    smpl_params: SmplParams | None = None  # grounded params -> consumed by ``body.bone_transforms``
-    body: BodyModel | None = None          # the subject's live posing engine (None => positions-only)
+    smpl_params: SmplParams | None = None  # params ancrés → consommés par ``body.bone_transforms``
+    body: BodyModel | None = None          # moteur de pose live du sujet (None => positions-only)
 
     @property
     def n_frames(self) -> int:
@@ -280,25 +288,26 @@ class GroundedScene:
 
 
 # =============================================================================
-# sdf / point_cloud — build-once geometry assets (the interaction inputs)
+# sdf / point_cloud — assets géométrie build-once (les entrées interaction)
 # =============================================================================
 @dataclass(frozen=True)
 class SDF:
-    """Signed-distance grid of a rigid surface, in its local frame — for objects, terrain ground
-    AND the flat ground (a plane is an affine field, so trilinear sampling reproduces it EXACTLY on a
-    tiny grid; it is an ordinary SDF too, keeping every channel homogeneous — see ``build_plane_sdf``).
+    """Grille de distance signée d'une surface rigide, dans son repère local — pour objets, terrain
+    ET sol plat (un plan est un champ affine, donc l'interpolation trilinéaire le reproduit EXACTEMENT
+    sur une petite grille ; c'est aussi un SDF ordinaire, gardant chaque canal homogène — voir
+    ``build_plane_sdf``).
 
-    Carries a WITNESS grid (nearest surface point per node) alongside the distance: the eval
-    reconstructs the contact direction as ``normalize(probe - witness)`` from the trilinearly
-    interpolated witness, which stays a true unit vector near sharp box edges/corners — where a
-    finite-difference gradient of the distance grid is unstable. Sampled by trilinear interpolation
-    in the eval (``targets/interaction/eval.py``); pure data here (no method)."""
+    Porte une grille WITNESS (point de surface le plus proche par nœud) à côté de la distance : l'eval
+    reconstruit la direction de contact comme ``normalize(probe - witness)`` à partir du witness
+    interpolé trilinéairement, qui reste un vrai vecteur unitaire près des arêtes/coins de box aigus —
+    où le gradient différence finie de la grille de distance est instable. Échantillonné par interpolation
+    trilinéaire dans l'eval (``targets/interaction/eval.py``) ; pure données ici (pas de méthode)."""
 
-    grid: np.ndarray     # (Nx, Ny, Nz) signed distance (negative = inside)
-    witness: np.ndarray  # (Nx, Ny, Nz, 3) nearest surface point per node, local frame
-    origin: np.ndarray   # (3,) local coords of node (0, 0, 0)
-    spacing: float       # isotropic voxel size (m)
-    name: str            # channel name, e.g. "obj0" / "ground"
+    grid: np.ndarray     # (Nx, Ny, Nz) distance signée (négatif = intérieur)
+    witness: np.ndarray  # (Nx, Ny, Nz, 3) point de surface le plus proche par nœud, repère local
+    origin: np.ndarray   # (3,) coords locales du nœud (0, 0, 0)
+    spacing: float       # taille voxel isotrope (m)
+    name: str            # nom du canal, p. ex. "obj0" / "ground"
 
     def __post_init__(self) -> None:
         if self.witness.shape != self.grid.shape + (3,):
@@ -335,19 +344,19 @@ class GeodesicTable:
 
 @dataclass(frozen=True)
 class Channel:
-    """One evaluation channel = a signed-distance source + its per-frame pose binding. Makes the
-    ground/object alignment EXPLICIT (no implicit N vs N+1 offset). EVERY channel carries an ``sdf``
-    so the eval has a SINGLE trilinear path (homogeneous, no flat-ground special case); ``object_idx``
-    only sets the pose binding:
+    """Un canal d'évaluation = une source distance-signée + sa liaison pose per-frame. Rend
+    l'alignement sol/objet EXPLICITE (pas de décalage implicite N vs N+1). CHAQUE canal porte un
+    ``sdf`` pour que l'eval ait UN SEUL chemin trilinéaire (homogène, pas de cas spécial sol-plat) ;
+    ``object_idx`` ne fait que fixer la liaison pose :
 
-    - ``object_idx is None`` => the static GROUND in the world frame. Its ``sdf`` is a plane grid by
-      default (a plane is affine, so a tiny grid reproduces ``z`` EXACTLY) or a TERRAIN grid
-      (stairs/slope/climbing).
-    - ``object_idx`` set      => object ``object_idx``, its ``sdf`` posed by ``object_poses[object_idx][f]``."""
+    - ``object_idx is None`` => le SOL statique dans le repère monde. Son ``sdf`` est une grille de plan
+      par défaut (un plan est affine, donc une petite grille reproduit ``z`` EXACTEMENT) ou une grille
+      TERRAIN (escaliers/pente/escalade).
+    - ``object_idx`` défini  => objet ``object_idx``, son ``sdf`` posé par ``object_poses[object_idx][f]``."""
 
     name: str
-    object_idx: int | None        # None = static ground (world) ; else index into object_poses/clouds
-    sdf: SDF                       # the signed-distance grid (ground plane / terrain / object)
+    object_idx: int | None        # None = sol statique (monde) ; sinon index dans object_poses/clouds
+    sdf: SDF                       # grille distance-signée (plan sol / terrain / objet)
     geodesic: "GeodesicTable | None" = None   # None = sol PLAN (le coût retombe sur l'euclidien
                                               # analytique, qui EST la géodésique exacte d'un plan) ;
                                               # sinon objet/terrain. Seule entorse au "jamais de None"
@@ -356,21 +365,21 @@ class Channel:
 
 @dataclass(frozen=True)
 class PointCloud:
-    """Surface samples carrying their own SPARSE SKINNING, posed from part transforms alone
-    (mesh-free, torch-free), uniformly for every part kind:
-      - object: K=1, weight 1, part = the rigid body.
-      - robot : K=1, weight 1, part = the link (posed by FK).
-      - human : K~4, LBS-on-cloud blend over the dominant SMPL bones (closes joint creases).
+    """Échantillons de surface portant leur propre SKINNING CREUX, posés à partir des transformations
+    partie seules (mesh-free, torch-free), uniformément pour chaque sorte de partie :
+      - objet : K=1, poids 1, partie = le corps rigide.
+      - robot : K=1, poids 1, partie = le lien (posé par FK).
+      - humain : K~4, blend LBS-on-cloud sur les os SMPL dominants (ferme les plis articulaires).
 
-    Posing one frame, given each part's world transform ``T[j] = (R_j, t_j)``:
+    Pose un frame, donnée la transformation monde de chaque partie ``T[j] = (R_j, t_j)`` :
         p_world[i] = sum_k weights[i,k] * (R[parts[i,k]] @ offsets[i,k] + t[parts[i,k]])
-    ``offsets`` are in each part's REST-local frame (skinning baked once offline)."""
+    ``offsets`` sont dans le repère REST-local de chaque partie (skinning cuit une fois offline)."""
 
-    parts: np.ndarray     # (P, K) int    part/bone index per influence
-    weights: np.ndarray   # (P, K) float  rows sum to 1 (K=1 => rigid)
-    offsets: np.ndarray   # (P, K, 3)     point in part k's rest-local frame
-    sampling_id: str = "" # identity of the sampling (density/seed/topology) — binds to the
-                          # correspondence built against it (see CorrespondenceTable)
+    parts: np.ndarray     # (P, K) int    index partie/os par influence
+    weights: np.ndarray   # (P, K) float  lignes somment à 1 (K=1 => rigide)
+    offsets: np.ndarray   # (P, K, 3)     point dans repère rest-local de partie k
+    sampling_id: str = "" # identité du sampling (densité/seed/topologie) — se lie à la
+                          # correspondance construite contre lui (voir CorrespondenceTable)
 
     @property
     def n_points(self) -> int:
@@ -383,18 +392,18 @@ class PointCloud:
 
 @dataclass(frozen=True)
 class CorrespondenceTable:
-    """Fixed SMPL <-> robot surface correspondence (built once by optimal transport, OT).
+    """Correspondance fixe SMPL ↔ surface robot (construite une fois par transport optimal, OT).
 
-    Pairs M points: human side (``smpl_idx`` into the SMPL cloud) and robot side
-    (``link_idx`` + ``offset_local`` in that link's frame). Transport copies the human field
-    at ``smpl_idx[m]`` onto robot point m. VALID ONLY for the SMPL cloud whose
-    ``sampling_id == smpl_sampling_id`` (assert at assembly)."""
+    Appaire M points : côté humain (``smpl_idx`` dans le nuage SMPL) et côté robot (``link_idx`` +
+    ``offset_local`` dans le repère de ce lien). Le transport copie le champ humain à ``smpl_idx[m]``
+    sur le point robot m. VALIDE UNIQUEMENT pour le nuage SMPL dont ``sampling_id == smpl_sampling_id``
+    (assert à l'assemblage)."""
 
-    smpl_idx: np.ndarray         # (M,) index into the SMPL PointCloud's point order
-    link_idx: np.ndarray         # (M,) robot link index (into link_names)
-    offset_local: np.ndarray     # (M, 3) robot point in that link's frame
+    smpl_idx: np.ndarray         # (M,) index dans l'ordre de points du PointCloud SMPL
+    link_idx: np.ndarray         # (M,) index lien robot (dans link_names)
+    offset_local: np.ndarray     # (M, 3) point robot dans le repère de ce lien
     link_names: tuple[str, ...]  # (L,)
-    smpl_sampling_id: str = ""   # the human-cloud sampling this was built against
+    smpl_sampling_id: str = ""   # le sampling nuage humain contre lequel celui-ci a été construit
 
     @property
     def n_points(self) -> int:
@@ -403,24 +412,24 @@ class CorrespondenceTable:
 
 @dataclass(frozen=True)
 class InteractionContext:
-    """All build-once assets for the interaction treatment, passed explicitly (no globals).
+    """Tous les assets build-once pour le traitement interaction, passés explicitement (pas de globals).
 
-    Invariants (checked at assembly):
-    - ``channels[0]`` is the GROUND (static; a plane SDF by default, or a terrain SDF);
-      the rest are object channels with ``object_idx`` aligned to ``object_clouds`` and the
-      scene's object order.
+    Invariants (vérifiés à l'assemblage) :
+    - ``channels[0]`` est le SOL (statique ; SDF plan par défaut, ou SDF terrain) ;
+      le reste sont des canaux objets avec ``object_idx`` alignés avec ``object_clouds`` et
+      l'ordre objets de la scène.
     - ``human_cloud.sampling_id == correspondence.smpl_sampling_id``.
-    - ``robot_cloud.n_points == correspondence.n_points`` (same M points)."""
+    - ``robot_cloud.n_points == correspondence.n_points`` (mêmes M points)."""
 
-    channels: tuple[Channel, ...]          # ground (static) + one per object
-    human_cloud: PointCloud                # on the SMPL surface
-    object_clouds: tuple[PointCloud, ...]  # one per object (object_clouds[i] <-> channel object_idx=i)
-    correspondence: CorrespondenceTable    # SMPL -> robot (STATIC binding)
-    margin: float                          # field activation margin (m)
-    robot_cloud: PointCloud                # the M correspondence robot points as a K=1 cloud, parts
-                                           # in robot FK link order — solve poses it at q (online re-eval)
-    robot: RobotModel                      # q-dependent kinematics engine (FK to pose robot_cloud);
-                                           # mirrors GroundedScene.body, heavy deps hidden in the instance
+    channels: tuple[Channel, ...]          # sol (statique) + un par objet
+    human_cloud: PointCloud                # sur la surface SMPL
+    object_clouds: tuple[PointCloud, ...]  # un par objet (object_clouds[i] ↔ channel object_idx=i)
+    correspondence: CorrespondenceTable    # SMPL → robot (liaison STATIQUE)
+    margin: float                          # marge activation champ (m)
+    robot_cloud: PointCloud                # les M points robot de correspondance comme nuage K=1, parties
+                                           # dans l'ordre lien FK robot — solve les pose à q (re-eval online)
+    robot: RobotModel                      # moteur cinématique q-dépendant (FK pour poser robot_cloud) ;
+                                           # miroir de GroundedScene.body, dépendances lourdes cachées
 
     @property
     def channel_names(self) -> tuple[str, ...]:

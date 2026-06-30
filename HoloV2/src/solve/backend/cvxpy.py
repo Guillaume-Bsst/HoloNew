@@ -1,6 +1,6 @@
-"""cvxpy backend — translates a ``Problem`` into a ``cp.Problem`` and solves it. Objective = sum of
-``cp.sum_squares`` over the residual blocks ; constraints = affine ; trust regions = box (∞-norm →
-QP ; CVXPY routes to OSQP). **cvxpy is imported ONLY here** — the rest of ``solve`` stays cvxpy-free."""
+"""Backend cvxpy — transforme un ``Problem`` en ``cp.Problem`` et le résout. Objectif = somme de
+``cp.sum_squares`` sur les blocs résiduels ; contraintes = affines ; régions de confiance = box (∞-norm →
+QP ; CVXPY routage vers OSQP). **cvxpy est importé UNIQUEMENT ici** — le reste de ``solve`` reste cvxpy-free."""
 from __future__ import annotations
 
 import numpy as np
@@ -9,7 +9,7 @@ from ..contracts import Problem, Step
 
 
 class CvxpyBackend:
-    """``SolveBackend`` impl over cvxpy. v1 : box trust regions only (QP)."""
+    """Impl ``SolveBackend`` sur cvxpy. v1 : régions de confiance box uniquement (QP)."""
 
     def solve(self, problem: Problem) -> Step:
         import cvxpy as cp
@@ -41,8 +41,8 @@ class CvxpyBackend:
             if tr.norm == -1:                                   # box (∞-norm) -> QP
                 cons.append(var <= tr.radius)
                 cons.append(var >= -tr.radius)
-            else:                                               # norm == 2 (L2/SOC) — v1 = box only
-                raise NotImplementedError("L2 trust region (norm=2) is a future increment; v1 = box")
+            else:                                               # norm == 2 (L2/SOC) — v1 = box uniquement
+                raise NotImplementedError("région de confiance L2 (norm=2) est un incrément futur; v1 = box")
 
         cp_prob = cp.Problem(cp.Minimize(cost), cons)
         cp_prob.solve()

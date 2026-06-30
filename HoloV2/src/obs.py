@@ -1,20 +1,20 @@
-"""Observability for HoloV2 — nested timing spans + structured events.
+"""Observabilité pour HoloV2 — spans de temps imbriqués + événements structurés.
 
-Opt-in and **no-op when disabled** (the fast path pays ~nothing). Used ONLY at the
-orchestrator seams (``prepare/runner``, ``targets/pipeline``) — NEVER inside the pure ops
-they call, so the compute stays clean. This is the timing/log analogue of ``viz`` reading
-``FrameTrace``: observability is a wrapper, not an embedded hook.
+Opt-in et **no-op quand désactivé** (le chemin rapide coûte ~rien). Utilisé UNIQUEMENT aux
+seams de l'orchestrateur (``prepare/runner``, ``targets/pipeline``) — JAMAIS à l'intérieur des ops purs
+qu'ils appellent, donc le calcul reste propre. C'est l'analogue timing/log de ``viz`` lisant
+``FrameTrace`` : l'observabilité est un wrapper, pas un hook imbriqué.
 
-Usage
------
-    prof = Profile()                      # enabled
+Utilisation
+-----------
+    prof = Profile()                      # activé
     with prof.span("frame", f=12):
         with prof.span("eval", n_points=3925, n_channels=3):
             ...
         prof.event("sdf cache hit", item="obj0")
-    print(prof.render())                  # indented tree with durations + %
+    print(prof.render())                  # arbre indenté avec durées + %
 
-    process_frame(..., prof=NULL)         # default everywhere -> ~zero overhead
+    process_frame(..., prof=NULL)         # défaut partout → ~zéro surcharge
 """
 from __future__ import annotations
 
@@ -27,15 +27,15 @@ from dataclasses import dataclass, field
 class Span:
     name: str
     meta: dict
-    duration: float = 0.0                       # seconds; 0 for point events
+    duration: float = 0.0                       # secondes ; 0 pour les événements ponctuels
     is_event: bool = False
     children: list["Span"] = field(default_factory=list)
 
 
 class Profile:
-    """Collects a nested span tree. ``enabled=False`` makes ``span``/``event`` no-ops.
+    """Collecte un arbre de spans imbriqué. ``enabled=False`` rend ``span``/``event`` des no-ops.
 
-    Pass an optional ``logger`` to also emit one structured debug line per span on exit.
+    Passer un ``logger`` optionnel pour émettre aussi une ligne de débogage structurée par span à la sortie.
     """
 
     def __init__(self, enabled: bool = True, logger=None) -> None:
@@ -73,7 +73,7 @@ class Profile:
         return self._root
 
     def render(self) -> str:
-        """Indented flame-tree: name, duration (ms), % of parent, and meta."""
+        """Arbre enflammé indenté : nom, durée (ms), % du parent, et métadonnées."""
         lines: list[str] = []
 
         def walk(span: Span, depth: int, parent_dur: float) -> None:
@@ -91,6 +91,6 @@ class Profile:
         return "\n".join(lines)
 
 
-# Shared disabled singleton — the default everywhere. Safe to share: when disabled,
-# span/event return immediately and never mutate state.
+# Singleton partagé désactivé — le défaut partout. Sûr à partager : quand désactivé,
+# span/event retournent immédiatement et ne mutent jamais l'état.
 NULL = Profile(enabled=False)

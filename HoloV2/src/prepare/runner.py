@@ -1,19 +1,19 @@
-"""prepare/ orchestrator — builds (or loads from cache) the build-once assets and assembles
-the prepare outputs for a scene.
+"""Orchestrateur prepare/ — construit (ou charge du cache) les assets build-once et assemble
+les sorties prepare pour une scène.
 
-Drives the deliverable builders (calibration, sdf, point_cloud) through their AssetBuilder
-``cache_key``/``build``/``load``. This is the ONE place with side effects (the disk cache): the
-builders stay pure, effects live at this edge. Instrumentation lives HERE via ``prof`` spans +
-``event`` (cache hit/miss), NEVER inside the builders. See docs/PREPARE.md, CACHE.md, OBS.md.
+Pilote les builders livrables (calibration, sdf, point_cloud) via leurs ``cache_key``/``build``/``load``
+AssetBuilder. C'est l'UNIQUE endroit avec effets de bord (le cache disque) : les builders restent purs,
+les effets vivent à cette frontière. L'instrumentation vit ICI via les spans ``prof`` + ``event``
+(cache hit/miss), JAMAIS dans les builders. Voir docs/PREPARE.md, CACHE.md, OBS.md.
 
-Assembly DAG (one-way, dependency order):
-    load -> body -> calibration -> grounded scene -> channels (ground + objects)
-    -> correspondence (carries the sampling) -> human cloud (bound to that sampling)
-    -> object clouds -> InteractionContext.
+DAG d'assemblage (one-way, ordre dépendances) :
+    load → body → calibration → grounded scene → channels (ground + objects)
+    → correspondence (porte le sampling) → human cloud (lié au sampling)
+    → object clouds → InteractionContext.
 
-The scene stays at NATIVE (human) scale: l'échelle de scène (human->robot placement) est appliquée en
-aval, sur les RÉFÉRENCES de ``targets`` (``targets.config.SceneScaleConfig``), après l'éval — PAS ici
-(prepare reste à l'échelle réelle pour que la détection des contacts soit correcte).
+La scène reste à l'échelle NATIVE (humaine) : l'échelle de scène (placement human→robot) est appliquée
+en aval, sur les RÉFÉRENCES de ``targets`` (``targets.config.SceneScaleConfig``), après l'éval —
+PAS ici (prepare reste à l'échelle réelle pour que la détection des contacts soit correcte).
 """
 from __future__ import annotations
 
@@ -36,14 +36,14 @@ from .point_cloud.correspondence import CorrespondenceBuilder, robot_point_cloud
 from .geodesic import GeodesicBuilder
 from .sdf import SdfBuilder, build_plane_sdf
 
-# The committed neutral correspondence ships under this fixed name (built by
-# correspondence/build.regenerate); the runner reuses it as the (robot, template) default instead of
-# a hashed key, so every scene shares the one bundled OT table. A cache miss rebuilds it in place.
+# La correspondance neutre commitée voyage sous ce nom fixe (construite par
+# correspondence/build.regenerate) ; le runner la réutilise comme défaut (robot, template) plutôt qu'une
+# clé hashée, donc chaque scène partage la table OT bundée unique. Un cache miss la reconstruit sur place.
 _CORR_NAME = "corr_neutral"
 
 
 def _cache_dir(spec: SceneSpec) -> Path:
-    """Resolve the cache root: ``spec.cache_dir`` or the package default ``HoloV2/cache/``."""
+    """Résout la racine cache : ``spec.cache_dir`` ou le défaut package ``HoloV2/cache/``."""
     if spec.cache_dir is not None:
         return Path(spec.cache_dir)
     return Path(__file__).resolve().parents[2] / "cache"
@@ -51,12 +51,12 @@ def _cache_dir(spec: SceneSpec) -> Path:
 
 def _load_or_build(builder: Any, subdir: str, key: str, build: Callable[[], Any],
                    cache_dir: Path, prof, *, force: bool = False) -> Any:
-    """Generic load-or-build for one asset, keyed under ``cache_dir/<subdir>/<key>.npz``.
+    """Load-or-build générique pour un asset, keyé sous ``cache_dir/<subdir>/<key>.npz``.
 
-    The AssetBuilder signatures DIFFER (each takes its own sub-config + inputs), so the caller closes
-    over the specific ``builder.build(...)`` call in the no-arg ``build`` thunk and computes ``key``
-    via the matching ``builder.cache_key(...)``. This keeps the helper free of any per-asset shape.
-    ``force`` skips the load short-circuit (used by ``build_all`` to warm the cache)."""
+    Les signatures AssetBuilder DIFFERENT (chacun prend sa propre sous-config + inputs), donc l'appelant
+    ferme sur l'appel spécifique ``builder.build(...)`` dans le thunk ``build`` sans-arg et calcule
+    ``key`` via le ``builder.cache_key(...)`` correspondant. Ceci garde l'helper libre de toute forme
+    per-asset. ``force`` ignore le short-circuit de load (utilisé par ``build_all`` pour réchauffer le cache)."""
     path = cache_dir / subdir / f"{key}.npz"
     if not force and path.exists():
         prof.event("cache hit", asset=subdir, key=key[:8])
@@ -68,10 +68,10 @@ def _load_or_build(builder: Any, subdir: str, key: str, build: Callable[[], Any]
 
 
 def _scene_xy_bounds(grounded: GroundedScene) -> tuple[np.ndarray, np.ndarray]:
-    """``(xy_min (2,), xy_max (2,))`` horizontal extent the flat-ground plane SDF must span: the
-    grounded demo joints (where the human cloud lives) unioned with the object positions over the
-    clip. ``build_plane_sdf`` pads this further, so the contact band around the feet/objects is in
-    grid (probes beyond it are out-of-grid -> inactive, like any object SDF)."""
+    """``(xy_min (2,), xy_max (2,))`` étendue horizontale que le SDF plan sol-plat doit couvrir : les
+    joints démo ancrés (où vit le nuage humain) uniés avec les positions objets sur le clip.
+    ``build_plane_sdf`` rembourrre ceci davantage, donc la bande contact autour pieds/objets est dans
+    la grille (les sondes au-delà sont out-of-grid → inactives, comme tout SDF objet)."""
     xy = [np.asarray(grounded.joint_pos, np.float64)[:, :, :2].reshape(-1, 2)]
     for poses in grounded.object_poses:
         xy.append(np.asarray(poses, np.float64)[:, :2])
@@ -82,12 +82,12 @@ def _scene_xy_bounds(grounded: GroundedScene) -> tuple[np.ndarray, np.ndarray]:
 def _build_channels(grounded: GroundedScene, spec: SceneSpec, config: PrepareConfig,
                     cache_dir: Path, prof, *, force: bool,
                     object_meshes: list[tuple[np.ndarray, np.ndarray]]) -> tuple[Channel, ...]:
-    """The evaluation channels, ground FIRST (``channels[0]``): a flat plane SDF over the scene
-    extent by default (analytic, NOT cached), or a cached terrain SDF when ``spec.ground_mesh_path``
-    is set; then one cached object SDF per object, ``object_idx`` aligned 0..N-1 with the scene's
-    object order. ``object_meshes`` (``(verts, faces)`` per object, loaded ONCE by the caller and
-    aligned with ``grounded.object_mesh_paths``) feeds both this build and the object-cloud build, so
-    each mesh is read once per ``prepare`` (the SDF and geodesic of one object share its geometry)."""
+    """Les canaux d'évaluation, sol FIRST (``channels[0]``) : un SDF plan sol-plat sur l'étendue scène
+    par défaut (analytique, NON caché), ou un SDF terrain caché quand ``spec.ground_mesh_path`` est défini ;
+    puis un SDF objet caché par objet, ``object_idx`` aligné 0..N-1 avec l'ordre objets de la scène.
+    ``object_meshes`` (``(verts, faces)`` par objet, chargés UNE FOIS par l'appelant et alignés avec
+    ``grounded.object_mesh_paths``) alimente à la fois ce build et le build object-cloud, donc chaque mesh
+    est lu une fois par ``prepare`` (le SDF et la géodésique d'un objet partagent sa géométrie)."""
     sdf_builder = SdfBuilder()
     geo_builder = GeodesicBuilder()
     if spec.ground_mesh_path is None:
@@ -122,9 +122,9 @@ def _build_channels(grounded: GroundedScene, spec: SceneSpec, config: PrepareCon
 
 
 def _correspondence(spec: SceneSpec, config: PrepareConfig, cache_dir: Path, prof, *, force: bool):
-    """Load-or-build the ``(CorrespondenceTable, SurfaceSampling)`` pair. Reuses the committed
-    ``corr_neutral.npz`` (robot-agnostic on the human side); a miss rebuilds it from a NEUTRAL
-    template body (zero betas) + the robot URDF."""
+    """Load-or-build la paire ``(CorrespondenceTable, SurfaceSampling)``. Réutilise la ``corr_neutral.npz``
+    commitée (robot-agnostic côté humain) ; un miss la reconstruit à partir d'un body template NEUTRE
+    (zéro betas) + l'URDF robot."""
     builder = CorrespondenceBuilder()
     return _load_or_build(
         builder, "correspondence", _CORR_NAME,
@@ -136,12 +136,12 @@ def _correspondence(spec: SceneSpec, config: PrepareConfig, cache_dir: Path, pro
 
 def _validate(grounded: GroundedScene, channels: tuple[Channel, ...], human_cloud,
               object_clouds: tuple, correspondence, robot_cloud) -> None:
-    """Contract invariants of the assembled context — raise (not assert) on violation (golden rule).
+    """Invariants contrats du contexte assemblé — lève (pas assert) en violation (règle d'or).
 
-    Ground first, object channels/clouds aligned with the scene's object order, and the human cloud's
-    sampling bound to the correspondence (else the transport gather silently points at another point
-    order). The robot cloud must carry the SAME M points as the correspondence (else the online
-    re-eval addresses a different point set)."""
+    Sol first, canaux/nuages objets alignés avec l'ordre objets de la scène, et le sampling du nuage
+    humain lié à la correspondance (sinon le gather transport pointe silencieusement sur un autre ordre
+    de points). Le robot cloud doit porter les MÊMES M points que la correspondance (sinon la re-eval
+    online adresse un ensemble de points différent)."""
     if channels[0].object_idx is not None:
         raise ValueError("channels[0] must be the static ground (object_idx is None)")
     obj_channels = channels[1:]
@@ -163,7 +163,7 @@ def _validate(grounded: GroundedScene, channels: tuple[Channel, ...], human_clou
 
 
 def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
-    """Shared assembly core for ``prepare`` (load-or-build) and ``build_all`` (force-build)."""
+    """Cœur d'assemblage partagé pour ``prepare`` (load-or-build) et ``build_all`` (force-build)."""
     with prof.span("prepare"):
         raw = load(spec)
         if not raw.is_parametric:
@@ -182,8 +182,8 @@ def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
         with prof.span("scene"):
             grounded = scene.assemble(raw, calib, body)
 
-        # Object meshes loaded ONCE here, then shared by the SDF/geodesic channel build AND the
-        # object-cloud build below — so each mesh file is read once per prepare (not twice).
+        # Meshes objets chargés UNE FOIS ici, puis partagés par le build canal SDF/géodésique ET le
+        # build object-cloud en dessous — donc chaque fichier mesh est lu une fois par prepare (pas deux fois).
         object_meshes = [load_mesh(p) for p in grounded.object_mesh_paths]
 
         with prof.span("sdf+geodesic", n=grounded.n_objects + 1):
@@ -214,8 +214,8 @@ def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
 
         _validate(grounded, channels, human_cloud, object_clouds, corr_table, robot_cloud)
 
-        # margin = the SDF stored band (config.sdf.margin): the band the eval activates within IS the
-        # band the grids store, a single source of truth (no separate PrepareConfig.margin knob).
+        # margin = la bande stockée SDF (config.sdf.margin) : la bande que l'eval active est LA bande
+        # que les grilles stockent, une unique source de vérité (pas de knob PrepareConfig.margin séparé).
         ctx = InteractionContext(channels=channels, human_cloud=human_cloud,
                                  object_clouds=object_clouds, correspondence=corr_table,
                                  margin=config.sdf.margin, robot_cloud=robot_cloud, robot=robot)
@@ -223,15 +223,16 @@ def _run(spec: SceneSpec, config: PrepareConfig, prof, *, force: bool):
 
 
 def prepare(scene_spec: SceneSpec, config: PrepareConfig, prof=NULL):
-    """scene_spec (subject, objects, robot, take) + ``PrepareConfig`` -> ``(GroundedScene,
-    InteractionContext)``. The grounding ``Calibration`` rides inside ``grounded.calibration`` (so the
-    return is a 2-tuple); the subject ``body`` is built ONCE here (the only place with the SMPL model
-    dir) and threaded into the scene. Every build-once asset is load-or-built from the disk cache."""
+    """scene_spec (sujet, objets, robot, prise) + ``PrepareConfig`` → ``(GroundedScene,
+    InteractionContext)``. L'ancrage ``Calibration`` voyage dans ``grounded.calibration`` (donc le
+    retour est un 2-tuple) ; le ``body`` du sujet est construit UNE FOIS ici (l'unique place avec le
+    répertoire modèle SMPL) et enfilé dans la scène. Chaque asset build-once est load-or-built du
+    cache disque."""
     return _run(scene_spec, config, prof, force=False)
 
 
 def build_all(scene_spec: SceneSpec, config: PrepareConfig, prof=NULL):
-    """Force-build every asset for a scene (no online use) — for offline batch / warm cache: runs
-    each builder's ``build``+``save``, skipping the load short-circuit. Returns the assembled
-    ``(GroundedScene, InteractionContext)`` like ``prepare``."""
+    """Force-build chaque asset pour une scène (pas d'usage online) — pour batch offline / réchauffer
+    cache : exécute le ``build``+``save`` de chaque builder, ignorant le short-circuit de load. Retourne
+    la ``(GroundedScene, InteractionContext)`` assemblée comme ``prepare``."""
     return _run(scene_spec, config, prof, force=True)

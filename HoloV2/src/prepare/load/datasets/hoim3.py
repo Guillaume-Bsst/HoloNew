@@ -1,21 +1,21 @@
-"""HOI-M3 loader (EasyMocap SMPL, multi-person / multi-object) -> RawMotion (as SMPL-X).
+"""Chargeur HOI-M3 (EasyMocap SMPL, multi-personne / multi-objet) -> RawMotion (comme SMPL-X).
 
-Each sequence is a pair under ``mocap_ground/``:
-    <seq>_human.npz   smpl_params[frame] = list of persons {poses(69), shapes(10), Rh(3), Th(3),
+Chaque séquence est une paire sous ``mocap_ground/`` :
+    <seq>_human.npz   smpl_params[frame] = liste de personnes {poses(69), shapes(10), Rh(3), Th(3),
                       id}  (EasyMocap SMPL) + model/gender/mocap_frame_rate
     <seq>_object.npz  object_params[frame] = {object_name: {object_R(3,3), object_T(1,3)}}
-Object meshes live at ``scanned_object/<obj>/<obj>_simplified_transformed.obj`` (the centred frame
-the R/T poses expect). The capture is Y-up @ 60fps. ``spec.motion_path`` points at the human npz.
+Les meshes d'objets vivent à ``scanned_object/<obj>/<obj>_simplified_transformed.obj`` (le frame centré
+que les poses R/T attendent). La capture est Y-up @ 60fps. ``spec.motion_path`` pointe vers le npz humain.
 
-We retarget ONE person (the pipeline is single-human) and keep ALL objects. To stay homogeneous
-with the other loaders (everything SMPL-X) the SMPL params are converted to SMPL-X:
-  - SHAPE: transferred once via ``smpl_betas_to_smplx`` (deformation transfer; shape is constant);
-  - POSE: remaps kinematically -- SMPL body joints 1-21 == SMPL-X body joints 1-21, so
-    ``body_pose = poses[:, :63]``; SMPL's two single hand joints are dropped (flat SMPL-X hands);
-  - PLACEMENT: EasyMocap rotates the canonical body about the origin then adds Th, i.e.
-    ``v_world = R(Rh) @ v_canonical + Th``. SMPL-X rotates about the pelvis, so
-    ``global_orient = Rh`` and ``transl = Th + (R(Rh) - I) @ J0`` reproduce the same world pose.
-``BodyModel`` then applies Q (Y->Z); object R/T are rotated to the Z-up world the same way.
+Nous retargetons UNE SEULE personne (le pipeline est single-human) et gardons TOUS les objets. Pour rester
+homogène avec les autres chargeurs (tout en SMPL-X), les params SMPL sont convertis en SMPL-X :
+  - SHAPE : transféré une fois via ``smpl_betas_to_smplx`` (deformation transfer ; la shape est constante) ;
+  - POSE : remap cinématiquement -- joints du corps SMPL 1-21 == joints du corps SMPL-X 1-21, donc
+    ``body_pose = poses[:, :63]`` ; les deux joints simples de main SMPL sont supprimés (mains plates SMPL-X) ;
+  - PLACEMENT : EasyMocap tourne le corps canonique autour de l'origine puis ajoute Th, c.-à-d.
+    ``v_world = R(Rh) @ v_canonical + Th``. SMPL-X tourne autour du bassin, donc
+    ``global_orient = Rh`` et ``transl = Th + (R(Rh) - I) @ J0`` reproduisent la même pose monde.
+``BodyModel`` applique alors Q (Y->Z) ; object R/T sont tournés au monde Z-up de la même manière.
 """
 from __future__ import annotations
 
@@ -35,8 +35,8 @@ _MESH_CACHE = Path(tempfile.gettempdir()) / "holov2_hoim3_meshes"
 
 
 def _centered_mesh(src: Path, cache_dir: Path) -> Path:
-    """The object_R/T poses are calibrated against the mesh CENTRED on its vertex mean (the HOI-M3
-    toolbox does ``vertices -= vertices.mean(0)`` before posing). Centre + cache, return the path."""
+    """Les poses object_R/T sont calibrées contre le mesh CENTRÉ sur sa moyenne vertex (la boîte à outils
+    HOI-M3 fait ``vertices -= vertices.mean(0)`` avant de poser). Centrer + cacher, retourner le chemin."""
     import trimesh
 
     out = cache_dir / src.name
@@ -52,26 +52,26 @@ def _centered_mesh(src: Path, cache_dir: Path) -> Path:
 
 def _resolve_assets(smplx_dir: Path, gender: str, smplh_dir: Path | None = None,
                     deftrafo_pkl: Path | None = None):
-    """Locate the SMPL-X npz, the SMPL-H npz (SMPL body template) and the SMPL->SMPL-X deftrafo.
+    """Localiser le npz SMPL-X, le npz SMPL-H (template du corps SMPL) et le deftrafo SMPL->SMPL-X.
 
-    Explicit overrides (from paths.toml, threaded via SceneSpec) win; otherwise derive by
-    convention from the SMPL-X model dir (``.../models/<release>/models/smplx``)."""
+    Les overrides explicites (de paths.toml, enfilés via SceneSpec) gagnent ; sinon dériver par
+    convention du répertoire du modèle SMPL-X (``.../models/<release>/models/smplx``)."""
     smplx_npz = smplx_dir / f"SMPLX_{gender.upper()}.npz"
     models_root = smplx_dir.parents[2]                      # .../models
     smplh_root = Path(smplh_dir) if smplh_dir is not None else models_root / "smplh"
     smplh_npz = smplh_root / gender / "model.npz"
     deftrafo = (Path(deftrafo_pkl) if deftrafo_pkl is not None
                 else models_root / "model_transfer" / "smpl2smplx_deftrafo_setup.pkl")
-    for p, what in ((smplx_npz, "SMPL-X npz"), (smplh_npz, "SMPL-H npz (SMPL body template)"),
-                    (deftrafo, "SMPL->SMPL-X deftrafo (smpl2smplx_deftrafo_setup.pkl)")):
+    for p, what in ((smplx_npz, "npz SMPL-X"), (smplh_npz, "npz SMPL-H (template du corps SMPL)"),
+                    (deftrafo, "deftrafo SMPL->SMPL-X (smpl2smplx_deftrafo_setup.pkl)")):
         if not p.exists():
-            raise FileNotFoundError(f"HOI-M3 needs the {what} at {p}")
+            raise FileNotFoundError(f"HOI-M3 a besoin du {what} à {p}")
     return smplx_npz, smplh_npz, deftrafo
 
 
 def _person_series(smpl_params: np.ndarray, target_id: int):
-    """``(Rh (T,3), Th (T,3), poses (T,69), betas10)`` for ``target_id``, holding the last seen
-    frame on a dropout (multi-person mocap can briefly lose a subject)."""
+    """``(Rh (T,3), Th (T,3), poses (T,69), betas10)`` pour ``target_id``, gardant le dernier frame
+    vu lors d'un dropout (la capture mocap multi-personne peut brièvement perdre un sujet)."""
     T = len(smpl_params)
     Rh, Th, poses = np.zeros((T, 3)), np.zeros((T, 3)), np.zeros((T, 69))
     betas, last = None, None
@@ -79,7 +79,7 @@ def _person_series(smpl_params: np.ndarray, target_id: int):
         ent = next((p for p in smpl_params[f] if int(np.asarray(p["id"])) == target_id), None)
         ent = last if ent is None else ent
         if ent is None:
-            continue                                        # leading dropout: filled once seen
+            continue                                        # dropout initial : rempli une fois vu
         last = ent
         Rh[f] = np.asarray(ent["Rh"], np.float64).reshape(3)
         Th[f] = np.asarray(ent["Th"], np.float64).reshape(3)
@@ -93,16 +93,16 @@ def _person_series(smpl_params: np.ndarray, target_id: int):
 
 def _objects(object_npz: Path, scanned_dir: Path, cache_dir: Path, override: tuple[Path, ...],
              keep: tuple[str, ...] | None):
-    """Objects -> (poses tuple of (T,7), mesh-path tuple). ``keep`` selects a subset by name
-    (None => all). Meshes are centred (the frame the poses expect); objects whose mesh is absent
-    are dropped; the last seen pose is held on a per-frame dropout."""
+    """Objets -> (tuple poses de (T,7), tuple chemin-mesh). ``keep`` sélectionne un sous-ensemble par nom
+    (None => tous). Les meshes sont centrés (le frame que les poses attendent) ; les objets dont le mesh
+    est absent sont supprimés ; la dernière pose vue est gardée sur un dropout per-frame."""
     op = np.load(str(object_npz), allow_pickle=True)["object_params"]
     T = len(op)
     names = list(op[0].keys())
     if keep is not None:
         unknown = [n for n in keep if n not in names]
         if unknown:
-            raise ValueError(f"object_names {unknown} not in the scene; available: {names}")
+            raise ValueError(f"object_names {unknown} pas dans la scène ; disponibles : {names}")
         names = [n for n in names if n in keep]
     poses: list[np.ndarray] = []
     meshes: list[Path] = []
@@ -129,11 +129,11 @@ def _objects(object_npz: Path, scanned_dir: Path, cache_dir: Path, override: tup
 
 def build_person_params(smpl_params: np.ndarray, target_id: int, gender: str, smplx_dir: Path,
                         smplh_dir: Path | None = None, deftrafo_pkl: Path | None = None):
-    """EasyMocap SMPL person ``target_id`` -> ``(SmplParams (SMPL-X), BodyModel)``.
+    """Personne EasyMocap SMPL ``target_id`` -> ``(SmplParams (SMPL-X), BodyModel)``.
 
-    Shared by ``load()`` (one retargeted person) and the multi-person debug view. EasyMocap places
-    the body as ``R(Rh) @ J_canonical + Th`` about the SMPL pelvis, so the SMPL-X pelvis is re-placed
-    on the SMPL one: ``transl = Th + R @ J0_smpl - J0_smplx`` (rest pelvis heights differ ~14cm)."""
+    Partagé par ``load()`` (une personne retargetée) et la vue debug multi-personne. EasyMocap place
+    le corps comme ``R(Rh) @ J_canonical + Th`` autour du bassin SMPL, donc le bassin SMPL-X est
+    repassé au SMPL : ``transl = Th + R @ J0_smpl - J0_smplx`` (les hauteurs rest du bassin diffèrent ~14cm)."""
     Rh, Th, poses, betas10 = _person_series(smpl_params, target_id)
     T = len(smpl_params)
     smplx_npz, smplh_npz, deftrafo = _resolve_assets(Path(smplx_dir), gender, smplh_dir, deftrafo_pkl)
@@ -164,7 +164,7 @@ class HoiM3Loader:
         fps = float(np.asarray(hd["mocap_frame_rate"]))
         smpl_params = hd["smpl_params"]
 
-        # Retarget the chosen person (spec.person_id), defaulting to the first present at frame 0.
+        # Retargete la personne choisie (spec.person_id), par défaut la première présente à la trame 0.
         ids = [int(np.asarray(p["id"])) for p in smpl_params[0]]
         target_id = ids[0] if spec.person_id is None else spec.person_id
         if target_id not in ids:

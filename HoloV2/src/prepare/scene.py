@@ -1,20 +1,22 @@
-"""Assembles a GroundedScene by applying the Calibration to the loaded motion and object poses.
+"""Assemble une GroundedScene en appliquant la Calibration au mouvement chargé et poses objets.
 
-Grounding is PER ENTITY (single-human / multi-object): the human (demo joints + SMPL params) drops
-by ``Calibration.human_offset``, and ALL objects drop together by the single ``Calibration.object_offset``
-— the human and the objects can sit at different heights in the raw capture (e.g. the human floats
-while the objects already rest on the floor), so one shared scene shift would push the objects through
-the floor; the objects share one offset so their inter-object geometry is kept. The scene stays at HUMAN scale: the human->robot scale is NOT applied here — l'échelle de scène
-(placement) est appliquée en aval sur les RÉFÉRENCES de ``targets``
+L'ancrage est PER ENTITY (mono-humain / multi-objet) : l'humain (joints démo + params SMPL) chute par
+``Calibration.human_offset``, et TOUS les objets chutent ensemble par le seul ``Calibration.object_offset``
+— l'humain et les objets peuvent s'asseoir à des hauteurs différentes dans la capture brute (p. ex.
+l'humain flotte tandis que les objets reposent déjà au sol), donc un décalage scène partagé pousserait
+les objets à travers le sol ; les objets partagent un décalage pour que leur géométrie inter-objets soit
+gardée. La scène reste à l'échelle HUMAINE : l'échelle human→robot n'est PAS appliquée ici — l'échelle
+de scène (placement) est appliquée en aval sur les RÉFÉRENCES de ``targets``
 (``targets.config.SceneScaleConfig``), après l'éval sur la scène réelle.
 
-The subject's ``body`` (built once upstream by the runner) is carried THROUGH onto the
-``GroundedScene`` so the per-frame treatment can pose the human cloud (``body.bone_transforms``); it
-is ``None`` for a positions-only source. ``assemble`` only stores the reference — it stays pure
-(numpy-only), the torch-backed body is built in ``load/smpl.py``.
+Le ``body`` du sujet (construit une fois en amont par le runner) est porté À TRAVERS vers la
+``GroundedScene`` pour que le traitement per-frame pose le nuage humain (``body.bone_transforms``) ;
+il est ``None`` pour une source positions-only. ``assemble`` ne stocke que la référence — reste pur
+(numpy-only), le body backed-torch est construit dans ``load/smpl.py``.
 
-``root_frame`` is identity for now (provisional), so only the z-shifts are applied. When a non-trivial
-framing is introduced, apply it to the world arrays here (and rebase the native params accordingly).
+``root_frame`` est identité pour l'instant (provisoire), donc seules les translations z sont appliquées.
+Quand un framing non-trivial est introduit, l'appliquer aux tableaux monde ici (et rebaser les params
+natives en conséquence).
 """
 from __future__ import annotations
 
@@ -24,32 +26,32 @@ import numpy as np
 
 from .contracts import BodyModel, Calibration, GroundedScene, RawMotion, SmplParams
 
-# SMPL params are in the model's NATIVE Y-up frame; the body model maps native Y -> world Z (the Q
-# rotation in load/smpl.py). So a world z-drop of ``human_offset`` is a native y-drop of the root
-# translation by the same amount — posing the grounded params then yields the grounded world.
-_NATIVE_UP_AXIS = 1   # transl column carrying world height
+# Les params SMPL sont dans le repère NATIVE Y-up du modèle ; le body model mappe native Y → world Z
+# (la rotation Q dans load/smpl.py). Donc une chute z-monde de ``human_offset`` est une chute y-native
+# de la translation racine du même montant — poser les params ancrés produit alors le monde ancré.
+_NATIVE_UP_AXIS = 1   # colonne transl portant la hauteur monde
 
 
 def _drop_object_z(pose: np.ndarray, dz: float) -> np.ndarray:
-    """Lower an object's per-frame pose (T,7) [x,y,z,qw,qx,qy,qz] by ``dz`` in world z."""
+    """Baisse la pose per-frame d'un objet (T,7) [x,y,z,qw,qx,qy,qz] de ``dz`` en z monde."""
     out = np.asarray(pose, np.float32).copy()
     out[:, 2] -= dz
     return out
 
 
 def _ground_params(params: SmplParams, dz: float) -> SmplParams:
-    """Lower the human by ``dz`` in world z via the native root translation (see module note)."""
+    """Baisse l'humain de ``dz`` en z monde via la translation racine native (voir note module)."""
     transl = np.asarray(params.transl).copy()
     transl[:, _NATIVE_UP_AXIS] -= dz
     return replace(params, transl=transl)
 
 
 def assemble(raw: RawMotion, calib: Calibration, body: BodyModel | None = None) -> GroundedScene:
-    """Apply ``calib`` to a loaded ``RawMotion`` -> ``GroundedScene`` (grounded, human-scale).
+    """Applique ``calib`` à un ``RawMotion`` chargé → ``GroundedScene`` (ancrée, échelle humaine).
 
-    The human drops by ``human_offset``; all objects drop together by the shared ``object_offset``.
-    ``body`` (the subject's posing engine, built once upstream) is carried through unchanged; pass
-    ``None`` for a positions-only source."""
+    L'humain chute de ``human_offset`` ; tous les objets chutent ensemble du seul ``object_offset``.
+    ``body`` (moteur de pose du sujet, construit une fois en amont) est porté inchangé ; passe
+    ``None`` pour une source positions-only."""
     dz = float(calib.human_offset)
     joints = np.asarray(raw.joint_pos, np.float32).copy()
     joints[:, :, 2] -= dz

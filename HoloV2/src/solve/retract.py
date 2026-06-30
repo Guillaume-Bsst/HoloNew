@@ -1,10 +1,10 @@
-"""retract — applies the solver step to the decision variables. PURE, numpy-only,
-pinocchio/torch-free: ``q ⊕ dv`` is delegated to ``RobotModel.integrate`` (sole holder of free-flyer
-kinematics), ``object_pose ⊕ dξ`` is an SE(3) exp in pure numpy.
+"""retract — applique le pas du solveur aux variables de décision. PUR, numpy-only,
+pinocchio/torch-free : ``q ⊕ dv`` est délégué à ``RobotModel.integrate`` (seul détenteur des cinématiques
+du free-flyer), ``object_pose ⊕ dξ`` est une exp SE(3) en pur numpy.
 
-Object tangent convention (consistent with ``ContactEval.probe_jac_obj``, world-aligned ``(δt,δθ)``,
-LOCAL_WORLD_ALIGNED): ``new_pos = pos + δt`` (world translation), ``new_R = exp(δθ) · R`` (rotation
-increment applied LEFT, in world frame). Quaternions wxyz; object pose ``[x,y,z,qw,qx,qy,qz]``."""
+Convention de tangente d'objet (cohérente avec ``ContactEval.probe_jac_obj``, alignée-au-monde ``(δt,δθ)``,
+LOCAL_WORLD_ALIGNED) : ``new_pos = pos + δt`` (translation monde), ``new_R = exp(δθ) · R`` (incrément de
+rotation appliqué À GAUCHE, en frame monde). Quaternions wxyz ; pose d'objet ``[x,y,z,qw,qx,qy,qz]``."""
 from __future__ import annotations
 
 import numpy as np
@@ -13,8 +13,8 @@ from .contracts import Step
 
 
 def so3_exp(w: np.ndarray) -> np.ndarray:
-    """SO(3) exponential (Rodrigues) of a rotation vector ``w (3,)`` -> ``R (3,3)``. Uses
-    small-angle (Taylor series) to stay stable and differentiable near 0."""
+    """Exponentielle SO(3) (Rodrigues) d'un vecteur de rotation ``w (3,)`` -> ``R (3,3)``. Utilise
+    les petits angles (série Taylor) pour rester stable et différentiable près de 0."""
     w = np.asarray(w, np.float64)
     th = float(np.linalg.norm(w))
     K = np.array([[0.0, -w[2], w[1]], [w[2], 0.0, -w[0]], [-w[1], w[0], 0.0]])
@@ -24,7 +24,7 @@ def so3_exp(w: np.ndarray) -> np.ndarray:
 
 
 def quat_wxyz_to_mat(q: np.ndarray) -> np.ndarray:
-    """Quaternion wxyz (assumed unit) -> rotation matrix ``(3,3)``."""
+    """Quaternion wxyz (supposé unitaire) -> matrice de rotation ``(3,3)``."""
     qw, qx, qy, qz = (float(v) for v in q)
     return np.array([
         [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qw * qz),     2 * (qx * qz + qw * qy)],
@@ -34,7 +34,7 @@ def quat_wxyz_to_mat(q: np.ndarray) -> np.ndarray:
 
 
 def mat_to_quat_wxyz(R: np.ndarray) -> np.ndarray:
-    """Rotation matrix ``(3,3)`` -> unit quaternion wxyz (Shepperd method, stable)."""
+    """Matrice de rotation ``(3,3)`` -> quaternion wxyz unitaire (méthode Shepperd, stable)."""
     R = np.asarray(R, np.float64)
     t = R[0, 0] + R[1, 1] + R[2, 2]
     if t > 0.0:
@@ -54,14 +54,14 @@ def mat_to_quat_wxyz(R: np.ndarray) -> np.ndarray:
 
 
 def quat_wxyz_to_xyzw(q: np.ndarray) -> np.ndarray:
-    """Reorders wxyz -> xyzw (pinocchio convention for free-flyer ``q``)."""
+    """Réordonne wxyz -> xyzw (convention pinocchio pour le free-flyer ``q``)."""
     q = np.asarray(q, np.float64)
     return np.array([q[1], q[2], q[3], q[0]])
 
 
 def retract(q: np.ndarray, object_poses: np.ndarray, step: Step, robot) -> tuple[np.ndarray, np.ndarray]:
-    """``q ⊕ dv`` via ``robot.integrate`` (free-flyer, pinocchio-free on solve side) + ``pose ⊕ dξ`` via
-    SE(3) exp numpy per object. Does not mutate inputs."""
+    """``q ⊕ dv`` via ``robot.integrate`` (free-flyer, pinocchio-free côté solve) + ``pose ⊕ dξ`` via
+    exp SE(3) numpy par objet. Ne mute pas les inputs."""
     q_new = robot.integrate(np.asarray(q, np.float64), np.asarray(step.dv, np.float64))
     poses = np.array(object_poses, np.float64, copy=True)
     if step.dxi is not None and poses.shape[0] > 0:

@@ -1,15 +1,15 @@
-"""Complex ops AT THE EXCLUSIVE SERVICE OF THE RESIDUALS — the ``solve``-specific contractions / frame
-maps / manifold logs that the spec keeps OUT of the (ref-free) ``targets`` evaluator. Pure numpy
-(float64), no I/O, no mutation. Shared by C and CO (rule #8 homogeneity): one ``dist_jac`` contraction,
-one ``world_normal`` frame map, one ``so3_log``.
+"""Ops complexes AU SERVICE EXCLUSIF DES RÉSIDUELS — les contractions spécifiques à ``solve`` / cartes de
+frame / logs de variété que la spec garde EN DEHORS de l'évaluateur (sans-ref) ``targets``. Numpy pur
+(float64), pas d'I/O, pas de mutation. Partagé par C et CO (règle #8 homogénéité) : une contraction ``dist_jac``,
+une carte de frame ``world_normal``, un ``so3_log``.
 
-Conventions (locked by ``targets``):
-  * Robot point Jacobians (``point_jac``, ``jac_pos``, ``jac_rot``) are WORLD / LOCAL_WORLD_ALIGNED.
-  * OBJECT-channel ``direction``/``witness``/geodesic gradients are OBJECT-LOCAL -> map to world with
-    ``world_normal(R_i, …)`` before contracting with a world Jacobian; contract with the RAW local
-    vector against the object tangent Jacobian ``probe_jac_obj`` (object-local).
-  * Orientation residual is the WORLD-frame log ``log(R_cur·R_refᵀ)`` to pair with the world angular
-    Jacobian ``jac_rot`` (``omega_world = jac_rot·v``).
+Conventions (verrouillées par ``targets``) :
+  * Les Jacobiennes de point robot (``point_jac``, ``jac_pos``, ``jac_rot``) sont WORLD / LOCAL_WORLD_ALIGNED.
+  * Les gradients de ``direction``/``witness``/géodésique de canal OBJECT sont OBJECT-LOCAL -> mappé au monde avec
+    ``world_normal(R_i, …)`` avant contraction avec une Jacobienne monde ; contracter avec le vecteur LOCAL BRUT
+    contre la Jacobienne tangente d'objet ``probe_jac_obj`` (local à l'objet).
+  * Le résiduel d'orientation est le log de frame MONDE ``log(R_cur·R_refᵀ)`` pour s'apparier avec la Jacobienne
+    angulaire mondiale ``jac_rot`` (``omega_world = jac_rot·v``).
 """
 from __future__ import annotations
 
@@ -21,17 +21,17 @@ from ...prepare.contracts import GeodesicTable
 
 
 def world_normal(R: np.ndarray, n_local: np.ndarray) -> np.ndarray:
-    """Map an object-LOCAL direction/normal/gradient to WORLD: ``n_world = R · n_local``.
-    ``R`` (3,3) [one frame] or (M,3,3) [per row]; ``n_local`` (...,3). Ground channel: ``R = I``."""
+    """Mappe une direction/normale/gradient LOCAL-d'objet au MONDE : ``n_world = R · n_local``.
+    ``R`` (3,3) [une trame] ou (M,3,3) [par ligne] ; ``n_local`` (...,3). Canal sol : ``R = I``."""
     R = np.asarray(R, np.float64)
     n = np.asarray(n_local, np.float64)
     return np.einsum("...ij,...j->...i", R, n)
 
 
 def dist_jac(direction: np.ndarray, jac: np.ndarray) -> np.ndarray:
-    """``∂(directionᵀ·point)/∂step`` = ``directionᵀ·jac`` row-wise. ``direction`` (M,3), ``jac``
-    (M,3,K) -> (M,K). The signed-distance gradient w.r.t. the point is the contact unit normal, so
-    this gives ``∂d/∂step`` for both the robot tangent (K=nv, ``point_jac``) and the object tangent
+    """``∂(directionᵀ·point)/∂step`` = ``directionᵀ·jac`` ligne-par-ligne. ``direction`` (M,3), ``jac``
+    (M,3,K) -> (M,K). Le gradient de distance signée par rapport au point est la normale de contact unitaire,
+    donc ceci donne ``∂d/∂step`` pour la tangente robot (K=nv, ``point_jac``) et la tangente d'objet
     (K=6, ``probe_jac_obj`` / ``cloud_jac_self``)."""
     direction = np.asarray(direction, np.float64)
     jac = np.asarray(jac, np.float64)
@@ -39,14 +39,14 @@ def dist_jac(direction: np.ndarray, jac: np.ndarray) -> np.ndarray:
 
 
 def geo_chain(grad: np.ndarray, jac: np.ndarray) -> np.ndarray:
-    """``∂geo/∂step`` = ``gradᵀ·jac`` — the SAME contraction as ``dist_jac`` (the geodesic gradient is
-    tangent to the surface; its normal component, if any, is annihilated by the tangent Jacobian).
-    Kept as a named op for builder readability (rule #8)."""
+    """``∂geo/∂step`` = ``gradᵀ·jac`` — la MÊME contraction que ``dist_jac`` (le gradient géodésique est
+    tangent à la surface ; sa composante normale, le cas échéant, est annihilée par la Jacobienne tangente).
+    Conservé comme op nommée pour la lisibilité du builder (règle #8)."""
     return dist_jac(grad, jac)
 
 
 def quat_to_rot(wxyz: np.ndarray) -> np.ndarray:
-    """Unit quaternion(s) ``wxyz`` (...,4) -> rotation matrix (...,3,3). Normalises defensively."""
+    """Quaternion(s) unitaire(s) ``wxyz`` (...,4) -> matrice de rotation (...,3,3). Normalise défensivement."""
     q = np.asarray(wxyz, np.float64)
     q = q / np.linalg.norm(q, axis=-1, keepdims=True)
     w, x, y, z = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
@@ -58,15 +58,15 @@ def quat_to_rot(wxyz: np.ndarray) -> np.ndarray:
 
 
 def _log_one(E: np.ndarray) -> np.ndarray:
-    """SO(3) log of a single rotation matrix -> rotation vector (3,). Robust near 0 and π."""
+    """Log SO(3) d'une seule matrice de rotation -> vecteur de rotation (3,). Robuste près de 0 et π."""
     cos = np.clip((np.trace(E) - 1.0) * 0.5, -1.0, 1.0)
     theta = np.arccos(cos)
-    if theta < 1e-7:                                    # near identity: first-order
+    if theta < 1e-7:                                    # près de l'identité : premier ordre
         return 0.5 * np.array([E[2, 1] - E[1, 2], E[0, 2] - E[2, 0], E[1, 0] - E[0, 1]])
-    if np.pi - theta < 1e-4:                            # near π: axis from the symmetric part
+    if np.pi - theta < 1e-4:                            # près de π : axe de la partie symétrique
         Aerr = (E + np.eye(3)) * 0.5
         axis = np.sqrt(np.clip(np.diag(Aerr), 0.0, None))
-        # fix signs from the off-diagonal of (E - Eᵀ)
+        # corrige les signes via la partie hors-diagonale de (E - Eᵀ)
         s = np.array([E[2, 1] - E[1, 2], E[0, 2] - E[2, 0], E[1, 0] - E[0, 1]])
         axis = np.where(s < 0, -axis, axis)
         axis = axis / (np.linalg.norm(axis) + 1e-12)
@@ -76,10 +76,10 @@ def _log_one(E: np.ndarray) -> np.ndarray:
 
 
 def so3_log(R_ref: np.ndarray, R_cur: np.ndarray) -> np.ndarray:
-    """World-frame orientation error per row: ``log(R_cur·R_refᵀ)`` (L,3,3),(L,3,3) -> (L,3).
-    Gauss-Newton residual ``c = so3_log(R_ref, R_cur)``; the EXACT first-order Jacobian of a world
-    (left) bump is ``A = J_l⁻¹(c)·jac_rot``, NOT the raw ``jac_rot`` — the inverse-left-Jacobian factor
-    matters at finite error (see ``style._so3_left_jac_inv``; omitting it fails the S-rot FD test)."""
+    """Erreur d'orientation de frame monde par ligne : ``log(R_cur·R_refᵀ)`` (L,3,3),(L,3,3) -> (L,3).
+    Résiduel Gauss-Newton ``c = so3_log(R_ref, R_cur)`` ; la Jacobienne du premier ordre EXACTE d'un
+    bump (gauche) du monde est ``A = J_l⁻¹(c)·jac_rot``, NON le ``jac_rot`` brut — le facteur Jacobienne-inverse-gauche
+    importe à erreur finie (voir ``style._so3_left_jac_inv`` ; l'omettre échoue le test FD S-rot)."""
     R_ref = np.asarray(R_ref, np.float64); R_cur = np.asarray(R_cur, np.float64)
     E = np.einsum("lij,lkj->lik", R_cur, R_ref)         # R_cur · R_refᵀ
     return np.stack([_log_one(E[l]) for l in range(E.shape[0])])
@@ -87,8 +87,8 @@ def so3_log(R_ref: np.ndarray, R_cur: np.ndarray) -> np.ndarray:
 
 def se3_log_world(R_ref: np.ndarray, p_ref: np.ndarray,
                   R_cur: np.ndarray, p_cur: np.ndarray) -> np.ndarray:
-    """World-aligned SE(3) error per object: ``[p_cur − p_ref, log(R_cur·R_refᵀ)]`` (N,6). Matches the
-    world-aligned object tangent ``δξ = (δt, δθ)`` (the O term anchors the object to its observed pose)."""
+    """Erreur SE(3) alignée au monde par objet : ``[p_cur − p_ref, log(R_cur·R_refᵀ)]`` (N,6). Correspond à la
+    tangente d'objet alignée au monde ``δξ = (δt, δθ)`` (le terme O ancre l'objet à sa pose observée)."""
     p_ref = np.asarray(p_ref, np.float64); p_cur = np.asarray(p_cur, np.float64)
     out = np.empty((p_ref.shape[0], 6), np.float64)
     out[:, :3] = p_cur - p_ref
@@ -97,8 +97,8 @@ def se3_log_world(R_ref: np.ndarray, p_ref: np.ndarray,
 
 
 def scatter_obj(block: np.ndarray, object_idx: int, n_obj: int) -> np.ndarray:
-    """Place a per-object ``(m,6)`` Jacobian block into the full ``(m, n_obj*6)`` object coupling
-    matrix (sparse: zeros for the other objects). ``object_idx`` in ``[0, n_obj)``."""
+    """Place un bloc Jacobienne ``(m,6)`` par-objet dans la matrice complète ``(m, n_obj*6)`` de
+    couplage d'objet (sparse : zéros pour les autres objets). ``object_idx`` dans ``[0, n_obj)``."""
     block = np.asarray(block, np.float64)
     m = block.shape[0]
     A_obj = np.zeros((m, n_obj * 6), np.float64)
@@ -108,13 +108,13 @@ def scatter_obj(block: np.ndarray, object_idx: int, n_obj: int) -> np.ndarray:
 
 @dataclass(frozen=True)
 class GeoField:
-    """Per-channel geodesic tables + channel WORLD frames — the bundle ``build_contact`` reads as its
-    ``geo`` argument. Assembled by Plan C from ``InteractionContext`` (the geodesic tables) +
-    ``FrameTargets.object_rot/pos``. Lets ``build_contact`` (a) read the geodesic field per channel and
-    (b) map object-LOCAL field directions/gradients to world via ``world_normal(rot[c], …)`` —
-    uniformly across channels (ground frame = identity). See plan Assumption 3."""
+    """Tables géodésiques par-canal + frames MONDE des canaux — le paquet que ``build_contact`` lit comme
+    son argument ``geo``. Assemblé par Plan C à partir de ``InteractionContext`` (les tables géodésiques) +
+    ``FrameTargets.object_rot/pos``. Laisse ``build_contact`` (a) lire le champ géodésique par canal et
+    (b) mapper les directions/gradients de champ LOCAL-d'objet au monde via ``world_normal(rot[c], …)`` —
+    uniformément sur les canaux (frame sol = identité). Voir Assumption 3 du plan."""
 
-    tables: tuple[GeodesicTable | None, ...]  # (C,) per-channel geodesic table; None -> no C-X row
-    rot: np.ndarray                           # (C, 3, 3) per-channel world rotation (ground = I)
-    pos: np.ndarray                           # (C, 3)    per-channel world translation (ground = 0)
-    object_idx: tuple[int, ...]               # (C,) channel -> object index (-1 for ground)
+    tables: tuple[GeodesicTable | None, ...]  # (C,) table géodésique par canal ; None -> pas de ligne C-X
+    rot: np.ndarray                           # (C, 3, 3) rotation monde par canal (sol = I)
+    pos: np.ndarray                           # (C, 3)    translation monde par canal (sol = 0)
+    object_idx: tuple[int, ...]               # (C,) canal -> index d'objet (-1 pour le sol)

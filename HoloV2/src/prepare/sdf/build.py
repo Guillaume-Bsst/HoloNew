@@ -1,23 +1,24 @@
-"""prepare/sdf — builds the signed-distance + witness grid of a surface: an object/terrain MESH
-(``build_sdf``) or the flat GROUND plane (``build_plane_sdf``, analytic, no mesh).
+"""prepare/sdf — construit la grille distance-signée + witness d'une surface : un MESH objet/terrain
+(``build_sdf``) ou le plan GROUND plat (``build_plane_sdf``, analytique, pas de mesh).
 
-The mesh SDF is offline, geometry-keyed, cached once (``SdfBuilder``): a subject-/robot-free asset
-shared by every sequence touching the same mesh. Mesh-agnostic — ONE builder for objects AND terrain.
-The flat ground is ALSO an SDF (not a special analytic case): a plane is affine, so a tiny grid
-reproduces it exactly, keeping every eval channel homogeneous (no flat-ground branch).
+Le SDF mesh est offline, geometry-keyed, caché une fois (``SdfBuilder``) : un asset subject-/robot-free
+partagé par chaque séquence touchant le même mesh. Mesh-agnostic — UN builder pour objets ET terrain.
+Le sol plat est AUSSI un SDF (pas un cas analytique spécial) : un plan est affine, donc une petite
+grille le reproduit exactement, gardant chaque canal eval homogène (pas de branche flat-ground).
 
-Build pipeline (trimesh, no Coal — this runs once and is cached, so per-probe speed is irrelevant):
-fill each grid node with the signed distance to the surface. ``trimesh.proximity.closest_point``
-returns the nearest surface point (the WITNESS, stored first-class) AND the unsigned distance in one
-vectorised call; ``mesh.contains`` gives the inside/outside sign. The grid stores the TRUE signed
-distance everywhere (no clamp): the activation band (``dist < margin``) is applied later, at eval.
+Pipeline build (trimesh, pas Coal — ce code tourne une fois et est caché, donc la vitesse par-probe
+est sans importance) : remplit chaque nœud grille avec la distance signée à la surface.
+``trimesh.proximity.closest_point`` retourne le point de surface le plus proche (le WITNESS, stocké
+first-class) ET la distance non-signée en un appel vectorisé ; ``mesh.contains`` donne le signe
+intérieur/extérieur. La grille stocke la TRUE distance signée partout (pas de clamp) : la bande
+d'activation (``dist < margin``) est appliquée plus tard, à l'eval.
 
-Sampling the grid (probe -> ContactField) is NOT here — it lives in ``targets/interaction/eval.py``
-(the online, q-independent consumer). This module builds the asset; its ``.npz`` persistence lives in
-``cache.py`` (the builder delegates).
+Échantillonner la grille (probe → ContactField) n'est PAS ici — ça vit dans ``targets/interaction/eval.py``
+(le consumer online, q-indépendant). Ce module construit l'asset ; sa persistence ``.npz`` vit dans
+``cache.py`` (le builder délègue).
 
-Ported from HoloNew ``contact/backends/sdf.py`` (the grid build), with the Coal distance backend
-replaced by ``trimesh.proximity`` and the witness kept as a first-class grid.
+Porté de HoloNew ``contact/backends/sdf.py`` (le grid build), avec le backend distance Coal remplacé
+par ``trimesh.proximity`` et le witness gardé comme grille first-class.
 """
 from __future__ import annotations
 
@@ -33,13 +34,13 @@ from .cache import load_sdf, save_sdf
 
 def build_sdf(vertices: np.ndarray, faces: np.ndarray, spacing: float, margin: float,
               name: str = "") -> SDF:
-    """Signed-distance + witness grid over the mesh AABB padded by ``margin + 2*spacing``.
+    """Grille distance-signée + witness sur l'AABB mesh rembourré de ``margin + 2*spacing``.
 
-    The pad makes the whole activation band (half-width ``margin``) representable with a 2-voxel
-    cushion for stable trilinear gradients at the band edge. Nodes hold the TRUE signed distance
-    (negative inside) and the nearest surface point (witness); both are valid across the whole grid
-    (a closest-point query is not band-limited). Pure: builds a trimesh internally, no I/O, leaves
-    its inputs untouched, returns a frozen ``SDF``."""
+    Le rembourrage rend la bande d'activation entière (demi-largeur ``margin``) représentable avec
+    un coussin 2-voxel pour des gradients trilinéaires stables à la bordure bande. Les nœuds tiennent
+    la TRUE distance signée (négative intérieur) et le point de surface le plus proche (witness) ;
+    les deux sont valides sur la grille entière (une requête closest-point n'est pas band-limitée).
+    Pur : construit un trimesh en interne, pas I/O, laisse ses inputs intacts, retourne un ``SDF`` gelé."""
     import trimesh
 
     verts = np.asarray(vertices, np.float64)
@@ -47,7 +48,7 @@ def build_sdf(vertices: np.ndarray, faces: np.ndarray, spacing: float, margin: f
     pad = float(margin) + 2.0 * float(spacing)
     lo = verts.min(0) - pad
     hi = verts.max(0) + pad
-    dims = np.ceil((hi - lo) / spacing).astype(np.int64) + 1          # (3,) nodes per axis
+    dims = np.ceil((hi - lo) / spacing).astype(np.int64) + 1          # (3,) nœuds par axe
     xs = lo[0] + spacing * np.arange(dims[0])
     ys = lo[1] + spacing * np.arange(dims[1])
     zs = lo[2] + spacing * np.arange(dims[2])
@@ -71,40 +72,41 @@ def build_sdf(vertices: np.ndarray, faces: np.ndarray, spacing: float, margin: f
 
 def build_plane_sdf(xy_min: np.ndarray, xy_max: np.ndarray, spacing: float, margin: float,
                     name: str = "ground") -> SDF:
-    """Flat-ground SDF: the ``z = 0`` plane baked into a grid, so the ground is an ORDINARY ``SDF``
-    (homogeneous with objects/terrain — the eval samples every channel the same way, no flat-ground
-    special case). A plane's signed distance ``z`` and witness ``(x, y, 0)`` are AFFINE, so trilinear
-    sampling reproduces them EXACTLY at any resolution; the grid only has to SPAN the probe region.
+    """SDF sol-plat : le plan ``z = 0`` cuit dans une grille, donc le sol est un ``SDF`` ORDINAIRE
+    (homogène avec objets/terrain — l'eval échantillonne chaque canal de la même façon, pas de cas
+    spécial sol-plat). La distance signée ``z`` d'un plan et le witness ``(x, y, 0)`` sont AFFINE,
+    donc l'interpolation trilinéaire les reproduit EXACTEMENT à n'importe quelle résolution ; la grille
+    n'a que COUVRIR la région probe.
 
-    Covers the scene's horizontal extent ``[xy_min, xy_max]`` (each (2,)) padded by ``margin +
-    2*spacing``, with ``z`` in ``+-(margin + 2*spacing)`` — the contact band around the plane (a probe
-    beyond it is out-of-grid -> inactive, exactly like any object SDF). Pure + analytic: no mesh, no
-    trimesh, just a broadcast fill."""
+    Couvre l'étendue horizontale ``[xy_min, xy_max]`` de la scène (chacun (2,)) rembourré de
+    ``margin + 2*spacing``, avec ``z`` dans ``+-(margin + 2*spacing)`` — la bande contact autour du
+    plan (une probe au-delà est out-of-grid → inactive, exactement comme tout SDF objet). Pur +
+    analytique : pas de mesh, pas de trimesh, juste un remplissage broadcast."""
     pad = float(margin) + 2.0 * float(spacing)
     lo = np.array([float(xy_min[0]) - pad, float(xy_min[1]) - pad, -pad], np.float64)
     hi = np.array([float(xy_max[0]) + pad, float(xy_max[1]) + pad, pad], np.float64)
-    dims = np.ceil((hi - lo) / spacing).astype(np.int64) + 1          # (3,) nodes per axis
+    dims = np.ceil((hi - lo) / spacing).astype(np.int64) + 1          # (3,) nœuds par axe
     xs = lo[0] + spacing * np.arange(dims[0])
     ys = lo[1] + spacing * np.arange(dims[1])
     zs = lo[2] + spacing * np.arange(dims[2])
     shape = tuple(int(d) for d in dims)
 
-    grid = np.broadcast_to(zs, shape)                                # signed distance = z (plane z=0)
+    grid = np.broadcast_to(zs, shape)                                # distance signée = z (plan z=0)
     gx, gy, _ = np.meshgrid(xs, ys, zs, indexing="ij")
-    witness = np.stack([gx, gy, np.zeros(shape)], axis=-1)           # nearest surface point (x, y, 0)
+    witness = np.stack([gx, gy, np.zeros(shape)], axis=-1)           # point de surface le plus proche (x, y, 0)
     return SDF(grid=np.ascontiguousarray(grid, np.float32),
                witness=np.ascontiguousarray(witness, np.float32),
                origin=lo, spacing=float(spacing), name=name)
 
 
 class SdfBuilder:
-    """``AssetBuilder`` producing the ``SDF`` of one rigid mesh (object or terrain ground). Scoped to
-    GEOMETRY (+ the ``SdfConfig``): two sequences sharing a mesh share the cached grid, independent
-    of subject/robot. The runner wraps ``build``/``load`` in a ``prof.span("sdf")``."""
+    """``AssetBuilder`` produisant le ``SDF`` d'un mesh rigide (objet ou terrain ground). Scopé à
+    la GÉOMÉTRIE (+ le ``SdfConfig``) : deux séquences partageant un mesh partagent la grille cachée,
+    indépendamment du sujet/robot. Le runner enveloppe ``build``/``load`` dans un ``prof.span("sdf")``."""
 
     def cache_key(self, config: SdfConfig, vertices: np.ndarray, faces: np.ndarray) -> str:
-        """Stable hash of the geometry + the SDF resolution (spacing) and band (margin). Geometry
-        only — no subject/robot term, so the grid is shared across every sequence using the mesh."""
+        """Hash stable de la géométrie + la résolution SDF (spacing) et bande (margin). Géométrie
+        uniquement — pas de terme sujet/robot, donc la grille est partagée entre chaque séquence utilisant le mesh."""
         h = hashlib.sha1()
         h.update(f"{config.spacing}|{config.margin}".encode())
         h.update(np.ascontiguousarray(vertices, np.float32).tobytes())
@@ -116,7 +118,7 @@ class SdfBuilder:
         return build_sdf(vertices, faces, config.spacing, config.margin, name=name)
 
     def save(self, sdf: SDF, path: Path) -> None:
-        return save_sdf(sdf, path)             # persistence lives in cache.py
+        return save_sdf(sdf, path)             # la persistence vit dans cache.py
 
     def load(self, path: Path) -> SDF:
         return load_sdf(path)

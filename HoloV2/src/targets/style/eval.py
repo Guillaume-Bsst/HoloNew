@@ -29,7 +29,7 @@ def style_eval(robot: RobotModel, q: np.ndarray, link_names: tuple[str, ...]) ->
         raise ValueError(f"style links absent from robot.link_names: {missing}")
 
     rot, pos, jac_lin, jac_ang = robot.link_jacobians(q)        # (L_all, ...) repère monde
-    gather = np.array([robot.link_names.index(n) for n in link_names], np.int64)  # (L,) into FK order
+    gather = np.array([robot.link_names.index(n) for n in link_names], np.int64)  # (L,) vers l'ordre FK
     return StyleEval(
         position=np.ascontiguousarray(pos[gather]),            # (L, 3)
         rotation=np.ascontiguousarray(rot[gather]),            # (L, 3, 3)

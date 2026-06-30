@@ -1,21 +1,23 @@
-"""Config of the ``prepare`` stage — the dataclass SCHEMAS (the knobs), kept apart from the data.
+"""Config de l'étape ``prepare`` — les SCHÉMAS dataclass (les knobs), séparés des données.
 
-The defaults are sensible inline values, so ``PrepareConfig()`` IS the default config. The data
-artifacts that flow through the pipeline live in ``prepare/contracts.py`` (config is the HOW, kept
-apart from the WHAT). The sub-configs are grouped by deliverable; ``PrepareConfig`` composes them and
-is what ``runner.prepare`` receives. Each builder reads (and hashes into its cache key) ONLY its
-relevant sub-config, so a knob change invalidates only the affected asset.
+Les défauts sont des valeurs inline sensées, donc ``PrepareConfig()`` EST la config par défaut. Les
+artefacts de données qui circulent dans le pipeline vivent dans ``prepare/contracts.py`` (config est
+le HOW, séparé du WHAT). Les sous-configs sont groupés par livrable ; ``PrepareConfig`` les compose
+et c'est ce que ``runner.prepare`` reçoit. Chaque builder lit (et hash dans sa clé cache) UNIQUEMENT
+sa sous-config pertinente, donc un changement de knob invalide uniquement l'asset affecté.
 
-Knob vs constant: a field here is something a user legitimately tunes. Fixed FACTS (frame
-conventions, SMPL joint orders, segment taxonomy, dataset formats, robot rest poses) and internal
-perf caps are NOT knobs — they stay as constants local to the module that owns them.
+Knob vs constante : un champ ici est quelque chose qu'un utilisateur règle légitimement. Les FAITS
+fixes (conventions frame, ordres joints SMPL, taxonomie segment, formats dataset, poses repos robot)
+et les caps perf internes NE sont PAS des knobs — ils restent comme constantes locales au module qui
+les possède.
 
-Each sub-config validates its own ranges in ``__post_init__`` (frozen, so the checks only raise —
-they never mutate), catching a nonsensical knob at construction rather than deep in a builder.
+Chaque sous-config valide ses propres plages dans ``__post_init__`` (gelé, donc les vérifications
+lèvent seulement — ne mutent jamais), attrapant un knob insensé à la construction plutôt que profond
+dans un builder.
 
-Changing a run's config: ``PrepareConfig()`` for the default, or override a sub-config inline, e.g.
-``PrepareConfig(sdf=SdfConfig(spacing=0.005))``. A tyro CLI front-end attaches here with the run
-entry point.
+Changer la config d'une run : ``PrepareConfig()`` pour le défaut, ou override une sous-config inline,
+p. ex. ``PrepareConfig(sdf=SdfConfig(spacing=0.005))``. Un frontend CLI tyro s'attache ici avec le
+point d'entrée de run.
 """
 from __future__ import annotations
 
@@ -24,15 +26,15 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class CalibrationConfig:
-    """Scene grounding + subject characterisation (``prepare/calibration``)."""
+    """Ancrage scène + caractérisation sujet (``prepare/calibration``)."""
 
-    foot_percentile: float = 50.0    # human floor = this percentile of the lower foot-joint height
-                                     # over the clip (50 = median; targets the resting foot, robust to
-                                     # the SMPL toe penetration a min/low-percentile would chase)
-    object_floor_pct: float = 1.0    # object floor = this (low) percentile of the lowest posed object
-                                     # point: ~the "lowest reach" of the floor-touching object, robust
-                                     # to a stray low vertex/frame
-    # (no stature knob: grounding is body-free; the subject stature lives on the BodyModel, betas-FK)
+    foot_percentile: float = 50.0    # sol humain = ce percentile de la hauteur joint pied inférieur
+                                     # sur le clip (50 = médiane ; cible le pied au repos, robuste à
+                                     # la pénétration orteil SMPL qu'un min/low-percentile chercherait)
+    object_floor_pct: float = 1.0    # sol objet = ce percentile (bas) du point objet posé le plus bas :
+                                     # ~la « portée la plus basse » de l'objet qui touche le sol, robuste
+                                     # à un sommet/frame bas errant
+    # (pas de knob stature : l'ancrage est body-free ; la stature sujet vit sur BodyModel, betas-FK)
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.foot_percentile <= 100.0:
@@ -43,11 +45,11 @@ class CalibrationConfig:
 
 @dataclass(frozen=True)
 class SdfConfig:
-    """Signed-distance grids for objects / terrain (``prepare/sdf``)."""
+    """Grilles distance-signée pour objets / terrain (``prepare/sdf``)."""
 
-    spacing: float = 0.01            # isotropic voxel size (m) for object/terrain grids
-    margin: float = 0.05             # band beyond the surface that is stored
-    # (the flat ground is a coarse but EXACT plane SDF — built analytically, no mesh; see build_plane_sdf)
+    spacing: float = 0.01            # taille voxel isotrope (m) pour grilles objet/terrain
+    margin: float = 0.05             # bande au-delà de la surface qui est stockée
+    # (le sol plat est un SDF plan grossier mais EXACT — construit analytiquement, pas de mesh ; voir build_plane_sdf)
 
     def __post_init__(self) -> None:
         if self.spacing <= 0.0:
@@ -58,13 +60,13 @@ class SdfConfig:
 
 @dataclass(frozen=True)
 class CloudConfig:
-    """Surface point clouds — human + objects (``prepare/point_cloud``)."""
+    """Nuages de points de surface — humain + objets (``prepare/point_cloud``)."""
 
-    human_density: float = 2000.0    # points / m^2 on the SMPL surface
-    object_density: float = 2000.0   # points / m^2 on each object
-    seed: int = 0                    # deterministic sampling — KEY component (shared by the human
-                                     # cloud AND the correspondence; they MUST agree)
-    k_influences: int = 4            # K of the sparse LBS-on-cloud skinning
+    human_density: float = 2000.0    # points / m^2 sur la surface SMPL
+    object_density: float = 2000.0   # points / m^2 sur chaque objet
+    seed: int = 0                    # sampling déterministe — composante CLÉ (partagée par le nuage
+                                     # humain ET la correspondance ; ils DOIVENT être d'accord)
+    k_influences: int = 4            # K du skinning LBS-on-cloud creux
 
     def __post_init__(self) -> None:
         if self.human_density <= 0.0:
@@ -77,10 +79,10 @@ class CloudConfig:
 
 @dataclass(frozen=True)
 class CorrespondenceConfig:
-    """Human<->robot surface correspondence by optimal transport (``prepare/point_cloud/correspondence``)."""
+    """Correspondance surface humain↔robot par transport optimal (``prepare/point_cloud/correspondence``)."""
 
-    ot_reg: float = 0.05             # OT entropic regularisation
-    robot_density: float = 3000.0    # points / m^2 sampled on the robot surface for the OT build
+    ot_reg: float = 0.05             # régularisation entropique OT
+    robot_density: float = 3000.0    # points / m^2 échantillonnés sur la surface robot pour le build OT
 
     def __post_init__(self) -> None:
         if self.ot_reg <= 0.0:
@@ -115,9 +117,9 @@ class GeodesicConfig:
 
 @dataclass(frozen=True)
 class PrepareConfig:
-    """All knobs of the ``prepare`` step, composed — the single object ``runner.prepare`` receives;
-    each builder reads only its sub-config. ``cloud`` feeds the human cloud, the correspondence,
-    and the geodesic table (one canonical sampling shared by all three)."""
+    """Tous les knobs de l'étape ``prepare``, composés — l'objet unique que ``runner.prepare`` reçoit ;
+    chaque builder lit seulement sa sous-config. ``cloud`` alimente le nuage humain, la correspondance,
+    et la table géodésique (un unique sampling canonique partagé par tous les trois)."""
 
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     sdf: SdfConfig = field(default_factory=SdfConfig)

@@ -1,6 +1,6 @@
-"""(De)serialisation of an ``SDF`` ``.npz`` — save AND load in one place, so the writer and the
-reader of the format cannot drift apart. The asset is a signed-distance + witness grid; the grids are
-large, hence ``np.savez_compressed``. ``SdfBuilder.save``/``load`` delegate here in one line.
+"""(Dé)sérialisation d'un ``SDF`` ``.npz`` — save ET load au même endroit, pour que le writer et le
+reader du format ne s'éloignent pas. L'asset est une grille distance-signée + witness ; les grilles
+sont grandes, d'où ``np.savez_compressed``. ``SdfBuilder.save``/``load`` délèguent ici en une ligne.
 """
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from ..contracts import SDF
 
 
 def save_sdf(sdf: SDF, path: Path) -> None:
-    """Serialise an ``SDF`` to ``path`` (``np.savez_compressed`` — the grids are large), creating
-    parent dirs as needed."""
+    """Sérialise un ``SDF`` vers ``path`` (``np.savez_compressed`` — les grilles sont grandes), crée
+    les dossiers parents au besoin."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(str(path), grid=sdf.grid, witness=sdf.witness,
@@ -22,7 +22,7 @@ def save_sdf(sdf: SDF, path: Path) -> None:
 
 
 def load_sdf(path: Path) -> SDF:
-    """Inverse of ``save_sdf``: load an ``SDF`` from ``path``."""
+    """Inverse de ``save_sdf`` : charge un ``SDF`` depuis ``path``."""
     d = np.load(str(path), allow_pickle=False)
     return SDF(grid=d["grid"], witness=d["witness"], origin=d["origin"],
                spacing=float(d["spacing"]), name=str(d["name"]))

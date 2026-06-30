@@ -1,8 +1,8 @@
-"""``solve`` stage — online, q-DEPENDENT: turns the per-frame ``targets`` outputs (Evaluator + Refs)
-into the retargeted ``qpos`` trajectory by a linearised QP (SQP/trust-region) loop. Public surface:
-``solve.contracts`` (the data types), ``solve.config`` (knobs), and ``solve.runner.solve`` (entry).
-Imports the upstream ``targets`` public surface; never a ``targets`` internal. cvxpy is confined to
-``solve/backend/cvxpy.py`` — ``solve`` stays pinocchio/torch-free."""
+"""Étage ``solve`` — en ligne, dépendant de q : transforme les sorties ``targets`` par-trame (Evaluator + Refs)
+en trajectoire ``qpos`` reorientée par une boucle QP linéarisée (SQP/région-de-confiance). Surface publique :
+``solve.contracts`` (les types de données), ``solve.config`` (knobs), et ``solve.runner.solve`` (point d'entrée).
+Importe la surface publique en amont ``targets`` ; jamais un interne ``targets``. cvxpy est confiné à
+``solve/backend/cvxpy.py`` — ``solve`` reste pinocchio/torch-free."""
 
 from .contracts import LinearConstraint, Problem, ResidualBlock, Step, TrustRegion
 from .backend import SolveBackend, make_backend
@@ -13,10 +13,10 @@ __all__ = ["Problem", "ResidualBlock", "LinearConstraint", "TrustRegion", "Step"
 from .config import SolveConfig
 from .contracts import FrameEval, FrameInfo, SolveTrajectory
 
-# ``solve`` is re-exported lazily via module __getattr__ so that a bare ``import src.solve``
-# does NOT transitively pull ``src.solve.terms`` as side-effect attribute (which would break
-# the light-import guard assertion ``not hasattr(src.solve, "terms")``).  Accessing
-# ``src.solve.solve`` or ``from src.solve import solve`` both work correctly.
+# ``solve`` est ré-exporté en lazy via __getattr__ du module pour que ``import src.solve`` nu
+# n'attire PAS transitivement ``src.solve.terms`` comme attribut d'effet secondaire (ce qui casserait
+# l'assertion de garde d'import léger ``not hasattr(src.solve, "terms")``). Accéder à
+# ``src.solve.solve`` ou ``from src.solve import solve`` fonctionne correctement.
 def __getattr__(name: str):
     if name == "solve":
         from .runner import solve  # noqa: PLC0415

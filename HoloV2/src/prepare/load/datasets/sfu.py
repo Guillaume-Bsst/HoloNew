@@ -1,9 +1,10 @@
-"""SFU loader (AMASS-style SMPL-X): per-joint GLOBAL orientations + positions -> RawMotion.
+"""Chargeur SFU (SMPL-X style AMASS) : orientations + positions GLOBALES par joint -> RawMotion.
 
-The .npz stores 22 global SMPL-X body-joint orientations + positions (already Z-up, floor~0),
-plus betas and gender -- NO local pose, NO hands, NO objects. We reconstruct the local
-``SmplParams`` the ``BodyModel`` needs (``local_rotvecs_from_global``; hands set to zero) and keep
-the global positions as the demo joints. Body-only: interaction would be human-vs-ground only.
+Le .npz stocke les orientations + positions globales de 22 joints du corps SMPL-X (déjà Z-up, sol~0),
+plus betas et gender -- PAS de pose locale, PAS de mains, PAS d'objets. Nous reconstruisons le
+``SmplParams`` local que ``BodyModel`` nécessite (``local_rotvecs_from_global`` ; mains mis à zéro)
+et conservons les positions globales en tant que joints de démo. Seul le corps : l'interaction serait
+humain-vs-sol uniquement.
 """
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ from ..smpl import SMPLX_BODY_JOINTS, local_rotvecs_from_global, rest_body_model
 
 @register_loader("sfu")
 class SfuLoader:
-    """SceneSpec -> RawMotion for an SFU SMPL-X sequence (body-only, no objects)."""
+    """SceneSpec -> RawMotion pour une séquence SFU SMPL-X (seul le corps, pas d'objets)."""
 
     def load(self, spec: SceneSpec) -> RawMotion:
         if spec.smpl_model_dir is None:
@@ -26,7 +27,7 @@ class SfuLoader:
         d = np.load(str(spec.motion_path), allow_pickle=True)
         betas = np.asarray(d["betas"], np.float32).reshape(-1)
         gender = str(d["gender"])
-        # SFU quats are wxyz (validated against positions).
+        # Les quats SFU sont wxyz (validés contre les positions).
         quats = np.asarray(d["global_joint_orientations"], np.float64)   # (T, 22, 4) global, Z-up
         pos = np.asarray(d["global_joint_positions"], np.float32)        # (T, 22, 3) Z-up
         T, J = pos.shape[0], pos.shape[1]

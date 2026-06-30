@@ -1,14 +1,14 @@
-"""HODome loader: raw SMPL-X params + object R/T -> RawMotion.
+"""Chargeur HODome : params SMPL-X bruts + object R/T -> RawMotion.
 
-Layout of a HODome release (root = the dir holding ``smplx/``, ``object/``, ``scaned_object/``):
-    smplx/<subject>_<token>.npz   per-frame SMPL-X params (global_orient, body_pose, hands, ...)
+Layout d'une release HODome (root = le répertoire contenant ``smplx/``, ``object/``, ``scaned_object/``) :
+    smplx/<subject>_<token>.npz   params SMPL-X par frame (global_orient, body_pose, hands, ...)
     object/<subject>_<token>.npz  object_R (T,3,3) + object_T (T,3) + mocap_frame_rate
-    scaned_object/<token>.tar     the scanned object mesh
+    scaned_object/<token>.tar     le mesh d'objet scanné
 
-``spec.motion_path`` points at the ``smplx/`` npz; the object npz and scanned mesh are derived
-from the release layout. SMPL-X is native Y-up; world arrays (joints, object poses) are returned
-in the canonical Z-up world, while ``SmplParams`` keeps the native params (``BodyModel`` poses
-them into Z-up). Ported from the previous HoloNew ``data_loaders/hodome.py``.
+``spec.motion_path`` pointe vers le npz ``smplx/`` ; le npz d'objet et le mesh scanné sont dérivés
+du layout de la release. SMPL-X est Y-up natif ; les tableaux du monde (joints, poses d'objets) sont
+retournés dans le monde Z-up canonique, tandis que ``SmplParams`` garde les params natifs (``BodyModel``
+les pose en Z-up). Porté du ``data_loaders/hodome.py`` HoloNew précédent.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def _betas(d) -> np.ndarray:
 
 
 def _smpl_params(d) -> SmplParams:
-    """Native SMPL-X params from the npz (BodyModel poses them into the Z-up world)."""
+    """Params SMPL-X natifs du npz (BodyModel les pose dans le monde Z-up)."""
     def a(key):
         return np.asarray(d[key], np.float32)
 
@@ -46,12 +46,12 @@ def _smpl_params(d) -> SmplParams:
 
 
 def _object_mesh(token: str, scaned_dir: Path, cache_dir: Path) -> Path:
-    """Extract scaned_object/<token>.tar and return a clean, centroid-centred mesh (cached).
+    """Extraire scaned_object/<token>.tar et retourner un mesh propre, centré au centroïde (caché).
 
-    The supplied decimated ``<token>_face1000.obj`` is a fragmented soup (hundreds of disjoint
-    patches -> visible holes), so we use the dense scan ``<token>.obj`` instead (geometry only,
-    no texture). object_R/T are calibrated against the decimated mesh's centroid, so we centre
-    the dense mesh on THAT centroid to keep the poses aligned."""
+    Le ``<token>_face1000.obj`` décimé fourni est une soupe fragmentée (centaines de patches
+    disjoints -> trous visibles), donc nous utilisons plutôt le scan dense ``<token>.obj``
+    (géométrie uniquement, pas de texture). object_R/T sont calibrés contre le centroïde du
+    mesh décimé, donc nous centrons le mesh dense sur CE centroïde pour garder les poses alignées."""
     import trimesh
 
     base = cache_dir / token
@@ -62,12 +62,12 @@ def _object_mesh(token: str, scaned_dir: Path, cache_dir: Path) -> Path:
     if not full.exists():
         tar = Path(scaned_dir) / f"{token}.tar"
         if not tar.exists():
-            raise FileNotFoundError(f"HODome object archive not found: {tar}")
+            raise FileNotFoundError(f"Archive d'objet HODome non trouvée : {tar}")
         cache_dir.mkdir(parents=True, exist_ok=True)
         with tarfile.open(tar) as t:
             t.extractall(cache_dir)
-    src = full if full.exists() else face                       # dense scan preferred
-    ref = face if face.exists() else full                       # pose-calibration centroid
+    src = full if full.exists() else face                       # scan dense préféré
+    ref = face if face.exists() else full                       # centroïde de calibration de pose
     centroid = np.asarray(trimesh.load(str(ref), force="mesh", process=False).vertices,
                           np.float64).mean(0)
     m = trimesh.load(str(src), force="mesh", process=True, skip_materials=True)
@@ -80,7 +80,7 @@ def _object_mesh(token: str, scaned_dir: Path, cache_dir: Path) -> Path:
 
 @register_loader("hodome")
 class HodomeLoader:
-    """SceneSpec -> RawMotion for a HODome smplx sequence (one object when present)."""
+    """SceneSpec -> RawMotion pour une séquence HODome smplx (un objet quand présent)."""
 
     def load(self, spec: SceneSpec) -> RawMotion:
         if spec.smpl_model_dir is None:
@@ -91,10 +91,10 @@ class HodomeLoader:
         params = _smpl_params(d)
         body = build_body_model(params, Path(spec.smpl_model_dir))
         T = params.n_frames
-        # Demo joints = the first SMPL-X body bone positions (Z-up), via the body model's batched FK.
+        # Joints de démo = les premières positions d'os du corps SMPL-X (Z-up), via la FK en batch du modèle de corps.
         joints = body.bone_positions(params)[:, :len(SMPLX_BODY_JOINTS)].astype(np.float32)
 
-        root = npz.parent.parent                                    # HODome release root
+        root = npz.parent.parent                                    # racine release HODome
         obj_npz = root / "object" / f"{npz.stem}.npz"
         cache_dir = Path(spec.cache_dir) / "hodome_meshes" if spec.cache_dir else _MESH_CACHE
 

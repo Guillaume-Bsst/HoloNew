@@ -1,14 +1,15 @@
-"""Build the human<->robot correspondence offline by per-segment optimal transport.
+"""Construit la correspondance humain<->robot hors ligne par transport optimal par segment.
 
-Robot-agnostic: the robot-specific bits are the URDF (``RobotSpec.urdf_path``) and the rest-pose
-angles (``load/robot.correspondence_rest_angles``); everything here is generic. The asset is the
-pair ``(CorrespondenceTable, SurfaceSampling)`` — the table maps each robot surface point to a human
-sample, and the sampling is the canonical ``(tri_idx, bary)`` the (subject) human cloud must reuse so
-its point order matches ``smpl_idx``. Saved in the ``.npz`` format ``correspondence/cache.py`` reads.
+Indépendant du robot : les éléments spécifiques au robot sont l'URDF (``RobotSpec.urdf_path``) et
+les angles au repos (``load/robot.correspondence_rest_angles``) ; tout le reste est générique.
+L'actif est la paire ``(CorrespondenceTable, SurfaceSampling)`` — la table mappe chaque point de
+surface du robot à un échantillon humain, et l'échantillonnage est le ``(tri_idx, bary)`` canonique
+que le nuage humain (du sujet) doit réutiliser pour que son ordre de points corresponde à
+``smpl_idx``. Sauvegardé au format ``.npz`` que ``correspondence/cache.py`` lit.
 
-The human side is a NEUTRAL template body (zero betas): the per-segment OT normalises out centre and
-scale, so the coupling is shape-neutral and reused across subjects; only the subject human cloud's
-skinning is recomputed (the sampling identity is shared).
+Le côté humain est un corps de modèle NEUTRE (zéro betas) : l'OT par segment normalise le centre et
+l'échelle, donc l'appairage est neutre en forme et réutilisable sur les sujets ; seul le skinning du
+nuage humain du sujet est recalculé (l'identité d'échantillonnage est partagée).
 """
 from __future__ import annotations
 
@@ -27,15 +28,16 @@ from .ot_couple import couple
 from .robot_surface import sample_robot_surface
 from .segments import point_segments
 
-# SMPL-X rest is native Y-up facing +Z; humanoid URDF worlds are Z-up facing +X. The OT couples the
-# human against the robot in the robot world frame, so the human cloud is rotated into it (applied as
-# points @ R.T). Without this the per-segment axis anchors disagree and central segments map mirrored.
+# SMPL-X au repos est natif Y-up face à +Z ; les mondes URDF humanoides sont Z-up face à +X.
+# L'OT apparie l'humain contre le robot dans le repère mondial du robot, donc le nuage humain est
+# pivoté dedans (appliqué comme points @ R.T). Sans cela, les ancres des axes par segment ne sont
+# pas d'accord et les segments centraux cartographient miroir.
 SMPLX_TO_ROBOT_FRAME = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 
 
 def _sample_surface(rest_verts: np.ndarray, faces: np.ndarray, density: float,
                     seed: int) -> SurfaceSampling:
-    """Evenly sample the rest mesh -> the canonical ``SurfaceSampling`` (tri_idx, bary)."""
+    """Échantillonne uniformément le maillage au repos → l'``SurfaceSampling`` canonique (tri_idx, bary)."""
     import trimesh
     mesh = trimesh.Trimesh(vertices=np.asarray(rest_verts, np.float64), faces=np.asarray(faces),
                            process=False)
@@ -47,9 +49,9 @@ def _sample_surface(rest_verts: np.ndarray, faces: np.ndarray, density: float,
 
 
 def _human_source(body: SmplBody, sampling: SurfaceSampling) -> tuple[np.ndarray, np.ndarray]:
-    """Neutral human rest samples in the robot world frame (M,3) + their segment index (M,)."""
+    """Échantillons humains neutres au repos dans le repère mondial du robot (M,3) + leur index de segment (M,)."""
     rest = np.asarray(body.rest_vertices(None), np.float64)              # (V,3) native Y-up
-    tri_v = body.faces[sampling.tri_idx]                                 # (N,3) vertex ids
+    tri_v = body.faces[sampling.tri_idx]                                 # (N,3) ids de vertex
     pts = np.einsum("nij,ni->nj", rest[tri_v], sampling.bary.astype(np.float64))
     pts_robot = pts @ SMPLX_TO_ROBOT_FRAME.T                             # native -> robot world frame
     seg = point_segments(body.lbs_weights, body.faces, sampling.tri_idx, sampling.bary)
@@ -58,7 +60,7 @@ def _human_source(body: SmplBody, sampling: SurfaceSampling) -> tuple[np.ndarray
 
 def build_correspondence(config: PrepareConfig, neutral_body: SmplBody,
                          spec: RobotSpec) -> tuple[CorrespondenceTable, SurfaceSampling]:
-    """Run the full OT pipeline -> ``(CorrespondenceTable, SurfaceSampling)``."""
+    """Lance le pipeline OT complet → ``(CorrespondenceTable, SurfaceSampling)``."""
     sampling = _sample_surface(neutral_body.rest_vertices(None), neutral_body.faces,
                                config.cloud.human_density, config.cloud.seed)
     human_pts, human_seg = _human_source(neutral_body, sampling)
@@ -72,16 +74,16 @@ def build_correspondence(config: PrepareConfig, neutral_body: SmplBody,
 
 
 class CorrespondenceBuilder:
-    """``AssetBuilder`` producing the ``(CorrespondenceTable, SurfaceSampling)`` for a (robot,
-    template). Scoped per (robot, template, sampling/OT config); shape-neutral, so it is reused
-    across subjects. ``save``/``load`` delegate to ``correspondence/cache.py`` (the shared format)."""
+    """``AssetBuilder`` produisant le ``(CorrespondenceTable, SurfaceSampling)`` pour un (robot,
+    modèle). Limité par (robot, modèle, config d'échantillonnage/OT) ; neutre en forme, donc réutilisé
+    sur les sujets. ``save``/``load`` délèguent à ``correspondence/cache.py`` (le format partagé)."""
 
     def cache_key(self, config: PrepareConfig, spec: RobotSpec) -> str:
         h = hashlib.sha1()
         c, cc = config.cloud, config.correspondence
         h.update(f"{c.human_density}|{c.seed}|{cc.ot_reg}|{cc.robot_density}|{spec.name}".encode())
         h.update(str(spec.urdf_path).encode())
-        h.update(repr(correspondence_rest_angles(spec.name)).encode())  # editing the g1 rest angles invalidates the cache
+        h.update(repr(correspondence_rest_angles(spec.name)).encode())  # éditer les angles au repos g1 invalide le cache
         return h.hexdigest()
 
     def build(self, config: PrepareConfig, neutral_body: SmplBody,
@@ -96,7 +98,7 @@ class CorrespondenceBuilder:
 
 
 def regenerate(model_dir: Path, spec: RobotSpec, out_path: Path, config: PrepareConfig | None = None) -> None:
-    """Rebuild the correspondence for ``spec`` from a NEUTRAL template body and write the ``.npz``."""
+    """Reconstruit la correspondance pour ``spec`` à partir d'un corps de modèle NEUTRE et écrit le ``.npz``."""
     config = config or PrepareConfig()
     body = rest_body_model(np.zeros(10, np.float32), "neutral", model_dir)
     builder = CorrespondenceBuilder()

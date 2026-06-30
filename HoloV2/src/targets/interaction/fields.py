@@ -1,18 +1,18 @@
-"""eval_fields — evaluate a posed cloud against ALL channels -> ``MultiChannelField`` (channel-first
-``(C, P)``). The clouds x channels matrix runs the SAME op for the human cloud AND each object cloud.
+"""eval_fields — évaluer un nuage posé contre TOUS les canaux → ``MultiChannelField`` (premier canal
+``(C, P)``). La matrice nuages × canaux exécute la MÊME op pour le nuage humain ET chaque nuage objet.
 
-For each ``Channel``: a channel with ``object_idx is None`` is the static GROUND (world frame); a
-channel with ``object_idx=i`` maps the points into object i's local frame via that object's per-frame
-``(R, t)``. Then the channel's ``sdf`` is sampled by trilinear interpolation — ONE path, no
-flat-ground special case (the flat ground is an exact plane SDF) — and the contact direction is
-reconstructed from the trilinearly interpolated witness (stable at box edges/corners). Pure,
-array-oriented (axis = points), torch-free. Ported from HoloNew ``contact/contact_field`` +
+Pour chaque ``Channel`` : un canal avec ``object_idx is None`` est le SOL statique (frame mondial) ;
+un canal avec ``object_idx=i`` mappe les points dans le frame local de l'objet i via sa ``(R, t)``
+par frame. Ensuite, le ``sdf`` du canal est échantillonné par interpolation trilinéaire — UN chemin,
+pas de cas spécial sol-plat (le sol plat est un SDF de plan exact) — et la direction du contact est
+reconstruite à partir du témoin trilinéairement interpolé (stable aux arêtes/coins des boîtes). Pur,
+orienté tableaux (axe = points), sans torch. Porté de HoloNew ``contact/contact_field`` +
 ``contact/combined`` + ``backends/floor``.
 
-The matrix diagonal (an OBJECT cloud vs its OWN channel) is the one exception: there the cloud sits on
-its own surface, a degenerate self-contact, so ``self_idx`` short-circuits it to the closed form
-(distance 0, witness = the point itself) WITHOUT sampling the SDF — keeping the ``(C, P)`` layout
-homogeneous while letting the downstream solve ignore that diagonal cheaply.
+La diagonale de la matrice (un nuage OBJET vs son PROPRE canal) est l'une exception : là le nuage
+repose sur sa propre surface, un auto-contact dégénéré, donc ``self_idx`` le court-circuite sur la
+forme fermée (distance 0, témoin = le point lui-même) SANS échantillonner le SDF — gardant la
+disposition ``(C, P)`` homogène tout en laissant la résolution aval ignorer cette diagonale à bon marché.
 """
 from __future__ import annotations
 
@@ -24,56 +24,56 @@ from ...prepare.contracts import Channel, SDF
 
 def eval_fields(points: np.ndarray, channels: tuple[Channel, ...], object_rot: np.ndarray,
                 object_pos: np.ndarray, margin: float, self_idx: int | None = None) -> MultiChannelField:
-    """``(C, P)`` field of ``points`` (``(P, 3)`` world) vs every ``Channel``.
+    """Champ ``(C, P)`` de ``points`` (``(P, 3)`` mondial) vs chaque ``Channel``.
 
-    ``object_rot (N, 3, 3)`` / ``object_pos (N, 3)`` are the per-frame object world transforms (from
-    ``FramePose``, reused — no recompute): a channel with ``object_idx=i`` reads
-    ``(object_rot[i], object_pos[i])`` as its frame, a channel with ``object_idx is None`` uses the
-    world frame (ground). A probe is ``active`` within ``margin`` of the surface; inactive probes
-    carry ``distance = +margin`` and zeroed direction/witness, so the output is homogeneous ``(C, P)``.
+    ``object_rot (N, 3, 3)`` / ``object_pos (N, 3)`` sont les transformations mondiales d'objet par frame
+    (de ``FramePose``, réutilisé — pas de recalcul) : un canal avec ``object_idx=i`` lit
+    ``(object_rot[i], object_pos[i])`` comme son frame, un canal avec ``object_idx is None`` utilise
+    le frame mondial (sol). Un sondage est ``actif`` dans la ``margin`` de la surface ; les sondages
+    inactifs portent ``distance = +margin`` et direction/témoin mis à zéro, donc la sortie est homogène ``(C, P)``.
 
-    ``self_idx`` is the object index of the cloud being evaluated (its OWN object), or ``None`` for a
-    cloud that is no object (the human). When a channel's ``object_idx == self_idx`` the cloud sits on
-    its OWN surface, so the field is closed-form — distance 0, witness = the point itself (object-local),
-    zero normal, active everywhere — and is filled DIRECTLY without sampling that SDF (skipping the
-    degenerate self round-trip). The diagonal of the object×channel matrix; the human side has none.
+    ``self_idx`` est l'index d'objet du nuage en cours d'évaluation (son PROPRE objet), ou ``None`` pour un
+    nuage qui n'est pas un objet (l'humain). Quand ``object_idx`` d'un canal == ``self_idx`` le nuage repose sur
+    sa PROPRE surface, donc le champ est forme fermée — distance 0, témoin = le point lui-même (local-objet),
+    normal nul, actif partout — et est rempli DIRECTEMENT sans échantillonner ce SDF (sautant l'aller-retour
+    auto dégénéré). La diagonale de la matrice objet×canal ; le côté humain n'en a pas.
     """
-    pts = np.asarray(points, np.float64)                            # (P, 3) world probe positions
+    pts = np.asarray(points, np.float64)                            # (P, 3) positions monde des probes
     margin = float(margin)
     p = len(pts)
 
     dist_ch, dir_ch, wit_ch, act_ch = [], [], [], []
     for ch in channels:
         if ch.object_idx is None:
-            probe = pts                                            # ground: local frame == world
+            probe = pts                                            # sol : frame local == monde
         else:
-            rot = np.asarray(object_rot[ch.object_idx], np.float64)  # (3, 3) object world rotation
-            pos = np.asarray(object_pos[ch.object_idx], np.float64)  # (3,)   object world position
-            probe = (pts - pos) @ rot                              # (P, 3) = R.T @ (p - t), object-local
+            rot = np.asarray(object_rot[ch.object_idx], np.float64)  # (3, 3) rotation monde de l'objet
+            pos = np.asarray(object_pos[ch.object_idx], np.float64)  # (3,)   position monde de l'objet
+            probe = (pts - pos) @ rot                              # (P, 3) = R.T @ (p - t), objet-local
 
         if self_idx is not None and ch.object_idx == self_idx:
-            # Self channel: this cloud IS object ``self_idx``, so every probe lies on its own surface.
-            # Closed-form fill (no SDF sample): distance 0, witness = the probe itself (object-local),
-            # no contact normal, active everywhere (on-surface => within margin).
+            # Canal auto : ce nuage EST l'objet ``self_idx``, donc chaque sondage repose sur sa propre surface.
+            # Remplissage en forme fermée (pas d'échantillonnage SDF) : distance 0, témoin = le sondage lui-même
+            # (local-objet), pas de normale de contact, actif partout (sur surface => dans margin).
             dist_ch.append(np.zeros(p))                            # (P,)
-            dir_ch.append(np.zeros((p, 3)))                       # (P, 3) no normal on self
-            wit_ch.append(probe)                                  # (P, 3) own point, object-local
+            dir_ch.append(np.zeros((p, 3)))                       # (P, 3) pas de normale sur soi
+            wit_ch.append(probe)                                  # (P, 3) point propre, objet-local
             act_ch.append(np.ones(p, bool))                       # (P,)
             continue
 
-        dist, witness, in_grid = _sample(ch.sdf, probe)            # (P,), (P, 3), (P,) — local frame
-        active = in_grid & (dist < margin)                         # (P,) within the band AND in grid
+        dist, witness, in_grid = _sample(ch.sdf, probe)            # (P,), (P, 3), (P,) — frame local
+        active = in_grid & (dist < margin)                         # (P,) dans la bande ET dans la grille
 
-        delta = probe - witness                                    # (P, 3) surface -> point, channel frame
+        delta = probe - witness                                    # (P, 3) surface -> point, frame canal
         norm = np.linalg.norm(delta, axis=1, keepdims=True)        # (P, 1)
-        # Direction from the (interpolated) stored witness, NOT a distance gradient: a true unit
-        # vector even at box edges/corners. The guarded denominator (1.0 where on-surface) avoids a
-        # 0/0 warning; ``where`` still zeroes the direction where probe == witness (on-surface) and
-        # absorbs the float32 witness round-trip residual there.
-        den = np.where(norm > 1e-6, norm, 1.0)                     # (P, 1) safe divisor
-        direction = np.where(norm > 1e-6, delta / den, 0.0)        # (P, 3) unit contact normal
+        # Direction du témoin stocké (interpolé), PAS un gradient de distance : un vrai vecteur unitaire
+        # même aux arêtes/coins des boîtes. Le dénominateur gardé (1.0 sur surface) évite un avertissement
+        # 0/0 ; ``where`` met toujours à zéro la direction où sondage == témoin (sur surface) et absorbe
+        # le résidu d'aller-retour témoin float32 là.
+        den = np.where(norm > 1e-6, norm, 1.0)                     # (P, 1) diviseur sûr
+        direction = np.where(norm > 1e-6, delta / den, 0.0)        # (P, 3) normale de contact unitaire
 
-        # Homogenise the (C, P) layout: inactive probes carry distance=+margin, zeroed dir/witness.
+        # Homogénéiser la disposition (C, P) : les sondages inactifs portent distance=+margin, dir/témoin mis à zéro.
         dist_ch.append(np.where(active, dist, margin))             # (P,)
         dir_ch.append(np.where(active[:, None], direction, 0.0))   # (P, 3)
         wit_ch.append(np.where(active[:, None], witness, 0.0))     # (P, 3)
@@ -89,18 +89,19 @@ def eval_fields(points: np.ndarray, channels: tuple[Channel, ...], object_rot: n
 
 
 def _sample(sdf: SDF, probe: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Trilinear sample of an ``SDF`` at local ``probe`` (``(P, 3)``) -> ``(distance (P,), witness
-    (P, 3), in_grid (P,))``, all in the SDF's local frame. Node ``(ix, iy, iz)`` sits at ``origin +
-    spacing*(ix, iy, iz)``; the distance AND the stored witness grids are interpolated with the SAME
-    8-corner weights. ``in_grid`` flags probes whose enclosing cell is fully inside the grid (both
-    corners on every axis); out-of-grid probes are clamped only so the gather stays in bounds — the
-    caller treats them as inactive. Float64 compute; vectorised over P (the 8-corner loop is fixed)."""
-    shape = np.array(sdf.grid.shape)                               # (3,) nodes per axis
-    g = (probe - sdf.origin) / sdf.spacing                         # (P, 3) continuous grid index
-    i0 = np.floor(g).astype(np.int64)                             # (P, 3) lower corner
-    in_grid = np.all((i0 >= 0) & (i0 < shape - 1), axis=1)         # (P,) both corners valid per axis
-    t = g - i0                                                    # (P, 3) fractional offset in [0, 1)
-    i0 = np.clip(i0, 0, shape - 2)                                # clamp so the 8-corner gather is in bounds
+    """Échantillon trilinéaire d'un ``SDF`` au sondage local ``probe`` (``(P, 3)``) → ``(distance (P,),
+    témoin (P, 3), in_grid (P,))``, tous dans le frame local du SDF. Le nœud ``(ix, iy, iz)`` s'assoit à
+    ``origine + espacement*(ix, iy, iz)`` ; la distance ET les grilles de témoin stockées sont
+    interpolées avec les MÊMES poids des 8 coins. ``in_grid`` signale les sondages dont la cellule
+    englobante est entièrement à l'intérieur de la grille (coins sur chaque axe) ; les sondages hors
+    grille ne sont serrés que pour que la cueillette reste dans les limites — l'appelant les traite
+    comme inactifs. Calcul float64 ; vectorisé sur P (la boucle des 8 coins est fixe)."""
+    shape = np.array(sdf.grid.shape)                               # (3,) nœuds par axe
+    g = (probe - sdf.origin) / sdf.spacing                         # (P, 3) indice de grille continu
+    i0 = np.floor(g).astype(np.int64)                             # (P, 3) coin inférieur
+    in_grid = np.all((i0 >= 0) & (i0 < shape - 1), axis=1)         # (P,) les deux coins valides par axe
+    t = g - i0                                                    # (P, 3) offset fractionnaire dans [0, 1)
+    i0 = np.clip(i0, 0, shape - 2)                                # clamp pour que le gather 8-coins reste dans les bornes
     ix, iy, iz = i0[:, 0], i0[:, 1], i0[:, 2]
 
     dist = np.zeros(len(probe), np.float64)                        # (P,)
@@ -110,7 +111,7 @@ def _sample(sdf: SDF, probe: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.nda
             for dz in (0, 1):
                 w = (np.where(dx, t[:, 0], 1 - t[:, 0]) *
                      np.where(dy, t[:, 1], 1 - t[:, 1]) *
-                     np.where(dz, t[:, 2], 1 - t[:, 2]))           # (P,) trilinear corner weight
+                     np.where(dz, t[:, 2], 1 - t[:, 2]))           # (P,) poids trilinéaire du coin
                 dist += w * sdf.grid[ix + dx, iy + dy, iz + dz]    # (P,)
                 witness += w[:, None] * sdf.witness[ix + dx, iy + dy, iz + dz]  # (P, 3)
     return dist, witness, in_grid

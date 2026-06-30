@@ -1,9 +1,9 @@
-"""Dataset loaders: the ``MotionLoader`` protocol + a name->loader registry.
+"""Chargeurs de données : le protocol ``MotionLoader`` + un registre name->loader.
 
-Each dataset has ONE loader turning a ``SceneSpec`` into the uniform ``RawMotion`` contract;
-everything downstream is dataset-agnostic. Adding a dataset = adding a module with a
-``@register_loader("name")`` class — nothing else changes. Loaders are stateless (all inputs
-come from the spec).
+Chaque ensemble de données a UN chargeur qui transforme un ``SceneSpec`` en contrat uniforme
+``RawMotion`` ; tout en aval est agnostique du dataset. Ajouter un dataset = ajouter un module
+avec une classe ``@register_loader("name")`` — rien d'autre ne change. Les chargeurs sont
+sans état (tous les inputs proviennent de la spec).
 """
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from ..contracts import RawMotion, SceneSpec
 
 @runtime_checkable
 class MotionLoader(Protocol):
-    """Turns a ``SceneSpec`` into a ``RawMotion`` (joints, optional SMPL params, object poses +
-    mesh paths). The only dataset-specific code in the pipeline."""
+    """Transforme un ``SceneSpec`` en ``RawMotion`` (joints, params SMPL optionnels, poses
+    d'objets + chemins mesh). Le seul code spécifique à un dataset dans le pipeline."""
 
     def load(self, spec: SceneSpec) -> RawMotion: ...
 
@@ -25,7 +25,7 @@ _LOADERS: dict[str, type[MotionLoader]] = {}
 
 
 def register_loader(name: str):
-    """Class decorator registering a ``MotionLoader`` under ``name`` (raises on duplicate)."""
+    """Décorateur de classe enregistrant un ``MotionLoader`` sous ``name`` (lève une exception en cas de doublon)."""
 
     def _register(cls: type[MotionLoader]) -> type[MotionLoader]:
         if name in _LOADERS:
@@ -37,17 +37,18 @@ def register_loader(name: str):
 
 
 def get_loader(dataset: str) -> MotionLoader:
-    """Instantiate the loader registered for ``dataset`` (raises ValueError if unknown).
+    """Instancier le chargeur enregistré pour ``dataset`` (lève ValueError si inconnu).
 
-    Loaders register themselves on import. By convention the module for ``dataset`` is
-    ``src.prepare.load.datasets.<dataset>``, so it is imported lazily on first use — keeping this
-    package light (no torch/smplx pulled until a parametric dataset is actually requested)."""
+    Les chargeurs s'enregistrent à l'import. Par convention, le module pour ``dataset`` est
+    ``src.prepare.load.datasets.<dataset>``, il est importé paresseusement au premier usage —
+    gardant ce package léger (torch/smplx ne sont pas importés tant qu'un dataset paramétré
+    n'est pas vraiment demandé)."""
     if dataset not in _LOADERS:
         try:
             importlib.import_module(f"{__package__}.datasets.{dataset}")
         except ModuleNotFoundError as e:
             if e.name != f"{__package__}.datasets.{dataset}":
-                raise                  # a real dependency is missing inside the loader — surface it
+                raise                  # une vraie dépendance manque dans le loader — la faire remonter
     try:
         cls = _LOADERS[dataset]
     except KeyError:
@@ -57,5 +58,5 @@ def get_loader(dataset: str) -> MotionLoader:
 
 
 def load(spec: SceneSpec) -> RawMotion:
-    """Top-level entry: dispatch to the loader registered for ``spec.dataset``."""
+    """Entrée de haut niveau : dispatche vers le chargeur enregistré pour ``spec.dataset``."""
     return get_loader(spec.dataset).load(spec)

@@ -1,15 +1,17 @@
-"""Bakes the SMPL surface into a ``PointCloud`` carrying its own sparse LBS skinning.
+"""Crée la surface SMPL dans un ``PointCloud`` portant son propre skinning LBS creux.
 
-Sampled ONCE on the subject's rest mesh, reusing the shared ``SurfaceSampling`` (so the point order
-matches the correspondence's ``smpl_idx``). Each point stores its K dominant SMPL bones, their
-normalised skinning weights, and its offset in each bone's REST-local frame; posing is then
-mesh-free and torch-free (``targets/interaction/pose_cloud``), closing joint creases that a single
-rigid bone would tear (LBS-on-cloud). The heavy SMPL model is touched only here, at bake time.
+Échantillonné UNE FOIS sur le maillage au repos du sujet, réutilisant l'``SurfaceSampling`` partagé
+(pour que l'ordre des points corresponde à ``smpl_idx`` de la correspondance). Chaque point stocke
+ses K os SMPL dominants, leurs poids de skinning normalisés et son décalage dans le repère local au
+repos de chaque os ; la pose est alors sans maillage et sans torch (``targets/interaction/pose_cloud``),
+comblant les plis articulaires qu'un seul os rigide déchirerait (LBS-on-cloud). Le modèle SMPL lourd
+n'est touché que ici, au moment de la création.
 
-Why the offset is a plain native difference: at rest every SMPL bone's world transform is the pure
-frame rotation Q (native Y-up -> world Z-up; ``load/smpl.py``), identical for all bones, so in
-``p = sum_k w_k (R[k] @ offset_k + t[k])`` it cancels and ``offset_k = rest_point - rest_joint[k]``
-in the native frame (the frame ``rest_vertices`` / ``rest_joints`` / ``lbs_weights`` all share).
+Pourquoi le décalage est une simple différence native : au repos, la transformation mondiale de chaque
+os SMPL est la pure rotation de repère Q (natif Y-up → mondial Z-up ; ``load/smpl.py``), identique pour
+tous les os, donc dans ``p = sum_k w_k (R[k] @ offset_k + t[k])`` elle s'annule et
+``offset_k = rest_point - rest_joint[k]`` dans le repère natif (le repère que ``rest_vertices`` /
+``rest_joints`` / ``lbs_weights`` partagent tous).
 """
 from __future__ import annotations
 
@@ -26,15 +28,15 @@ from .cache import load_cloud, save_cloud
 
 
 # =============================================================================
-# Pure functions (no I/O, no mutation)
+# Fonctions pures (pas d'I/O, pas de mutation)
 # =============================================================================
 def _top_k(weights_dense: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
-    """Keep each row's K largest skinning weights, renormalised to sum 1.
-    Returns ``parts (N, K)`` bone indices and ``weights (N, K)`` (order within a row is irrelevant —
-    ``pose_cloud`` sums over K). ``K`` is clamped to the number of bones."""
+    """Conserve les K poids de skinning les plus grands de chaque ligne, renormalisés pour sommer 1.
+    Retourne ``parts (N, K)`` indices d'os et ``weights (N, K)`` (l'ordre dans une ligne est sans importance —
+    ``pose_cloud`` somme sur K). ``K`` est limité au nombre d'os."""
     n, j = weights_dense.shape
     k = min(k, j)
-    idx = np.argpartition(-weights_dense, k - 1, axis=1)[:, :k]      # (N, K) the K dominant bones
+    idx = np.argpartition(-weights_dense, k - 1, axis=1)[:, :k]      # (N, K) les K bones dominants
     w = np.take_along_axis(weights_dense, idx, axis=1)               # (N, K)
     w = w / w.sum(axis=1, keepdims=True)
     return idx.astype(np.int64), w.astype(np.float32)
@@ -42,14 +44,15 @@ def _top_k(weights_dense: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
 
 def bake_skinned_cloud(rest_verts: np.ndarray, faces: np.ndarray, lbs_weights: np.ndarray,
                        rest_joints: np.ndarray, sampling: SurfaceSampling, k: int) -> PointCloud:
-    """Sparse-skinned ``PointCloud`` from a rest mesh + its LBS weights, sampled at ``sampling``.
+    """``PointCloud`` avec skinning creux à partir d'un maillage au repos + ses poids LBS,
+    échantillonné à ``sampling``.
 
-    ``rest_verts (V,3)`` / ``rest_joints (J,3)`` / ``lbs_weights (V,J)`` are all in the body's
-    native rest frame. Each sample is the barycentric blend of its triangle's vertices (point and
-    weight vector alike); the K dominant bones give the sparse skinning."""
+    ``rest_verts (V,3)`` / ``rest_joints (J,3)`` / ``lbs_weights (V,J)`` sont tous dans le repère
+    natif au repos du corps. Chaque échantillon est le mélange barycentrique des sommets de son
+    triangle (point et vecteur de poids) ; les K os dominants donnent le skinning creux."""
     rv = np.asarray(rest_verts, np.float64)
     bc = np.asarray(sampling.bary, np.float64)                      # (N, 3)
-    tri_v = np.asarray(faces)[np.asarray(sampling.tri_idx)]         # (N, 3) vertex ids
+    tri_v = np.asarray(faces)[np.asarray(sampling.tri_idx)]         # (N, 3) ids de vertex
     pts = np.einsum("nij,ni->nj", rv[tri_v], bc)                    # (N, 3) rest surface points
     w_dense = np.einsum("nij,ni->nj", np.asarray(lbs_weights, np.float64)[tri_v], bc)  # (N, J)
     parts, weights = _top_k(w_dense, k)                             # (N, K)
@@ -59,23 +62,24 @@ def bake_skinned_cloud(rest_verts: np.ndarray, faces: np.ndarray, lbs_weights: n
 
 
 def build_human_cloud(body: SmplBody, sampling: SurfaceSampling, config: CloudConfig) -> PointCloud:
-    """Bake the subject's human cloud (pulls the rest arrays from ``body``)."""
+    """Crée le nuage humain du sujet (récupère les tableaux au repos de ``body``)."""
     return bake_skinned_cloud(body.rest_vertices(None), body.faces, body.lbs_weights,
                               body.rest_joints, sampling, config.k_influences)
 
 
 # =============================================================================
-# HumanCloudBuilder — the AssetBuilder for this deliverable (build / cache)
+# HumanCloudBuilder — l'AssetBuilder pour ce livrable (build / cache)
 # =============================================================================
 class HumanCloudBuilder:
-    """``AssetBuilder`` producing the subject's human ``PointCloud``. Scoped per SUBJECT: the cloud
-    is the subject's rest geometry sampled at the shared ``SurfaceSampling`` (so its ``sampling_id``
-    binds to the correspondence). The runner wraps ``build``/``load`` in a ``prof.span``."""
+    """``AssetBuilder`` produisant le ``PointCloud`` humain du sujet. Limité par SUJET : le nuage
+    est la géométrie au repos du sujet échantillonnée à l'``SurfaceSampling`` partagé (de sorte que
+    son ``sampling_id`` se lie à la correspondance). Le runner encapsule ``build``/``load`` dans un
+    ``prof.span``."""
 
     def cache_key(self, config: CloudConfig, params: SmplParams, sampling: SurfaceSampling) -> str:
-        """Hash of everything the cloud depends on: the K of the sparse skinning, the shared
-        sampling identity (density/seed/topology), and the subject (betas + gender). No SMPL forward
-        needed — the rest geometry is fully determined by these."""
+        """Hash de tout ce dont le nuage dépend : le K du skinning creux, l'identité d'échantillonnage
+        partagée (densité/seed/topologie) et le sujet (betas + genre). Aucun forward SMPL nécessaire —
+        la géométrie au repos est entièrement déterminée par ceux-ci."""
         h = hashlib.sha1()
         h.update(f"{config.k_influences}|{sampling.sampling_id}|{params.gender}".encode())
         h.update(np.ascontiguousarray(params.betas, np.float32).tobytes())

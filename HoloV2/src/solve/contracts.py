@@ -1,11 +1,11 @@
-"""Data contracts of the ``solve`` stage — the solver-AGNOSTIC representation of ONE linearised
-subproblem + the backend output. FROZEN dataclasses of numpy arrays, numpy-only (no cvxpy, no logic),
-importable everywhere.
+"""Contrats de données de l'étage ``solve`` — la représentation AGNOSTIQUE du solveur d'UN sous-problème
+linéarisé + la sortie backend. Classes gelées (``frozen``) de tableaux numpy, numpy-only (pas cvxpy,
+pas de logique), importables partout.
 
-A subproblem optimises ``dv`` (nv robot free-flyer tangent step) and optionally ``dxi`` (n_obj object
-SE(3) tangent steps). Objective = Σ squared residual blocks (a QP objective); constraints = linear
-(incl. box / joint limits) + per-DOF trust regions. Builders (``solve/terms``) fill these; a
-``SolveBackend`` turns the ``Problem`` into a ``Step``."""
+Un sous-problème optimise ``dv`` (pas tangent du free-flyer du robot nv-dimensionnel) et optionnellement
+``dxi`` (pas tangents SE(3) des n_obj objets). Objectif = Σ blocs résiduels au carré (objectif QP) ;
+contraintes = linéaires (incl. box / limites articulaires) + régions de confiance par-DOF. Les builders
+(``solve/terms``) les remplissent ; un ``SolveBackend`` transforme le ``Problem`` en ``Step``."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,7 +15,7 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ResidualBlock:
-    """Cost ``‖A·dv + A_obj·dxi + c‖²`` — weights ALREADY folded into A and c. ``m`` rows."""
+    """Coût ``‖A·dv + A_obj·dxi + c‖²`` — les poids DÉJÀ repliés dans A et c. ``m`` lignes."""
 
     A: np.ndarray            # (m, nv)
     c: np.ndarray            # (m,)
@@ -25,7 +25,7 @@ class ResidualBlock:
 
 @dataclass(frozen=True)
 class LinearConstraint:
-    """``lb ≤ A·dv (+ A_obj·dxi) ≤ ub``. ``None`` side = one-sided ; ``lb == ub`` = equality."""
+    """``lb ≤ A·dv (+ A_obj·dxi) ≤ ub``. Côté ``None`` = unilatéral ; ``lb == ub`` = égalité."""
 
     A: np.ndarray             # (m, nv)
     lb: np.ndarray | None     # (m,)
@@ -36,9 +36,9 @@ class LinearConstraint:
 
 @dataclass(frozen=True)
 class TrustRegion:
-    """``‖var‖_p ≤ radius`` (PER-DOF radius — handles the m/rad/joint unit heterogeneity).
-    ``norm = -1`` => box ``|var| ≤ radius`` (∞-norm → QP, v1) ; ``norm = 2`` => L2 ellipsoid
-    ``‖var ⊘ radius‖₂ ≤ 1`` (SOC → SOCP, future)."""
+    """``‖var‖_p ≤ radius`` (rayon par-DOF — gère l'hétérogénéité des unités m/rad/articulaire).
+    ``norm = -1`` => box ``|var| ≤ radius`` (∞-norm → QP, v1) ; ``norm = 2`` => ellipsoïde L2
+    ``‖var ⊘ radius‖₂ ≤ 1`` (SOC → SOCP, futur)."""
 
     var: str                  # 'dv' | 'dxi'
     radius: np.ndarray        # (nv,) or (n_obj*6,)
@@ -55,7 +55,7 @@ class TrustRegion:
 
 @dataclass(frozen=True)
 class Problem:
-    """One linearised subproblem: Σ ``ResidualBlock`` (objective) + ``LinearConstraint`` + ``TrustRegion``."""
+    """Un sous-problème linéarisé : Σ ``ResidualBlock`` (objectif) + ``LinearConstraint`` + ``TrustRegion``."""
 
     nv: int
     n_obj: int
@@ -89,7 +89,7 @@ class Problem:
 
 @dataclass(frozen=True)
 class Step:
-    """Backend output: the optimal step + solver status."""
+    """Sortie backend : le pas optimal + l'état du solveur."""
 
     dv: np.ndarray            # (nv,)
     dxi: np.ndarray | None    # (n_obj, 6)
@@ -99,15 +99,15 @@ class Step:
 
 from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:                       # annotations only -> contracts stays numpy-only at runtime
+if TYPE_CHECKING:                       # annotations seulement -> contracts reste numpy-only au runtime
     from ..targets import StyleEval, ContactEval
 
 
 @dataclass(frozen=True)
 class FrameEval:
-    """Combined per-frame evaluator output: the style FK + the contact field/Jacobians at the current
-    ``(q, object_poses)``. Produced by the ``evaluate`` wrapper (``solve/loop.py``), consumed by
-    ``assemble``. A plain container (no shape logic) — the two members validate themselves."""
+    """Sortie combinée d'évaluateur par trame : la FK de style + le champ/Jacobiennes de contact
+    aux ``(q, object_poses)`` courants. Produit par le wrapper ``evaluate`` (``solve/loop.py``), consumé
+    par ``assemble``. Un simple conteneur (pas de logique de forme) — les deux membres se valident eux-mêmes."""
 
     style: "StyleEval"
     contact: "ContactEval"
@@ -115,8 +115,8 @@ class FrameEval:
 
 @dataclass(frozen=True)
 class FrameInfo:
-    """Per-frame solve diagnostic (weight tuning + benchmark). ``cost_by_term`` is the squared residual
-    norm per term (``S-pos`` / ``C-D`` / …) at the converged step — the #1 tuning tool."""
+    """Diagnostic par-trame de résolution (tuning de poids + benchmark). ``cost_by_term`` est la norme
+    résiduelle au carré par terme (``S-pos`` / ``C-D`` / …) au pas convergé — l'outil #1 de tuning."""
 
     n_iters: int
     status: str
@@ -126,8 +126,8 @@ class FrameInfo:
 
 @dataclass(frozen=True)
 class SolveTrajectory:
-    """Runner output: the retargeted ``qpos`` trajectory + the per-frame object poses + diagnostics.
-    ``object_poses`` is ``(T, N, 7)`` (pos + quat wxyz) ; ``N = 0`` keeps the ``(T, 0, 7)`` shape."""
+    """Sortie du runner : la trajectoire ``qpos`` reorientée + les poses d'objets par-trame + diagnostics.
+    ``object_poses`` est ``(T, N, 7)`` (pos + quat wxyz) ; ``N = 0`` conserve la forme ``(T, 0, 7)``."""
 
     qpos: np.ndarray          # (T, nq)
     object_poses: np.ndarray  # (T, N, 7)  pos + quat wxyz

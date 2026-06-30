@@ -1,18 +1,18 @@
-"""Data contracts of the ``targets`` stage — its PUBLIC type surface.
+"""Contrats de données de l'étage ``targets`` — sa surface de types PUBLIQUE.
 
-The per-frame field-evaluation results and target artifacts (the ``targets`` -> ``solve`` contract),
-plus the shared per-frame pose state and the viz trace. FROZEN dataclasses of numpy arrays, numpy-only
-(no logic, no I/O), so this module is importable everywhere.
+Les résultats d'évaluation de champ par frame et les artefacts de cibles (le contrat ``targets`` ->
+``solve``), plus l'état de pose par frame partagé et la trace viz. Dataclasses FROZEN de tableaux numpy,
+numpy-only (pas de logique, pas d'I/O), donc ce module est importable partout.
 
-``targets`` consumes the upstream ``prepare`` contracts (``from ..prepare.contracts import ...``) and
-exposes these as its own public types; ``solve`` and ``viz`` import their inputs from here. The
-pipeline is linear (prepare -> targets -> solve), so each stage owns its contracts and depends only on
-the public types of the stage upstream — the dependency graph stays acyclic.
+``targets`` consomme les contrats amont ``prepare`` (``from ..prepare.contracts import ...``) et les
+expose comme ses propres types publics ; ``solve`` et ``viz`` importent leurs entrées d'ici. Le
+pipeline est linéaire (prepare -> targets -> solve), donc chaque étage possède ses contrats et ne dépend
+que des types publics de l'étage amont — le graphe de dépendances reste acyclique.
 
-Channel-first convention: ``ContactField`` / ``MultiChannelField`` arrays are ``(C, P)`` = C channels
-over P points (per-channel ops contiguous). C = ground + N objects. ``J_bones`` (SMPL skeleton, in
-``FramePose``) is distinct from ``J_demo`` (the dataset's joints) — never conflate them. A sequence is
-``list[FrameTargets]``.
+Convention canal-first : les tableaux ``ContactField`` / ``MultiChannelField`` sont ``(C, P)`` = C canaux
+sur P points (ops par canal contiguës). C = sol + N objets. ``J_bones`` (squelette SMPL, dans
+``FramePose``) est distinct de ``J_demo`` (les joints du dataset) — ne jamais les confondre. Une séquence
+est ``list[FrameTargets]``.
 """
 from __future__ import annotations
 
@@ -22,17 +22,17 @@ import numpy as np
 
 
 # =============================================================================
-# interaction/ — field evaluation results
+# interaction/ — résultats d'évaluation de champ
 # =============================================================================
 @dataclass(frozen=True)
 class ContactField:
-    """One cloud vs ONE channel, ONE frame. Inactive probes: distance=+margin, rest 0.
-    ``direction``/``witness`` are in the CHANNEL's frame (see ``MultiChannelField``)."""
+    """Un nuage vs UN canal, UNE frame. Probes inactives : distance=+margin, le reste 0.
+    ``direction``/``witness`` sont dans le frame du CANAL (voir ``MultiChannelField``)."""
 
-    distance: np.ndarray   # (P,)    signed distance
-    direction: np.ndarray  # (P, 3)  contact normal (surface -> point)
-    witness: np.ndarray    # (P, 3)  nearest surface point
-    active: np.ndarray     # (P,)    bool, within margin
+    distance: np.ndarray   # (P,)    distance signée
+    direction: np.ndarray  # (P, 3)  normale de contact (surface -> point)
+    witness: np.ndarray    # (P, 3)  point de surface le plus proche
+    active: np.ndarray     # (P,)    bool, dans le margin
 
     def __post_init__(self) -> None:
         for name in ("distance", "direction", "witness", "active"):
@@ -41,20 +41,20 @@ class ContactField:
 
 @dataclass(frozen=True)
 class MultiChannelField:
-    """One cloud vs ALL channels, ONE frame. Channel-first, homogeneous (C = ground + N obj).
+    """Un nuage vs TOUS les canaux, UNE frame. Canal-first, homogène (C = sol + N obj).
 
-    Per-channel NATURAL frame (object-as-variable ready): the GROUND channel is in the WORLD frame;
-    each OBJECT channel is in THAT object's LOCAL frame — the probe is mapped into the object frame,
-    the field is read there, and ``direction``/``witness`` are KEPT there (no world round-trip).
-    ``distance`` is a length (frame-invariant). This is exactly the frame the solve's object terms are
-    built in (the object's rigid-motion Jacobian couples in object-local), so the object channel needs
-    NO rewrite when the object becomes a decision variable."""
+    Frame NATUREL par canal (prêt pour l'objet-comme-variable) : le canal SOL est dans le frame MONDE ;
+    chaque canal OBJET est dans le frame LOCAL de CET objet — la probe est mappée dans le frame objet,
+    le champ y est lu, et ``direction``/``witness`` y sont GARDÉS (pas d'aller-retour monde).
+    ``distance`` est une longueur (invariante au frame). C'est exactement le frame dans lequel les termes
+    objet du solve sont construits (la Jacobienne de mouvement rigide de l'objet se couple en objet-local),
+    donc le canal objet ne nécessite AUCUNE réécriture quand l'objet devient une variable de décision."""
 
     distance: np.ndarray         # (C, P)
     direction: np.ndarray        # (C, P, 3)
     witness: np.ndarray          # (C, P, 3)
     active: np.ndarray           # (C, P) bool
-    channels: tuple[str, ...]    # (C,) channel names
+    channels: tuple[str, ...]    # (C,) noms de canaux
 
     def __post_init__(self) -> None:
         C = len(self.channels)
@@ -84,22 +84,22 @@ class MultiChannelField:
 
 
 # =============================================================================
-# per-frame targets -> solve
+# cibles par frame -> solve
 # =============================================================================
 @dataclass(frozen=True)
 class StyleTargets:
-    """Style objective, one frame: robot posture/style tracking, G1-ready via joint mapping.
-    The object-agnostic "how the body should move" channel. Provisional shape — the style
-    objective is still being designed (see ``targets/style/``).
+    """Objectif de style, une frame : suivi de posture/style du robot, G1-ready via le mapping de joints.
+    Le canal "comment le corps devrait bouger", indépendant des objets. Forme provisoire — l'objectif
+    de style est encore en cours de conception (voir ``targets/style/``).
 
-    Per-frame GEOMETRY only: WHERE each tracked link should be (``position``) and how it should be
-    oriented (``orientation``). HOW HARD to track each link (the tracking weights / cost gains) is a
-    SOLVER concern — static, not per-frame — so it is NOT carried here; ``solve`` defines it in its
-    own config when it is built (V1 ``w_p`` / ``w_r``)."""
+    GÉOMÉTRIE par frame seulement : OÙ chaque link suivi devrait être (``position``) et comment il devrait
+    être orienté (``orientation``). À quel POINT suivre chaque link (les poids de suivi / gains de coût)
+    est une affaire de SOLVEUR — statique, pas par frame — donc ce n'est PAS porté ici ; ``solve`` le
+    définit dans sa propre config à sa construction (V1 ``w_p`` / ``w_r``)."""
 
     link_names: tuple[str, ...]            # (L,)
-    position: np.ndarray                   # (L, 3) world target per link
-    orientation: np.ndarray | None = None  # (L, 4) wxyz, or None if position-only
+    position: np.ndarray                   # (L, 3) cible monde par link
+    orientation: np.ndarray | None = None  # (L, 4) wxyz, ou None si position seule
 
     def __post_init__(self) -> None:
         L = len(self.link_names)
@@ -114,43 +114,44 @@ class StyleTargets:
 
 @dataclass(frozen=True)
 class RobotInteractionTargets:
-    """Human field transported onto the robot's M correspondence points, ONE frame.
-    The static binding (which link each point attaches to) lives in
-    ``InteractionContext.correspondence`` — NOT duplicated here per frame."""
+    """Champ humain transporté sur les M points de correspondance du robot, UNE frame.
+    La liaison statique (à quel link chaque point s'attache) vit dans
+    ``InteractionContext.correspondence`` — PAS dupliquée ici par frame."""
 
-    field: MultiChannelField               # on the M robot points
+    field: MultiChannelField               # sur les M points robot
 
 
 @dataclass(frozen=True)
 class EnvironmentInteractionTargets:
-    """Object clouds vs the channels (object<->ground / object<->object), ONE frame; NOT transported.
+    """Nuages objets vs les canaux (objet<->sol / objet<->objet), UNE frame ; NON transportés.
 
-    First-class solve input for the OBJECT-AS-VARIABLE terms: when the object is a decision variable,
-    these scene-side contacts (object vs ground, object vs other objects, in object-local frame) drive
-    its consistency. Same eval matrix as the human side (cheap, homogeneous), with ONE extra term the
-    human side lacks: the DIAGONAL (object i vs its OWN channel i). The cloud sits on its own surface
-    there, so it is filled with the closed-form self-contact (distance 0, witness = the point itself;
-    see ``eval_fields`` ``self_idx``), NOT a real sample — the solve ignores that diagonal channel."""
+    Entrée de solve de première classe pour les termes OBJET-COMME-VARIABLE : quand l'objet est une
+    variable de décision, ces contacts côté scène (objet vs sol, objet vs autres objets, en frame
+    objet-local) pilotent sa cohérence. Même matrice d'éval que le côté humain (peu coûteuse, homogène),
+    avec UN terme supplémentaire que le côté humain n'a pas : la DIAGONALE (objet i vs son PROPRE canal i).
+    Le nuage y repose sur sa propre surface, donc elle est remplie par le self-contact en forme close
+    (distance 0, witness = le point lui-même ; voir ``eval_fields`` ``self_idx``), PAS un vrai échantillon
+    — le solve ignore ce canal diagonal."""
 
-    per_object: tuple[MultiChannelField, ...]  # one per object cloud
+    per_object: tuple[MultiChannelField, ...]  # un par nuage objet
 
 
 @dataclass(frozen=True)
 class FrameTargets:
-    """Output of ``process_frame`` for ONE frame; the targets -> solve contract. A sequence is
+    """Sortie de ``process_frame`` pour UNE frame ; le contrat targets -> solve. Une séquence est
     ``list[FrameTargets]``.
 
-    The solve seam is ``(FrameTargets, InteractionContext)``: solve also reads the static
-    ``InteractionContext`` (the correspondence binding for the robot control points, and the channel
-    SDFs it re-queries at those points). ``env_interaction`` feeds the object-as-variable terms (the
-    object's own contacts), so it is part of the prod path — not viz-only."""
+    Le seam du solve est ``(FrameTargets, InteractionContext)`` : le solve lit aussi l'``InteractionContext``
+    statique (la liaison de correspondance pour les points de contrôle du robot, et les SDFs de canaux
+    qu'il re-interroge en ces points). ``env_interaction`` alimente les termes objet-comme-variable (les
+    propres contacts de l'objet), donc il fait partie du chemin prod — pas seulement viz."""
 
     style: StyleTargets
     robot_interaction: RobotInteractionTargets
     env_interaction: EnvironmentInteractionTargets
-    object_rot: np.ndarray                 # (N, 3, 3) per-frame object world rotations — solve's
-                                           # object-channel frame + the object-variable init/reference
-    object_pos: np.ndarray                 # (N, 3)    per-frame object world positions
+    object_rot: np.ndarray                 # (N, 3, 3) rotations monde objets par frame — frame du canal
+                                           # objet du solve + init/référence de l'objet-variable
+    object_pos: np.ndarray                 # (N, 3)    positions monde objets par frame
 
     def __post_init__(self) -> None:
         n = len(self.env_interaction.per_object)
@@ -163,18 +164,18 @@ class FrameTargets:
 
 
 # =============================================================================
-# shared per-frame state + viz trace
+# état par frame partagé + trace viz
 # =============================================================================
 @dataclass(frozen=True)
 class FramePose:
-    """Per-frame world transforms, computed ONCE and shared by both treatments: ``style``
-    uses the demo joints (from GroundedScene); ``interaction`` uses these bone + object
-    transforms to pose its clouds. ``J_bones`` = SMPL skeleton (distinct from J_demo)."""
+    """Transforms monde par frame, calculés UNE fois et partagés par les deux traitements : ``style``
+    utilise les joints démo (depuis GroundedScene) ; ``interaction`` utilise ces transforms bone + objet
+    pour positionner ses nuages. ``J_bones`` = squelette SMPL (distinct de J_demo)."""
 
-    bone_rot: np.ndarray    # (J_bones, 3, 3) SMPL bone world rotations
-    bone_pos: np.ndarray    # (J_bones, 3)    SMPL bone world origins
-    object_rot: np.ndarray  # (N, 3, 3) object world rotations
-    object_pos: np.ndarray  # (N, 3)    object world positions
+    bone_rot: np.ndarray    # (J_bones, 3, 3) rotations monde des bones SMPL
+    bone_pos: np.ndarray    # (J_bones, 3)    origines monde des bones SMPL
+    object_rot: np.ndarray  # (N, 3, 3) rotations monde objets
+    object_pos: np.ndarray  # (N, 3)    positions monde objets
 
     def __post_init__(self) -> None:
         J = self.bone_rot.shape[0]
@@ -193,24 +194,24 @@ class FramePose:
 
 @dataclass(frozen=True)
 class FrameTrace:
-    """ALL artifacts of one frame, for inspection / visualisation. Produced by
-    ``targets.pipeline.trace_frame`` — the SAME pure ops as ``process_frame``, intermediates
-    kept. The clean seam for ``viz/``: zero hooks in the compute."""
+    """TOUS les artefacts d'une frame, pour inspection / visualisation. Produit par
+    ``targets.pipeline.trace_frame`` — les MÊMES ops purs que ``process_frame``, intermédiaires
+    gardés. Le seam propre pour ``viz/`` : zéro hook dans le calcul."""
 
     pose: FramePose
-    human_cloud_world: np.ndarray                  # (P, 3) posed SMPL cloud
-    object_clouds_world: tuple[np.ndarray, ...]    # per object, (P_i, 3)
-    human_field: MultiChannelField                 # on the human cloud (PRE-transport)
-    targets: FrameTargets                          # final outputs (style + robot + env)
+    human_cloud_world: np.ndarray                  # (P, 3) nuage SMPL posé
+    object_clouds_world: tuple[np.ndarray, ...]    # par objet, (P_i, 3)
+    human_field: MultiChannelField                 # sur le nuage humain (PRÉ-transport)
+    targets: FrameTargets                          # sorties finales (style + robot + env)
 
 
 # =============================================================================
-# EVAL (q-dependent) — current geometric state + analytic Jacobians (targets.Evaluator)
+# EVAL (q-dépendant) — état géométrique courant + Jacobiennes analytiques (targets.Evaluator)
 # =============================================================================
-# Mirror of the references above for the SAME conceptual op (pose a config, read style + contact),
-# applied to the OPTIMISED config (robot @ q + objects @ SE(3)). Reference-free, cost-free: the
-# residual (cur - ref) and the cost live in ``solve``. Tangent convention: pinocchio v
-# (nv = 6 + n_joints) for q; world-aligned (δt, δθ) for each object (LOCAL_WORLD_ALIGNED).
+# Miroir des références ci-dessus pour la MÊME op conceptuelle (poser une config, lire style + contact),
+# appliquée à la config OPTIMISÉE (robot @ q + objets @ SE(3)). Reference-free, cost-free : le
+# résidu (cur - ref) et le coût vivent dans ``solve``. Convention de tangente : pinocchio v
+# (nv = 6 + n_joints) pour q ; world-aligned (δt, δθ) pour chaque objet (LOCAL_WORLD_ALIGNED).
 @dataclass(frozen=True)
 class StyleEval:
     """État courant des links suivis à ``q`` (FK), + jacobiennes géométriques. Reference-free,

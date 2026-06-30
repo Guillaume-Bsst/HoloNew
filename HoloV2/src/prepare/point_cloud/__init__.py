@@ -1,6 +1,7 @@
-"""Point clouds + correspondence (build-once): the SMPL surface and each object surface as
-``PointCloud`` (sparse skinning), plus the SMPL<->robot ``CorrespondenceTable``. Logic in the
-submodules; the human cloud and the correspondence share one ``SurfaceSampling`` identity."""
+"""Nuages de points + correspondance (build-once) : la surface SMPL et chaque surface d'objet comme
+``PointCloud`` (skinning creux), plus la table de correspondance SMPL<->robot ``CorrespondenceTable``.
+La logique réside dans les sous-modules ; le nuage humain et la correspondance partagent une
+identité ``SurfaceSampling`` unique."""
 from .human import HumanCloudBuilder, bake_skinned_cloud, build_human_cloud
 from .objects import ObjectCloudBuilder, assemble_rigid_cloud, build_object_cloud, sample_object_surface
 from .sampling import SurfaceSampling, sampling_id

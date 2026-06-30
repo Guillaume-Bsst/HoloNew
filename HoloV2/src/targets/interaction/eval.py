@@ -44,7 +44,7 @@ def _probe_jac(channels: tuple[Channel, ...], points: np.ndarray,
     out = np.zeros((len(channels), p_count, 3, 6))                  # (C, P, 3, 6)
     for c, ch in enumerate(channels):
         if ch.object_idx is None:
-            continue                                               # ground rows stay 0
+            continue                                               # les lignes du sol restent 0
         i = ch.object_idx
         rit = np.asarray(object_rot[i], np.float64).T              # (3, 3) = R_iᵀ
         ti = np.asarray(object_pos[i], np.float64)                 # (3,)
@@ -80,13 +80,13 @@ def contact_eval(ctx: InteractionContext, q: np.ndarray,
     robot = ctx.robot
     rot, pos, jac_lin, jac_ang = robot.link_jacobians(q)           # (L,3,3),(L,3),(L,3,nv),(L,3,nv) monde
     cloud = ctx.robot_cloud
-    parts = np.asarray(cloud.parts)                               # (M, K) into FK link order
+    parts = np.asarray(cloud.parts)                               # (M, K) vers l'ordre des links FK
     weights = np.asarray(cloud.weights, np.float64)              # (M, K)
     offsets = np.asarray(cloud.offsets, np.float64)             # (M, K, 3) link-local
 
-    points = pose_cloud(cloud, rot, pos)                          # (M, 3) world robot control points
+    points = pose_cloud(cloud, rot, pos)                          # (M, 3) points de contrôle robot monde
 
-    r = np.einsum("mkij,mkj->mki", rot[parts], offsets)          # (M, K, 3) world offset link->point
+    r = np.einsum("mkij,mkj->mki", rot[parts], offsets)          # (M, K, 3) offset monde link->point
     contrib = jac_lin[parts] - np.einsum("mkij,mkjn->mkin", _skew(r), jac_ang[parts])  # (M,K,3,nv)
     point_jac = np.einsum("mk,mkin->min", weights, contrib)      # (M, 3, nv) = J_lin - [r]_× J_ang
 

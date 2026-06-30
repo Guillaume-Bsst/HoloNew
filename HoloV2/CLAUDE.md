@@ -66,8 +66,8 @@ redupliquer ici**). En bref : `SceneSpec`+`PrepareConfig` → **prepare/** (offl
   OU **terrain** (escalier/pente/climbing). `Channel.sdf` jamais `None` ⇒ éval homogène (chemin unique).
 - SMPL/meshes/robot instanciés **uniquement dans `prepare/`**.
 - **Commentaires autonomes** (pas de réf. à une discussion ; acronymes locaux définis), **rédigés en
-  anglais** (docstrings + commentaires inline). Le français reste pour CLAUDE.md, les messages de commit
-  et les échanges — JAMAIS dans le code.
+  français** (docstrings + commentaires inline) — cohérent avec CLAUDE.md et les messages de commit.
+  Seuls les fichiers sous `docs/` (specs/plans, fichiers pour Claude) sont hors de cette règle.
 
 ## Tests & vérification (obligatoire)
 

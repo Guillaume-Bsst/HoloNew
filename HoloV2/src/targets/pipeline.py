@@ -1,15 +1,15 @@
-"""targets/ orchestrator — per-frame construction of the cibles.
+"""Orchestrateur targets/ — construction par frame des cibles.
 
-Composes the pure ops (style + interaction's pose/eval/transport) into ``FrameTargets``. Input is the
-prepare public surface ``(GroundedScene, InteractionContext)`` plus the ``RobotSpec`` (it keys the style
-table) — the grounding ``Calibration`` rides inside ``grounded.calibration``, the subject body inside
-``grounded.body``. ``process_frame`` and ``trace_frame`` share ONE dataflow core (``_build_frame``)
-so the lean and the instrumented paths can never drift; the ``prof`` spans live in that core (the
-orchestrator), never in the pure ops. See docs/TARGETS.md, VIZ.md, OBS.md.
+Compose les ops purs (style + pose/eval/transport d'interaction) dans ``FrameTargets``. L'entrée est la
+surface publique prepare ``(GroundedScene, InteractionContext)`` plus la ``RobotSpec`` (elle clé la table
+de style) — l'ancrage ``Calibration`` existe dans ``grounded.calibration``, le corps du sujet dans
+``grounded.body``. ``process_frame`` et ``trace_frame`` partagent UN cœur de flux de données (``_build_frame``)
+donc les chemins maigres et instrumentés ne peuvent jamais dériver ; les spans ``prof`` vivent dans ce cœur
+(l'orchestrateur), jamais dans les ops purs. Voir docs/TARGETS.md, VIZ.md, OBS.md.
 
-Stage knobs ride on ``cfg`` (``TargetsConfig``, ``targets/config.py``): currently only ``style``
-carries knobs — ``cfg.style`` is handed to ``style.build``. The interaction per-frame knob
-(``margin``) stays on the ``InteractionContext`` (a ``prepare`` output), not in ``cfg``.
+Les knobs d'étage vivent sur ``cfg`` (``TargetsConfig``, ``targets/config.py``) : actuellement seul ``style``
+porte des knobs — ``cfg.style`` est remis à ``style.build``. Le knob par frame d'interaction
+(``margin``) reste sur ``InteractionContext`` (une sortie ``prepare``), pas dans ``cfg``.
 """
 from __future__ import annotations
 
@@ -26,8 +26,8 @@ from . import style
 
 
 def _pose7_to_Rt(pose7: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """One world pose ``[x, y, z, qw, qx, qy, qz]`` (quaternion wxyz, assumed unit) -> ``(R (3,3),
-    t (3,))``. The single quaternion->matrix path for object posing (kept torch-free)."""
+    """Une pose du monde ``[x, y, z, qw, qx, qy, qz]`` (quaternion wxyz, supposé unitaire) →
+    ``(R (3,3), t (3,))``. Le chemin unique quaternion→matrice pour poser des objets (gardé sans torch)."""
     x, y, z, qw, qx, qy, qz = (float(v) for v in pose7)
     rot = np.array([
         [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qy - qw * qz),     2 * (qx * qz + qw * qy)],
@@ -38,11 +38,11 @@ def _pose7_to_Rt(pose7: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 
 def frame_pose(grounded: GroundedScene, f: int) -> FramePose:
-    """Per-frame world transforms, computed ONCE and shared by BOTH treatments: SMPL bone (R, t) from
-    the body's FK and each object's (R, t) from its grounded pose7. ``interaction`` poses its clouds
-    from these (and reuses the object (R, t) as each object channel's frame in the eval); ``style``
-    reads the mapped bone (R, t) too (its GMR tracking follows the bone world pose, not the demo
-    joints). ``body is None`` (positions-only) => no bones."""
+    """Transformations mondiales par frame, calculées UNE FOIS et partagées par LES DEUX traitements :
+    os SMPL (R, t) de la FK du corps et (R, t) de chaque objet de sa pose7 ancrée. ``interaction`` pose
+    ses nuages à partir de ceux-ci (et réutilise l'objet (R, t) comme frame du canal objet dans l'éval) ;
+    ``style`` lit aussi l'os mappé (R, t) (son suivi GMR suit la pose monde de l'os, pas les articulations
+    démo). ``body is None`` (positions uniquement) ⇒ pas d'os."""
     if grounded.body is not None:
         bone_rot, bone_pos = grounded.body.bone_transforms(grounded.smpl_params, f)
     else:
@@ -57,17 +57,17 @@ def frame_pose(grounded: GroundedScene, f: int) -> FramePose:
 
 def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec, f: int,
                  cfg: TargetsConfig = TargetsConfig(), prof=NULL):
-    """Run every pure op of one frame ONCE, returning all intermediates. The single source of the
-    per-frame dataflow, shared by ``process_frame`` (keeps only the targets) and ``trace_frame``
-    (keeps everything). Interaction is a one-way flow: pose -> eval -> transport -> assemble. The
-    instrumentation (spans) lives here, in the orchestrator — the pure ops stay clean. ``robot`` keys
-    the style recipe (and carries the robot identity); the morphological scale uses ``cfg.style`` and
-    the subject's ``body.stature``."""
+    """Exécuter chaque op pur d'une frame UNE FOIS, retournant tous les intermédiaires. La source unique du
+    flux de données par frame, partagée par ``process_frame`` (garde uniquement les cibles) et ``trace_frame``
+    (garde tout). L'interaction est un flux unidirectionnel : pose → eval → transport → assemble.
+    L'instrumentation (spans) vit ici, dans l'orchestrateur — les ops purs restent propres. ``robot`` clé
+    la recette de style (et porte l'identité du robot) ; l'échelle morphologique utilise ``cfg.style`` et
+    la ``body.stature`` du sujet."""
     if grounded.body is None:
-        # The pipeline is bone-based: ``style`` tracks the SMPL bones and ``interaction`` poses the
-        # human cloud, both via the body's FK. A positions-only source (``body is None``) is a
-        # structural placeholder in the contract, not a wired path — fail explicitly here rather than
-        # with a bare ``AttributeError`` on ``grounded.body.stature``.
+        # Le pipeline est basé sur les os : ``style`` suit les os SMPL et ``interaction`` pose le
+        # nuage humain, tous deux via la FK du corps. Une source positions uniquement (``body is None``)
+        # est un placeholder structurel dans le contrat, pas un chemin câblé — échouer explicitement ici
+        # plutôt qu'avec une ``AttributeError`` nue sur ``grounded.body.stature``.
         raise ValueError("targets pipeline requires a parametric body (GroundedScene.body): style is "
                          "bone-based and interaction poses the SMPL cloud; positions-only is not wired")
     with prof.span("frame", f=f):
@@ -107,14 +107,14 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
 
 def process_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec, f: int,
                   cfg: TargetsConfig = TargetsConfig(), prof=NULL) -> FrameTargets:
-    """One frame -> ``FrameTargets`` (lean, prod path)."""
+    """Une frame -> ``FrameTargets`` (maigre, chemin prod)."""
     *_, targets = _build_frame(grounded, ctx, robot, f, cfg, prof)
     return targets
 
 
 def trace_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec, f: int,
                 cfg: TargetsConfig = TargetsConfig(), prof=NULL) -> FrameTrace:
-    """Same pure ops as ``process_frame``, intermediates kept -> ``FrameTrace`` (the seam for ``viz``)."""
+    """Mêmes ops purs que ``process_frame``, intermédiaires gardés -> ``FrameTrace`` (le seam pour ``viz``)."""
     pose, human_world, object_worlds, human_field, targets = _build_frame(grounded, ctx, robot, f, cfg, prof)
     return FrameTrace(pose=pose, human_cloud_world=human_world, object_clouds_world=object_worlds,
                       human_field=human_field, targets=targets)
@@ -122,8 +122,8 @@ def trace_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSp
 
 def run_sequence(grounded: GroundedScene, ctx: InteractionContext, robot: RobotSpec,
                  cfg: TargetsConfig = TargetsConfig(), prof=NULL) -> list[FrameTargets]:
-    """Drive all frames: the online loop ``for f: process_frame``. A vectorised batch over T (same
-    array-oriented ops, T on the leading axis) is a later optimisation — see the ``bone_transforms``
-    batch note in ``load/smpl.py``."""
+    """Piloter toutes les frames : la boucle online ``for f: process_frame``. Un batch vectorisé sur T
+    (mêmes ops array-oriented, T sur l'axe de tête) est une optimisation ultérieure — voir la note sur le
+    batch ``bone_transforms`` dans ``load/smpl.py``."""
     with prof.span("sequence", T=grounded.n_frames):
         return [process_frame(grounded, ctx, robot, f, cfg, prof) for f in range(grounded.n_frames)]

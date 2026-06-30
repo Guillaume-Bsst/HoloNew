@@ -1,10 +1,10 @@
-"""assemble — (evals + refs + geo + robot + cfg) -> ``Problem``. The bridge between current
-EVALUATIONS (``FrameEval``: style FK + contact field) and the linearized QP subproblem: calls
-``terms/`` builders (folded weights) and ``terms/constraints`` (joint limits + trust-region box),
-concatenates into ONE ``Problem``. PURE — no kinematics here (delegated to Eval), no cvxpy.
+"""assemble — (evals + refs + geo + robot + cfg) -> ``Problem``. Le pont entre les ÉVALUATIONS courantes
+(``FrameEval`` : FK de style + champ de contact) et le sous-problème QP linéarisé : appelle les builders
+``terms/`` (poids repliés) et ``terms/constraints`` (limites articulaires + boîte région-confiance),
+concatène en UN ``Problem``. PUR — pas de cinématique ici (déléguée à Eval), pas cvxpy.
 
-``geo`` = geodesic context per channel that ``build_contact`` reads for witness residual C-X (sourced
-from ``ctx.channels`` on runner side — each ``Channel`` carries its ``geodesic`` + ``sdf``)."""
+``geo`` = contexte géodésique par canal que ``build_contact`` lit pour le résiduel witness C-X (sourcé
+du côté runner depuis ``ctx.channels`` — chaque ``Channel`` porte sa ``geodesic`` + ``sdf``)."""
 from __future__ import annotations
 
 import numpy as np
@@ -20,8 +20,8 @@ from .terms.constraints import build_constraints
 
 
 def _geo_field(channels, object_rot, object_pos) -> GeoField:
-    """Per-frame bundle build_contact needs: object-local frames + geodesic tables per channel.
-    Channel.object_idx is None for ground -> -1 / identity frame (GeoField convention)."""
+    """Paquet par-trame dont build_contact a besoin : frames local-d'objet + tables géodésiques par canal.
+    Channel.object_idx est None pour le sol -> -1 / frame identité (convention GeoField)."""
     tables     = tuple(ch.geodesic for ch in channels)
     rot        = np.stack([np.eye(3) if ch.object_idx is None
                            else object_rot[ch.object_idx] for ch in channels])   # (C,3,3)
@@ -32,8 +32,8 @@ def _geo_field(channels, object_rot, object_pos) -> GeoField:
 
 
 def assemble(evals, frame_targets, geo, robot, cfg: SolveConfig) -> Problem:
-    """Builds the ``Problem`` for ONE SQP iteration. ``n_obj`` is derived from frame object poses;
-    if ``n_obj = 0`` the object builders simply produce no ``A_obj`` blocks."""
+    """Construit le ``Problem`` pour UNE itération SQP. ``n_obj`` est dérivé des poses d'objet de la trame ;
+    si ``n_obj = 0`` les builders d'objet produisent simplement pas de blocs ``A_obj``."""
     se, ce = evals.style, evals.contact
     blocks = []
     blocks += list(build_style(se, frame_targets.style, cfg))

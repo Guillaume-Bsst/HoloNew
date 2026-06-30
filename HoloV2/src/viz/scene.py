@@ -1,11 +1,11 @@
-"""Scene preview viewer — visual debug of the ``load`` stage.
+"""Visualiseur d'aperçu de scène — débogage visuel de l'étape ``load``.
 
-Given a ``SceneSpec`` it loads the ``RawMotion`` + builds the ``BodyModel`` and shows, per frame,
-the posed SMPL-X mesh, the skeleton (FK bones + demo joints), the object(s) posed by their world
-poses, and the ground. Pure consumer (drives ``load`` to get artifacts; no compute hooks). The
-full ``FrameTrace`` viewer (``viewer.py``) comes later, once ``targets`` exists.
+Étant donné une ``SceneSpec``, charge le ``RawMotion`` + construit le ``BodyModel`` et montre, par-frame,
+la maille SMPL-X posée, le squelette (os FK + articulations démo), les objet(s) posés par leurs poses monde,
+et le sol. Consommateur pur (pilote ``load`` pour récupérer des artefacts ; pas de hooks de calcul). Le
+visualiseur complet ``FrameTrace`` (``viewer.py``) vient plus tard, une fois que ``targets`` existe.
 
-Run:
+Exécution :
     python -m src.viz.scene --motion-path <smplx.npz> --model-dir <smplx_models> [--dataset hodome]
 """
 from __future__ import annotations
@@ -27,14 +27,14 @@ from ._scene_args import add_scene_args, scene_from_args
 
 
 def _object_world_lowz(vl: np.ndarray, poses: np.ndarray, cap: int = 8000):
-    """Per-frame lowest WORLD point of a rigid object posed by ``poses`` (F,7) pos-first wxyz.
+    """Point le plus bas MONDE par-frame d'un objet rigide posé par ``poses`` (F,7) pos-d'abord wxyz.
 
-    Returns ``(min_z (F,), low_point (F,3))``. The vertex set ``vl`` (V,3 local) is subsampled to
-    ``cap`` to bound cost on dense scans — a near-exact lowest point, enough for a debug marker."""
+    Retourne ``(min_z (F,), low_point (F,3))``. L'ensemble de vertices ``vl`` (V,3 local) est sous-échantillonné à
+    ``cap`` pour borner le coût sur les scans denses — un point le plus bas quasi-exact, suffisant pour un marqueur débogage."""
     v = vl
     if vl.shape[0] > cap:
         v = vl[np.random.default_rng(0).choice(vl.shape[0], cap, replace=False)]
-    rot = _Rot.from_quat(poses[:, [4, 5, 6, 3]]).as_matrix()          # wxyz -> xyzw
+    rot = _Rot.from_quat(poses[:, [4, 5, 6, 3]]).as_matrix()          # wxyz → xyzw
     world = np.einsum("fij,vj->fvi", rot, v) + poses[:, None, :3]     # (F, V, 3)
     z = world[:, :, 2]
     lo = z.argmin(axis=1)
@@ -51,7 +51,7 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
     print(f"loaded {raw.source_format}: T={raw.n_frames}, showing {F} frames, "
           f"{len(raw.object_poses_raw)} object(s), parametric={raw.is_parametric}")
 
-    # --- precompute per shown frame (bounded) ---
+    # --- précalcule par-frame affiché (borné) ---
     body = build_body_model(raw.smpl_params, Path(spec.smpl_model_dir)) if raw.is_parametric else None
     faces = body.faces if body is not None else None
     parents = body.parents if body is not None else None
@@ -70,7 +70,7 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
             verts[i] = body.posed_vertices(raw.smpl_params, t)
             bones[i] = body.bone_transforms(raw.smpl_params, t)[1]
 
-    # objects are rigid: keep local mesh + per-frame world pose, and update the transform per frame.
+    # les objets sont rigides : gardez la maille locale + pose monde par-frame, mettez à jour la transformation par-frame.
     objs = []  # (verts_local, faces, poses_frames (F, 7))
     for k in range(len(raw.object_poses_raw)):
         m = trimesh.load(str(raw.object_mesh_paths[k]), force="mesh", process=False, skip_materials=True)
@@ -79,29 +79,29 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
         poses = np.asarray(raw.object_poses_raw[k], np.float32)[frames]
         objs.append((vl, fl, poses))
 
-    # skeleton segments (parent -> child)
+    # segments de squelette (parent → enfant)
     bone_pairs = [(int(parents[j]), j) for j in range(body.n_bones) if parents[j] >= 0] if body else []
 
-    # --- grounding debug: the calibration + per-frame floor clearances (RAW, pre-grounding) ---
-    # Grounding is PER ENTITY: the human drops by calib.human_offset, ALL objects by the shared
-    # calib.object_offset. These clearances let us SEE each entity land on z=0 (the human may float
-    # while the objects already rest on the floor, hence the split human/object offsets).
-    calib = build_calibration(raw, CalibrationConfig())                # body-free grounding
+    # --- débogage d'ancrage : l'étalonnage + dégagements au sol par-frame (BRUT, pré-ancrage) ---
+    # L'ancrage est PAR ENTITÉ : l'humain chute par calib.human_offset, TOUS les objets par l'
+    # calib.object_offset partagée. Ces dégagements nous laissent VOIR chaque entité atterrir sur z=0
+    # (l'humain peut flotter tandis que les objets reposent déjà sur le sol, d'où les décalages humain/objet scindés).
+    calib = build_calibration(raw, CalibrationConfig())                # ancrage sans-corps
     human_offset = float(calib.human_offset)
-    object_offset = float(calib.object_offset)                         # shared by all objects
-    # Human lowest world z + lowest point per frame (surface if parametric, else demo joints).
+    object_offset = float(calib.object_offset)                         # partagée par tous les objets
+    # Z monde le plus bas humain + point le plus bas par-frame (surface si paramétrique, sinon articulations démo).
     src = verts if verts is not None else demo_j
     human_minz = src[:, :, 2].min(axis=1)                               # (F,)
     human_low = src[np.arange(F), src[:, :, 2].argmin(axis=1)]          # (F, 3)
-    # Human floor offset = a PERCENTILE of the lower mocap FOOT-JOINT height over the clip, dialled
-    # live by a slider. The foot joint is robust to the SMPL sole penetration (the toe-curl dips the
-    # mesh BELOW the rest level, so chasing the lowest point over-lifts the human); the percentile
-    # lets us target the RESTING/contact level instead. ``sole_med`` (the current method) is kept as
-    # an on-screen reference only.
-    sole_med = float(np.median(human_minz))                            # current method, for contrast
+    # Décalage du sol humain = un PERCENTILE de la hauteur INFÉRIEURE du PIED-ARTICULATION mocap sur le clip, réglé
+    # en direct par un curseur. L'articulation du pied est robuste à la pénétration de la semelle SMPL (la curl-orteil plonge la
+    # maille SOUS le niveau de repos, donc poursuivre le point le plus bas surélève trop l'humain) ; le percentile
+    # nous permet de cibler le niveau de REPOS/contact à la place. ``sole_med`` (la méthode actuelle) est gardée comme
+    # référence uniquement à l'écran.
+    sole_med = float(np.median(human_minz))                            # méthode actuelle, pour contraste
     _foot = [i for i, n in enumerate(raw.joint_names) if n in ("L_Foot", "R_Foot")]
-    lower_foot = raw.joint_pos[:, _foot, 2].min(axis=1) if _foot else human_minz   # (T,) lower foot z
-    obj_minz, obj_low = [], []                                          # per object: (F,), (F, 3)
+    lower_foot = raw.joint_pos[:, _foot, 2].min(axis=1) if _foot else human_minz   # (T,) z pied plus bas
+    obj_minz, obj_low = [], []                                          # par objet : (F,), (F, 3)
     for (vl, _fl, poses) in objs:
         mz, lp = _object_world_lowz(vl, poses)
         obj_minz.append(mz); obj_low.append(lp)
@@ -138,8 +138,8 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
                                    point_size=0.025)
     hobj = [srv.scene.add_mesh_simple(f"/obj{k}", vl, fl, color=(255, 140, 0), side="double")
             for k, (vl, fl, _) in enumerate(objs)]
-    # lowest-point markers: red = human sole, yellow = each object — the two things grounding must
-    # rest on z=0. Watching them separately is exactly how we tell a shared offset from a split one.
+    # marqueurs du point le plus bas : rouge = semelle humaine, jaune = chaque objet — les deux choses sur lesquelles l'ancrage doit
+    # reposer sur z=0. Les regarder séparément est exactement comment distinguer un décalage partagé d'un scindé.
     low_h = srv.scene.add_point_cloud("/low_human", human_low[:1], np.array([[255, 40, 40]], np.uint8),
                                       point_size=0.05)
     low_o = [srv.scene.add_point_cloud(f"/low_obj{k}", obj_low[k][:1], np.array([[255, 210, 0]], np.uint8),
@@ -147,9 +147,9 @@ def view_scene(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_fr
 
     def render(_=None):
         f = int(sld.value)
-        on = apply_ground.value                              # grounding = drop each entity to z=0
-        gh = float(np.percentile(lower_foot, foot_pct.value)) if on else 0.0   # foot-pct human z-shift
-        go = [object_offset if on else 0.0 for _ in range(len(objs))]       # shared object z-shift
+        on = apply_ground.value                              # ancrage = fait tomber chaque entité à z=0
+        gh = float(np.percentile(lower_foot, foot_pct.value)) if on else 0.0   # décalage z humain foot-pct
+        go = [object_offset if on else 0.0 for _ in range(len(objs))]       # décalage z objet partagé
         dzh = np.array([0.0, 0.0, gh], np.float32)
         if body is not None and show_mesh.value:
             srv.scene.add_mesh_simple("/body", verts[f] - dzh, faces, color=(200, 200, 210),

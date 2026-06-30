@@ -1,12 +1,12 @@
-"""Multi-person debug view for HOI-M3 — validate the loading end-to-end.
+"""Vue multi-personnes de débogage pour HOI-M3 — valide le chargement de bout en bout.
 
-HOI-M3 scenes have several people, each manipulating different objects; the single-human loader
-keeps one person + all objects, which looks incoherent (the other objects are driven by people we
-don't show). This view renders ALL people + all objects together (as the official toolbox does), so
-the per-entity loading can be checked against a coherent scene. Pure consumer: it reuses the loader
-(objects + one person) and ``build_person_params`` (the other people) + the SMPL-X body model.
+Les scènes HOI-M3 ont plusieurs personnes, chacune manipulant différents objets ; le loader à un seul humain
+garde une personne + tous les objets, ce qui semble incohérent (les autres objets sont pilotés par des personnes
+que nous ne montrons pas). Cette vue rend TOUTES les personnes + tous les objets ensemble (comme la boîte à outils
+officielle le fait), donc le chargement par-entité peut être vérifié par rapport à une scène cohérente. Consommateur
+pur : réutilise le loader (objets + une personne) et ``build_person_params`` (les autres personnes) + le modèle de corps SMPL-X.
 
-Run:
+Exécution :
     python -m src.viz.hoim3_multiperson --motion-path <..._human.npz> --model-dir <smplx_models>
 """
 from __future__ import annotations
@@ -31,18 +31,18 @@ def view(spec: SceneSpec, *, port: int = 8080, frame_step: int = 30, max_frames:
     import trimesh
     import viser
 
-    raw = load(spec)                                          # objects (+ one person) for free
+    raw = load(spec)                                          # objets (+ une personne) gratuitement
     hd = np.load(str(spec.motion_path), allow_pickle=True)
     smpl_params = hd["smpl_params"]
     gender = str(hd["gender"])
-    ids = [int(np.asarray(p["id"])) for p in smpl_params[0]]  # people present at frame 0
+    ids = [int(np.asarray(p["id"])) for p in smpl_params[0]]  # personnes présentes à la frame 0
     frames = list(range(0, raw.n_frames, frame_step))[:max_frames]
     F = len(frames)
     print(f"HOI-M3 multi-person: {len(ids)} people {ids}, {len(raw.object_poses_raw)} objects, "
           f"showing {F} frames")
 
-    # Per-person posed SMPL-X meshes for the shown frames (real forward).
-    persons = []  # (verts (F,V,3), faces, color)
+    # Mailles SMPL-X posées par-personne pour les frames affichées (avance réelle).
+    persons = []  # (verts (F,V,3), faces, couleur)
     for k, pid in enumerate(ids):
         params, body = build_person_params(smpl_params, pid, gender, Path(spec.smpl_model_dir),
                                            spec.smplh_dir, spec.smpl2smplx_pkl)
@@ -50,7 +50,7 @@ def view(spec: SceneSpec, *, port: int = 8080, frame_step: int = 30, max_frames:
         persons.append((verts, body.faces, _PALETTE[k % len(_PALETTE)]))
         print(f"  person {pid}: posed {F} frames")
 
-    # Objects: centred local mesh + per-frame Z-up pose, exactly as the loader produced them.
+    # Objets : maille locale centrée + pose Z-up par-frame, exactement comme le loader les a produits.
     objs = []  # (verts_local, faces, poses (F,7))
     for kk in range(len(raw.object_poses_raw)):
         m = trimesh.load(str(raw.object_mesh_paths[kk]), force="mesh", process=False, skip_materials=True)
@@ -115,7 +115,7 @@ def main() -> None:
     try:
         cfg = paths.load_paths()
     except FileNotFoundError:
-        # paths.toml only HARD-required for a default: missing model-dir or a relative motion.
+        # paths.toml FORTEMENT requis uniquement pour un défaut : model-dir manquant ou mouvement relatif.
         if a.model_dir is None or not Path(a.motion_path).is_absolute():
             raise
         cfg = {}

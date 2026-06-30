@@ -1,15 +1,15 @@
-"""SDF viewer — visual debug of the ``prepare/sdf`` build.
+"""Visualiseur SDF — débogage visuel de la construction ``prepare/sdf``.
 
-Renders any ``SDF`` (object / terrain / flat ground) in its local frame:
-  - a movable CROSS-SECTION slice of the grid, coloured by signed distance (blue = inside/negative,
-    white = surface/zero, red = outside/positive): the zero-crossing must trace the surface,
-  - the near-surface BAND shell (|d| < margin) coloured the same way,
-  - WITNESS lines (band node -> its stored nearest surface point): every line must end ON the surface,
-  - the source mesh as a ghost when there is one (a flat-ground plane SDF has no mesh).
+Rend tout ``SDF`` (objet / terrain / sol plat) dans son cadre local :
+  - une tranche COUPE-TRANSVERSALE mobile de la grille, coloriée par distance signée (bleu = intérieur/négatif,
+    blanc = surface/zéro, rouge = extérieur/positif) : la traversée zéro doit tracer la surface,
+  - la coquille BANDE près-surface (|d| < marge) coloriée de la même façon,
+  - lignes WITNESS (nœud bande → son point de surface le plus proche stocké) : chaque ligne doit finir SUR la surface,
+  - la maille source fantôme quand il y en a une (un SDF plan sol-plat n'a pas de maille).
 
-Pure consumer: drives the builder once to get the asset, then only reads it; no compute hooks.
+Consommateur pur : pilote le builder une fois pour récupérer l'asset, puis le lit uniquement ; pas de hooks de calcul.
 
-Run:
+Exécution :
     python -m src.viz.sdf --mesh <path.obj>   [--spacing 0.02] [--margin 0.05] [--port 8080]
     python -m src.viz.sdf --plane <size_m>    [--spacing 0.05] [--margin 0.05] [--port 8080]
 """
@@ -27,7 +27,7 @@ from ..prepare.sdf.build import build_plane_sdf, build_sdf
 
 
 def _node_coords(sdf: SDF) -> np.ndarray:
-    """(Nx, Ny, Nz, 3) local coords of every grid node."""
+    """(Nx, Ny, Nz, 3) coords locales de chaque nœud grille."""
     nx, ny, nz = sdf.grid.shape
     xs = sdf.origin[0] + sdf.spacing * np.arange(nx)
     ys = sdf.origin[1] + sdf.spacing * np.arange(ny)
@@ -37,14 +37,14 @@ def _node_coords(sdf: SDF) -> np.ndarray:
 
 
 def _diverging(dist: np.ndarray, vmax: float) -> np.ndarray:
-    """Signed distance -> (N,3) uint8 RGB. -vmax = blue, 0 = white, +vmax = red (clamped)."""
+    """Distance signée → (N,3) uint8 RGB. -vmax = bleu, 0 = blanc, +vmax = rouge (serré)."""
     t = np.clip(dist / max(vmax, 1e-9), -1.0, 1.0)
-    col = np.ones((len(t), 3), np.float64)                      # white at t=0
+    col = np.ones((len(t), 3), np.float64)                      # blanc à t=0
     neg = t < 0
     a = (-t[neg])[:, None]
-    col[neg] = (1 - a) * np.array([1, 1, 1]) + a * np.array([0.20, 0.35, 1.0])   # -> blue
+    col[neg] = (1 - a) * np.array([1, 1, 1]) + a * np.array([0.20, 0.35, 1.0])   # → bleu
     b = (t[~neg])[:, None]
-    col[~neg] = (1 - b) * np.array([1, 1, 1]) + b * np.array([1.0, 0.25, 0.20])  # -> red
+    col[~neg] = (1 - b) * np.array([1, 1, 1]) + b * np.array([1.0, 0.25, 0.20])  # → rouge
     return (col * 255).astype(np.uint8)
 
 
@@ -57,7 +57,7 @@ def view_sdf(sdf: SDF, margin: float, *, verts: np.ndarray | None = None,
     nx, ny, nz = sdf.grid.shape
     inside_pct = 100.0 * float((sdf.grid < 0).mean())
 
-    # band shell (|d| < margin): coords, signed dist, stored witness — for the shell + witness lines
+    # coquille bande (|d| < marge) : coords, dist signée, witness stocké — pour la coquille + lignes witness
     mask = np.abs(sdf.grid) < margin
     band_xyz = coords[mask]; band_d = sdf.grid[mask]; band_w = sdf.witness[mask]
     rng = np.random.default_rng(0)
@@ -105,9 +105,9 @@ def view_sdf(sdf: SDF, margin: float, *, verts: np.ndarray | None = None,
         band_h.visible = show_band.value
         wit_h.visible = show_wit.value
         info.content = (
-            f"**{sdf.name}** · grid {nx}×{ny}×{nz} · spacing {spacing} · margin {margin}\n\n"
-            f"inside **{inside_pct:.1f}%**\n\n"
-            f"slice **{axis.value}={i}**  ·  blue=inside (−) · white=surface (0) · red=outside (+)")
+            f"**{sdf.name}** · grille {nx}×{ny}×{nz} · espacement {spacing} · marge {margin}\n\n"
+            f"intérieur **{inside_pct:.1f}%**\n\n"
+            f"tranche **{axis.value}={i}**  ·  bleu=intérieur (−) · blanc=surface (0) · rouge=extérieur (+)")
 
     for h in (show_mesh, show_slice, show_band, show_wit, axis, idx):
         h.on_update(render)

@@ -1,15 +1,16 @@
-"""The shared surface-sampling identity that binds the human cloud to the correspondence.
+"""L'identité d'échantillonnage de surface partagée qui lie le nuage humain à la correspondance.
 
-``CorrespondenceTable.smpl_idx`` indexes the human cloud's point ORDER. That correspondence is
-built once on a NEUTRAL template body, while the runtime cloud is the SUBJECT's; for ``smpl_idx`` to
-stay valid both must share the exact same ``(tri_idx, bary)`` sampling. So the sampling is the
-canonical identity: the correspondence carries it (embedded in ``corr_neutral.npz``), and the human
-cloud REUSES it rather than resampling — it only recomputes the per-subject skinning on top.
+``CorrespondenceTable.smpl_idx`` indexe l'ORDRE des points du nuage humain. Cette correspondance est
+construite une fois sur un corps de modèle NEUTRE, tandis que le nuage à l'exécution est celui du
+SUJET ; pour que ``smpl_idx`` reste valide, les deux doivent partager exactement le même
+échantillonnage ``(tri_idx, bary)``. L'échantillonnage est donc l'identité canonique : la
+correspondance le porte (intégré dans ``corr_neutral.npz``), et le nuage humain le RÉUTILISE au
+lieu de le rééchantillonner — il recompile seulement le skinning par sujet par-dessus.
 
-``SurfaceSampling`` is a build-only intermediate (it never reaches ``targets``/``solve``), so it
-lives here, local to ``point_cloud/``, not in the ``contracts/`` package. ``sampling_id`` is the stable hash
-stamped onto both the cloud (``PointCloud.sampling_id``) and the table
-(``CorrespondenceTable.smpl_sampling_id``); the runner asserts they match.
+``SurfaceSampling`` est un intermédiaire de construction uniquement (il n'atteint jamais ``targets``/
+``solve``), il réside donc ici, local à ``point_cloud/``, pas dans le paquet ``contracts/``.
+``sampling_id`` est le hash stable estampillé sur le nuage (``PointCloud.sampling_id``) et la table
+(``CorrespondenceTable.smpl_sampling_id``) ; le runner affirme qu'ils correspondent.
 """
 from __future__ import annotations
 
@@ -21,12 +22,13 @@ import numpy as np
 
 @dataclass(frozen=True)
 class SurfaceSampling:
-    """A fixed set of surface samples as barycentric locations on a mesh's triangles, ORDER-stable.
-    Topology-bound (``tri_idx`` references the SMPL faces), so it is betas-independent: the same
-    ``(tri_idx, bary)`` names a valid point on any SMPL-X mesh of the same topology."""
+    """Un ensemble fixe d'échantillons de surface comme emplacements barycentriques sur les triangles
+    d'un maillage, stable en ORDRE. Lié à la topologie (``tri_idx`` référence les faces SMPL), donc
+    indépendant des betas : le même ``(tri_idx, bary)`` désigne un point valide sur n'importe quel
+    maillage SMPL-X de la même topologie."""
 
     tri_idx: np.ndarray   # (N,)    triangle index per sample
-    bary: np.ndarray      # (N, 3)  barycentric weights, rows sum to 1
+    bary: np.ndarray      # (N, 3)  poids barycentriques, lignes sommant à 1
     sampling_id: str      # stable identity (see ``sampling_id``)
 
     @property
@@ -35,11 +37,12 @@ class SurfaceSampling:
 
 
 def sampling_id(tri_idx: np.ndarray, bary: np.ndarray) -> str:
-    """Stable hash of a ``(tri_idx, bary)`` sampling — the binding key between cloud and table.
+    """Hash stable d'un échantillonnage ``(tri_idx, bary)`` — la clé de liaison entre le nuage et la table.
 
-    Depends only on the sampled locations (triangle + barycentric weights), so it is identical for
-    the neutral template and every subject that reuses the same sampling, and changes whenever the
-    sampling does. Hashed in canonical dtypes so the value is reproducible across machines."""
+    Dépend uniquement des emplacements échantillonnés (triangle + poids barycentriques), donc il est
+    identique pour le modèle neutre et tous les sujets qui réutilisent le même échantillonnage, et
+    change chaque fois que l'échantillonnage le fait. Hashé dans les dtype canoniques pour que la
+    valeur soit reproductible sur les machines."""
     h = hashlib.sha1()
     h.update(np.ascontiguousarray(tri_idx, np.int64).tobytes())
     h.update(np.ascontiguousarray(bary, np.float32).tobytes())

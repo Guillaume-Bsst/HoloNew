@@ -1,7 +1,6 @@
-"""(De)serialisation of a ``PointCloud`` — save AND load in one place, shared by the 2 cloud builders.
-
-The human and the object builders bake the SAME ``PointCloud`` contract, so its ``.npz`` round-trip
-lives here instead of being duplicated in each ``AssetBuilder.save``/``load``.
+"""(Dé)sérialisation d'un ``PointCloud`` — sauvegarde ET chargement au même endroit, partagé par les
+2 builders de nuages. Comme les builders humain et objet créent le même contrat ``PointCloud``, son
+aller-retour ``.npz`` réside ici au lieu d'être dupliqué dans chaque ``AssetBuilder.save``/``load``.
 """
 from __future__ import annotations
 
@@ -13,8 +12,8 @@ from ..contracts import PointCloud
 
 
 def save_cloud(cloud: PointCloud, path: Path) -> None:
-    """Write a ``PointCloud`` to ``path`` as a compact ``.npz`` (parts/weights/offsets + sampling id),
-    creating parent dirs as needed."""
+    """Écrit un ``PointCloud`` dans ``path`` comme un ``.npz`` compact (parts/weights/offsets + sampling id),
+    en créant les répertoires parents si nécessaire."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(str(path), parts=cloud.parts, weights=cloud.weights, offsets=cloud.offsets,
@@ -22,7 +21,7 @@ def save_cloud(cloud: PointCloud, path: Path) -> None:
 
 
 def load_cloud(path: Path) -> PointCloud:
-    """Read back a ``PointCloud`` saved by ``save_cloud`` (round-trips exactly)."""
+    """Relit un ``PointCloud`` sauvegardé par ``save_cloud`` (aller-retour exact)."""
     d = np.load(Path(path), allow_pickle=False)
     return PointCloud(parts=d["parts"], weights=d["weights"], offsets=d["offsets"],
                       sampling_id=str(d["sampling_id"]))

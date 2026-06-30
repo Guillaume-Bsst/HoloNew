@@ -1,25 +1,26 @@
-"""Config of the ``targets`` stage — the style KNOBS (frozen dataclasses) AND the robot style RECIPE,
-co-located in one place (stdlib-only, torch-free, importable anywhere).
+"""Config de l'étage ``targets`` — les KNOBS de style (dataclasses gelées) ET la RECETTE de style
+robot, co-localisés en un seul endroit (stdlib-only, torch-free, importable partout).
 
-Two kinds of content live here, kept visually apart:
+Deux types de contenu vivent ici, maintenus visuellement séparés :
 
-1. KNOBS — ``StyleConfig`` / ``TargetsConfig`` (frozen dataclasses). ``TargetsConfig()`` IS the
-   default; override inline (``TargetsConfig(style=StyleConfig(scale_arms=0.85))``). These are what a
-   user legitimately tunes: the GMR morphological SCALE values and the reference heights.
+1. KNOBS — ``StyleConfig`` / ``TargetsConfig`` (dataclasses gelées). ``TargetsConfig()`` EST le
+   défaut ; override inline (``TargetsConfig(style=StyleConfig(scale_arms=0.85))``). Ce sont ceux qu'un
+   utilisateur accorde légitimement : les valeurs SCALE morphologiques GMR et les hauteurs de référence.
 
-2. The robot-keyed style RECIPE — ``SMPL_BODY_INDEX`` / ``ROOT_BODY`` / ``ARM_BODIES`` /
-   ``_STYLE_TABLE`` + ``style_table()``. This is fixed reference DATA (which robot link tracks which
-   SMPL body, with which per-link pos/rot offsets): adding a robot is a data entry, never a code
-   change — like ``prepare/load/robot.CORRESPONDENCE_REST_POSE``. NOT a knob. (Per-link TRACKING
-   WEIGHTS are a SOLVER concern and live in ``solve``, not here.)
+2. La RECETTE de style clé-robot — ``SMPL_BODY_INDEX`` / ``ROOT_BODY`` / ``ARM_BODIES`` /
+   ``_STYLE_TABLE`` + ``style_table()``. C'est une DATA de référence fixe (quel lien robot suit quel
+   corps SMPL, avec quels offsets pos/rot par lien) : ajouter un robot est une entrée de données,
+   jamais un changement de code — comme ``prepare/load/robot.CORRESPONDENCE_REST_POSE``. PAS un knob.
+   (Les POIDS DE SUIVI par lien sont une préoccupation SOLVER et vivent dans ``solve``, pas ici.)
 
-(``prepare/config.py`` keeps knobs and data strictly apart; here the style data is folded in so the
-whole style surface is one file. The dataclasses stay pure knobs; the recipe stays plain data below.)
+(``prepare/config.py`` garde les knobs et les données strictement séparés ; ici les données de style
+sont repliées pour que toute la surface de style soit un fichier. Les dataclasses restent des knobs purs ;
+la recette reste des données brutes en dessous.)
 
-Ported from HoloNew ``test_socp/tables.py`` (``IK_MATCH_TABLE1`` + ``HUMAN_SCALE_TABLE``). The GMR
-human bodies are addressed by NAME and resolved to OUR SMPL-X bone order (``SMPL_BODY_INDEX``, derived
-from ``prepare/load/smpl.SMPLX_BODY_JOINTS``) — NOT the 52-joint MuJoCo layout V1 indexed into.
-``style/build.py`` does the float64 math.
+Porté de HoloNew ``test_socp/tables.py`` (``IK_MATCH_TABLE1`` + ``HUMAN_SCALE_TABLE``). Les corps
+humains GMR sont adressés par NOM et résolus à NOTRE ordre d'os SMPL-X (``SMPL_BODY_INDEX``, dérivé de
+``prepare/load/smpl.SMPLX_BODY_JOINTS``) — PAS la disposition MuJoCo 52 articulations V1 indexée.
+``style/build.py`` fait les mathématiques float64.
 """
 from __future__ import annotations
 
@@ -29,15 +30,16 @@ from dataclasses import dataclass, field
 # =============================================================================== KNOBS
 @dataclass(frozen=True)
 class StyleConfig:
-    """Knobs of the STYLE channel (``targets/style``): the GMR morphological SCALE values + the
-    reference heights feeding ``style.build``'s SCALE/OFFSET steps. The per-link RECIPE (body map,
-    tracking weights, alignment offsets) is robot DATA below (``_STYLE_TABLE``), never a knob."""
+    """Knobs du canal STYLE (``targets/style``) : les valeurs SCALE morphologiques GMR + les hauteurs
+    de référence alimentant les étapes SCALE/OFFSET de ``style.build``. La RECETTE par lien (carte des
+    corps, poids de suivi, offsets d'alignement) est une DATA robot ci-dessous (``_STYLE_TABLE``), jamais
+    un knob."""
 
-    human_height_assumption: float = 1.8   # GMR reference subject height (m): ratio = stature / this
-    ground_height: float = 0.0             # GMR target grounding plane z (the OFFSET subtracts it)
-    scale_torso_legs: float = 0.9          # morphological scale of the torso + leg bodies (incl. the
-                                           # pelvis anchor) — GMR smplx_to_g1 ``HUMAN_SCALE_TABLE``
-    scale_arms: float = 0.8                # morphological scale of the arm bodies (shoulder/elbow/wrist)
+    human_height_assumption: float = 1.8   # taille du sujet de référence GMR (m) : ratio = stature / ceci
+    ground_height: float = 0.0             # z du plan de mise au sol cible GMR (l'OFFSET le soustrait)
+    scale_torso_legs: float = 0.9          # scale morphologique des bodies torse + jambes (incl. l'ancre
+                                           # du pelvis) — GMR smplx_to_g1 ``HUMAN_SCALE_TABLE``
+    scale_arms: float = 0.8                # scale morphologique des bodies bras (épaule/coude/poignet)
 
     def __post_init__(self) -> None:
         if self.human_height_assumption <= 0.0:
@@ -71,8 +73,8 @@ class SceneScaleConfig:
 
 @dataclass(frozen=True)
 class TargetsConfig:
-    """All knobs of the ``targets`` step, composed — the single object ``pipeline`` receives; each op
-    reads only its sub-config. ``style`` = recette + scalaires morpho ; ``scene_scale`` = la similarité
+    """Tous les knobs de l'étape ``targets``, composés — l'objet unique que ``pipeline`` reçoit ; chaque op
+    lit uniquement sa sous-config. ``style`` = recette + scalaires morpho ; ``scene_scale`` = la similarité
     de scène partagée par style + interaction (placement). L'``InteractionContext.margin`` reste un
     knob ``prepare``."""
 
@@ -80,12 +82,12 @@ class TargetsConfig:
     scene_scale: SceneScaleConfig = field(default_factory=SceneScaleConfig)
 
 
-# =============================================================================== ROBOT STYLE RECIPE (data)
-# A fixed SMPL-skeleton fact (like the frame conventions): GMR human-body NAME -> bone INDEX in OUR
-# SMPL-X bone order (``prepare/load/smpl.SMPLX_BODY_JOINTS``, i.e. the order of ``FramePose.bone_rot``
-# / ``bone_pos``). GMR "left_foot" / "right_foot" are the leg-chain ANKLE joints (the toe is reached
-# via the table's pos_offset), so they resolve to L_Ankle (7) / R_Ankle (8), NOT the SMPL foot/toe
-# bones (10 / 11). Hardcoded so ``targets`` never imports the torch-pulling ``load/smpl``.
+# =============================================================================== RECETTE DE STYLE ROBOT (données)
+# Un fait SMPL-squelette fixe (comme les conventions de frame) : NOM du corps humain GMR → INDEX d'os dans NOTRE
+# ordre d'os SMPL-X (``prepare/load/smpl.SMPLX_BODY_JOINTS``, i.e. l'ordre de ``FramePose.bone_rot``
+# / ``bone_pos``). GMR "left_foot" / "right_foot" sont les articulations ANKLE de la chaîne jambe (l'orteil est
+# atteint via le pos_offset de la table), donc ils se résolvent en L_Ankle (7) / R_Ankle (8), PAS les os
+# pied/orteil SMPL (10 / 11). Hardcodé pour que ``targets`` n'importe jamais le ``load/smpl`` qui tire torch.
 SMPL_BODY_INDEX: dict[str, int] = {
     "pelvis": 0,
     "left_hip": 1, "right_hip": 2,
@@ -97,24 +99,24 @@ SMPL_BODY_INDEX: dict[str, int] = {
     "left_wrist": 20, "right_wrist": 21,
 }
 
-ROOT_BODY = "pelvis"            # the SCALE anchor (V1 ``HUMAN_ROOT_NAME``)
+ROOT_BODY = "pelvis"            # l'ancre SCALE (V1 ``HUMAN_ROOT_NAME``)
 
-# Which GMR bodies are ARMS: in the morphological SCALE they take ``StyleConfig.scale_arms``; every
-# other tracked body (torso + legs, incl. the pelvis anchor) takes ``StyleConfig.scale_torso_legs``.
-# The split is a FIXED fact of the GMR smplx_to_g1 recipe (V1 ``HUMAN_SCALE_TABLE``: torso/legs 0.9,
-# arms 0.8) — only the two scale VALUES are knobs (``StyleConfig`` above).
+# Quels corps GMR sont ARMS : dans la SCALE morphologique ils prennent ``StyleConfig.scale_arms`` ; tous les autres
+# corps suivis (torse + jambes, incl. l'ancre du bassin) prennent ``StyleConfig.scale_torso_legs``.
+# La division est un fait FIXE de la recette smplx_to_g1 GMR (V1 ``HUMAN_SCALE_TABLE`` : torse/jambes 0.9,
+# bras 0.8) — seules les deux VALEURS d'échelle sont des knobs (``StyleConfig`` ci-dessus).
 ARM_BODIES: frozenset[str] = frozenset({
     "left_shoulder", "right_shoulder",
     "left_elbow", "right_elbow",
     "left_wrist", "right_wrist",
 })
 
-# G1 GMR style recipe (ported from V1 ``IK_MATCH_TABLE1``): robot_link -> (smpl_body, pos_offset xyz,
-# rot_offset wxyz). ``pos_offset`` is added in the RE-ORIENTED body frame (corrects the human reference
-# point vs the robot link point); ``rot_offset`` (w FIRST) is composed onto the body orientation
-# (SMPL-X vs G1 zero-pose alignment per body). Insertion order is the link order of ``StyleTargets``
-# (14 tracked G1 links). The per-link TRACKING WEIGHTS (V1 ``w_p`` / ``w_r``) are a SOLVER concern and
-# are deliberately NOT kept here — ``solve`` defines its cost gains in its own config when built.
+# Recette de style G1 GMR (portée de V1 ``IK_MATCH_TABLE1``) : robot_link -> (smpl_body, pos_offset xyz,
+# rot_offset wxyz). ``pos_offset`` est ajouté dans le frame body RÉ-ORIENTÉ (corrige le point de référence
+# humain vs le point du link robot) ; ``rot_offset`` (w EN PREMIER) est composé sur l'orientation du body
+# (alignement zéro-pose SMPL-X vs G1 par body). L'ordre d'insertion est l'ordre des links de ``StyleTargets``
+# (14 links G1 suivis). Les POIDS de SUIVI par link (V1 ``w_p`` / ``w_r``) sont une affaire de SOLVEUR et
+# ne sont délibérément PAS gardés ici — ``solve`` définit ses gains de coût dans sa propre config à sa construction.
 _H = 0.4267755048530407
 _K = 0.5637931078484661
 _STYLE_TABLE: dict[str, dict[str, tuple]] = {
@@ -138,8 +140,8 @@ _STYLE_TABLE: dict[str, dict[str, tuple]] = {
 
 
 def style_table(robot_name: str) -> dict[str, tuple]:
-    """GMR style recipe for ``robot_name`` (robot_link -> (smpl_body, pos_offset, rot_offset); raises
-    if undefined). Mirrors ``load/robot.correspondence_rest_angles``."""
+    """Recette de style GMR pour ``robot_name`` (robot_link -> (smpl_body, pos_offset, rot_offset) ; lève
+    si non défini). Reflète ``load/robot.correspondence_rest_angles``."""
     try:
         return _STYLE_TABLE[robot_name]
     except KeyError:

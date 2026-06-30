@@ -1,8 +1,8 @@
-"""Shared CLI glue for the viz entry points: declare the common scene flags and assemble a
-fully-resolved ``SceneSpec`` from them (filling defaults from the machine-local paths.toml).
+"""Glue CLI partagé pour les points d'entrée viz : déclare les flags de scène communs et assemble une
+``SceneSpec`` entièrement résolue (complète les défauts à partir du paths.toml local machine).
 
-EDGE-only: imported by viz ``main()`` functions, never by the pure pipeline. Keeps the four
-viewers from each duplicating the RobotSpec/SceneSpec construction.
+EDGE-uniquement : importé par les fonctions ``main()`` viz, jamais par le pipeline pur. Évite aux quatre
+viewers de dupliquer chacun la construction RobotSpec/SceneSpec.
 """
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from ..prepare.contracts import RobotSpec, SceneSpec
 
 
 def add_scene_args(ap: argparse.ArgumentParser) -> None:
-    """Add the scene-selection flags shared by the viz CLIs."""
+    """Ajoute les flags de sélection de scène partagés par les CLIs viz."""
     ap.add_argument("--dataset", default="hodome")
     ap.add_argument("--motion-path", required=True, type=Path,
                     help="absolute, or relative to [datasets.<dataset>].motion in paths.toml")
@@ -30,20 +30,20 @@ def add_scene_args(ap: argparse.ArgumentParser) -> None:
 
 
 def _g1_robot() -> RobotSpec:
-    """Default G1 RobotSpec for the viz entry points (single-sourced URDF/DOF/height)."""
+    """RobotSpec G1 défaut pour les points d'entrée viz (source unique URDF/DOF/stature)."""
     return RobotSpec(name="g1", urdf_path=paths.HOLOV2_ROOT / "models" / "g1" / "g1_29dof.urdf",
                      link_names=("pelvis",), dof=29, height=1.3)
 
 
 def scene_from_args(a: argparse.Namespace, *, paths_file: Path | None = None) -> SceneSpec:
-    """Build a fully-resolved SceneSpec, filling missing paths from paths.toml.
+    """Construit une SceneSpec entièrement résolue, complète les chemins manquants à partir de paths.toml.
 
-    Explicit CLI args always win; paths.toml is read only when a default is needed (so fully
-    explicit, absolute invocations work even without a paths.toml).
+    Les args CLI explicites toujours gagnent ; paths.toml n'est lu que si un défaut est requis (ainsi
+    les invocations entièrement explicites et absolues fonctionnent même sans paths.toml).
     """
-    # paths.toml is only HARD-required when a default must come from it: a missing model-dir
-    # or a relative motion path. A missing --dataset-root degrades to None (dataset_meta_root
-    # returns None), so it must NOT force the file — absolute invocations work with no paths.toml.
+    # paths.toml n'est FORTEMENT requis que si un défaut doit en provenir : un model-dir manquant
+    # ou un chemin de mouvement relatif. Un --dataset-root manquant se dégrade à None (dataset_meta_root
+    # retourne None), il ne doit donc PAS forcer le fichier — les invocations absolues fonctionnent sans paths.toml.
     hard_need = (a.model_dir is None) or (not Path(a.motion_path).is_absolute())
     try:
         cfg = paths.load_paths(paths_file)

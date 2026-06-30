@@ -1,5 +1,5 @@
-"""Style treatment: reference (``build``: demo joints -> StyleTargets) + evaluation
-(``style_eval``: robot FK @ q -> StyleEval). See ``build.py`` / ``eval.py``."""
+"""Traitement du style : référence (``build`` : articulations démo → StyleTargets) + évaluation
+(``style_eval`` : FK robot @ q → StyleEval). Voir ``build.py`` / ``eval.py``."""
 from .build import build
 from .eval import style_eval
 

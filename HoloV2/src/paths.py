@@ -1,28 +1,28 @@
-"""Machine-local path registry for HoloV2 (SMPL model assets + dataset roots).
+"""Registre de chemins locaux au système pour HoloV2 (assets modèles SMPL + racines dataset).
 
-EDGE concern (effets de bord aux extrémités): read ONLY by CLI/entry points, never by the
-pure pipeline (prepare/targets). Source of truth = HoloV2/paths.toml (gitignored,
-machine-local; copy paths.example.toml). Parsed with the stdlib tomllib — no third-party dep.
-These are environment paths, NOT algorithmic knobs, so they live here and never in config.py.
+Préoccupation EDGE (effets de bord aux extrémités) : lire UNIQUEMENT par CLI/points d'entrée, jamais par
+le pipeline pur (prepare/targets). Source de vérité = HoloV2/paths.toml (gitignored, local machine ;
+copier paths.example.toml). Analysé avec tomllib stdlib — aucune dépendance tierce.
+Ce sont des chemins d'environnement, PAS des knobs algorithmiques, donc ils vivent ici et jamais dans config.py.
 
-Schema (see paths.example.toml):
-    [models]          smplx (required), smplh (optional), smpl2smplx (optional .pkl file)
-    [datasets.<name>] motion (base for a relative --motion-path), meta (optional; default motion)
+Schéma (voir paths.example.toml):
+    [models]          smplx (requis), smplh (optionnel), smpl2smplx (optionnel fichier .pkl)
+    [datasets.<name>] motion (base pour --motion-path relatif), meta (optionnel ; défaut motion)
 """
 from __future__ import annotations
 
 import tomllib
 from pathlib import Path
 
-HOLOV2_ROOT = Path(__file__).resolve().parents[1]   # .../HoloV2 (where paths.toml lives)
+HOLOV2_ROOT = Path(__file__).resolve().parents[1]   # .../HoloV2 (où vit paths.toml)
 PATHS_TOML = HOLOV2_ROOT / "paths.toml"
 PATHS_EXAMPLE = HOLOV2_ROOT / "paths.example.toml"
 
 
 def load_paths(path: Path | None = None) -> dict:
-    """Parse paths.toml -> dict ({"models": {...}, "datasets": {name: {...}}}).
+    """Analyser paths.toml → dict ({"models": {...}, "datasets": {name: {...}}}).
 
-    Raises FileNotFoundError (pointing at the example template) when the file is absent.
+    Lève FileNotFoundError (pointant le modèle d'exemple) quand le fichier est absent.
     """
     p = Path(path) if path is not None else PATHS_TOML
     if not p.exists():
@@ -42,7 +42,7 @@ def _dataset(cfg: dict, name: str) -> dict:
 
 
 def smplx_dir(cfg: dict | None = None, *, path: Path | None = None) -> Path:
-    """SMPL-X model dir (folder with SMPLX_{NEUTRAL,MALE,FEMALE}.npz). Required: ValueError if unset."""
+    """Répertoire modèle SMPL-X (dossier avec SMPLX_{NEUTRAL,MALE,FEMALE}.npz). Requis : ValueError si non défini."""
     cfg = cfg if cfg is not None else load_paths(path)
     val = _models(cfg).get("smplx")
     if not val:
@@ -51,21 +51,21 @@ def smplx_dir(cfg: dict | None = None, *, path: Path | None = None) -> Path:
 
 
 def smplh_dir(cfg: dict | None = None, *, path: Path | None = None) -> Path | None:
-    """SMPL-H model dir (holds <gender>/model.npz), or None if unset. Optional (HOI-M3 only)."""
+    """Répertoire modèle SMPL-H (contient <gender>/model.npz), ou None si non défini. Optionnel (HOI-M3 uniquement)."""
     cfg = cfg if cfg is not None else load_paths(path)
     val = _models(cfg).get("smplh")
     return Path(val) if val else None
 
 
 def smpl2smplx_pkl(cfg: dict | None = None, *, path: Path | None = None) -> Path | None:
-    """SMPL->SMPL-X deformation-transfer .pkl file, or None if unset. Optional (HOI-M3 only)."""
+    """Fichier .pkl de transfert de déformation SMPL→SMPL-X, ou None si non défini. Optionnel (HOI-M3 uniquement)."""
     cfg = cfg if cfg is not None else load_paths(path)
     val = _models(cfg).get("smpl2smplx")
     return Path(val) if val else None
 
 
 def dataset_motion_root(name: str, cfg: dict | None = None, *, path: Path | None = None) -> Path:
-    """Base dir for a relative --motion-path of `name`. Required: ValueError if unset."""
+    """Répertoire de base pour --motion-path relatif de `name`. Requis : ValueError si non défini."""
     cfg = cfg if cfg is not None else load_paths(path)
     val = _dataset(cfg, name).get("motion")
     if not val:
@@ -76,9 +76,9 @@ def dataset_motion_root(name: str, cfg: dict | None = None, *, path: Path | None
 
 
 def dataset_meta_root(name: str, cfg: dict | None = None, *, path: Path | None = None) -> Path | None:
-    """Release root for `name`'s betas/scales/object meshes (fills SceneSpec.dataset_root).
+    """Racine de mise à jour pour les betas/scales/meshes objets de `name` (remplit SceneSpec.dataset_root).
 
-    Defaults to the dataset's `motion` root when `meta` is unset; None if the dataset is absent.
+    Défaut vers la racine `motion` du dataset quand `meta` est non défini ; None si le dataset est absent.
     """
     cfg = cfg if cfg is not None else load_paths(path)
     d = _dataset(cfg, name)
@@ -88,7 +88,7 @@ def dataset_meta_root(name: str, cfg: dict | None = None, *, path: Path | None =
 
 def resolve_motion(name: str, motion: str | Path, cfg: dict | None = None,
                    *, path: Path | None = None) -> Path:
-    """Resolve a motion path: absolute -> as-is; relative -> dataset_motion_root(name)/motion."""
+    """Résoudre un chemin de mouvement : absolu → tel quel ; relatif → dataset_motion_root(name)/motion."""
     m = Path(motion)
     if m.is_absolute():
         return m

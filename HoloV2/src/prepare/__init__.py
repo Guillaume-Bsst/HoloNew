@@ -1,7 +1,7 @@
-"""``prepare`` stage — offline, q-independent: load + ground + build the geometry assets.
+"""Étape ``prepare`` — offline, q-indépendante : load + ancrage + construction des assets géométrie.
 
-Public surface (what downstream stages import): ``prepare.contracts`` (the data types it produces),
-``prepare.config`` (the knobs), and ``prepare.runner.prepare`` (the entry point). Downstream imports
-those, never ``prepare``'s internal submodules (``load/`` ``calibration/`` ``sdf/`` ``point_cloud/``).
-``prepare`` is the only place that instantiates SMPL / meshes / robot.
+Surface publique (ce que les étapes aval importent) : ``prepare.contracts`` (les types données qu'elle
+produit), ``prepare.config`` (les knobs), et ``prepare.runner.prepare`` (le point d'entrée). Les étapes
+aval importent ceux-ci, jamais les sous-modules internes de ``prepare`` (``load/`` ``calibration/``
+``sdf/`` ``point_cloud/``). ``prepare`` est l'unique endroit qui instancie SMPL / meshes / robot.
 """

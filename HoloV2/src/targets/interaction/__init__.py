@@ -1,6 +1,6 @@
-"""Interaction targets (online, per frame): pose the clouds, evaluate the channels, transport the
-human field onto the robot, assemble (references); evaluate the robot @ q (``contact_eval``). Pure ops
-in the submodules; the flow is one-way (pose -> eval -> transport -> assemble)."""
+"""Cibles d'interaction (online, par frame) : positionner les nuages, évaluer les canaux, transporter
+le champ humain sur le robot, assembler (références) ; évaluer le robot @ q (``contact_eval``). Ops purs
+dans les sous-modules ; le flux est unidirectionnel (pose → eval → transport → assemble)."""
 from .pointclouds import pose_cloud
 from .fields import eval_fields
 from .eval import contact_eval

@@ -1,12 +1,14 @@
-"""Bakes each object surface into a rigid ``PointCloud`` (K=1).
+"""Crée la surface de chaque objet dans un ``PointCloud`` rigide (K=1).
 
-An object is one rigid body, so its cloud is the degenerate single-influence case of the same
-contract as the human cloud: every point has one part (the body, index 0), weight 1, and an offset
-that IS the point in the object-local frame. Posing online is then the very same ``pose_cloud`` with
-the object's per-frame world transform passed as the single part — no object-specific code path.
+Un objet est un corps rigide unique, donc son nuage est le cas dégénéré à influence unique du même
+contrat que le nuage humain : chaque point a une partie (le corps, indice 0), poids 1 et un décalage
+qui EST le point dans le repère local de l'objet. La pose en ligne est alors le même ``pose_cloud``
+avec la transformation mondiale par image de l'objet passée comme partie unique — aucun chemin de
+code spécifique à l'objet.
 
-Geometry comes from ``prepare/load/mesh.load_mesh`` (the shared trimesh entry point), so the cloud
-and the object's SDF read the exact same local frame. Sampling is deterministic in the config seed.
+La géométrie provient de ``prepare/load/mesh.load_mesh`` (le point d'entrée trimesh partagé), donc
+le nuage et le SDF de l'objet lisent le même repère local exact. L'échantillonnage est déterministe
+dans la seed de la config.
 """
 from __future__ import annotations
 
@@ -21,12 +23,12 @@ from .cache import load_cloud, save_cloud
 
 
 # =============================================================================
-# Pure functions (deterministic; no I/O, no mutation of inputs)
+# Fonctions pures (déterministes ; pas d'I/O, pas de mutation des inputs)
 # =============================================================================
 def sample_object_surface(vertices: np.ndarray, faces: np.ndarray, density: float,
                           seed: int) -> np.ndarray:
-    """Evenly sample ``~area * density`` points (min 64) on the surface -> (P, 3) object-local.
-    Deterministic in ``seed`` (even Poisson-disk sampling), so the bake is reproducible."""
+    """Échantillonne uniformément ``~area * density`` points (min 64) sur la surface → (P, 3) objet-local.
+    Déterministe dans ``seed`` (échantillonnage uniforme par disque de Poisson), donc la création est reproductible."""
     import trimesh
     mesh = trimesh.Trimesh(vertices=np.asarray(vertices, np.float64), faces=np.asarray(faces),
                            process=False)
@@ -36,9 +38,10 @@ def sample_object_surface(vertices: np.ndarray, faces: np.ndarray, density: floa
 
 
 def assemble_rigid_cloud(points_local: np.ndarray) -> PointCloud:
-    """Wrap object-local surface points into a K=1 ``PointCloud``: one part (index 0), weight 1, the
-    point itself as the rest-local offset. Objects carry no correspondence, so ``sampling_id`` is
-    empty (it only binds the human cloud to its sampling)."""
+    """Enveloppe les points de surface locaux à l'objet dans un ``PointCloud`` K=1 : une partie
+    (indice 0), poids 1, le point lui-même comme décalage au repos-local. Les objets ne portent pas
+    de correspondance, donc ``sampling_id`` est vide (il lie uniquement le nuage humain à son
+    échantillonnage)."""
     pts = np.asarray(points_local, np.float64)
     p = pts.shape[0]
     return PointCloud(parts=np.zeros((p, 1), np.int64), weights=np.ones((p, 1), np.float32),
@@ -46,17 +49,17 @@ def assemble_rigid_cloud(points_local: np.ndarray) -> PointCloud:
 
 
 def build_object_cloud(vertices: np.ndarray, faces: np.ndarray, config: CloudConfig) -> PointCloud:
-    """Sample the object surface and wrap it into a rigid ``PointCloud``."""
+    """Échantillonne la surface de l'objet et l'enveloppe dans un ``PointCloud`` rigide."""
     pts = sample_object_surface(vertices, faces, config.object_density, config.seed)
     return assemble_rigid_cloud(pts)
 
 
 # =============================================================================
-# ObjectCloudBuilder — the AssetBuilder for this deliverable (build / cache)
+# ObjectCloudBuilder — l'AssetBuilder pour ce livrable (build / cache)
 # =============================================================================
 class ObjectCloudBuilder:
-    """``AssetBuilder`` producing an object's rigid ``PointCloud``. Scoped per GEOMETRY (shared by
-    every scene that uses the same object): the cache key hashes the local mesh + density + seed."""
+    """``AssetBuilder`` produisant un ``PointCloud`` rigide d'objet. Limité par GÉOMÉTRIE (partagé
+    par chaque scène utilisant le même objet) : la clé de cache hash le maillage local + densité + seed."""
 
     def cache_key(self, config: CloudConfig, vertices: np.ndarray, faces: np.ndarray) -> str:
         h = hashlib.sha1()

@@ -1,11 +1,11 @@
-"""runner — PUBLIC ENTRY POINT of the solve stage: ``solve(grounded, ctx, frame_targets, config)`` ->
-``SolveTrajectory``. Builds the ``Evaluator`` (targets) 1× and backend (Plan A) 1×, then loops
-frames: f=0 -> ``compute_q_init`` (Holosoma seed) + budget ``n_iter_first``; f>0 -> ``warm_start``
-(carry from f-1) + budget ``n_iter_per_frame``. ``prof.span`` (sequence) lives here. Remains
-pinocchio/torch-free (kinematics hidden in ``ctx.robot``); cvxpy arrives only via backend (lazy).
+"""runner — POINT D'ENTRÉE PUBLIC de l'étage solve : ``solve(grounded, ctx, frame_targets, config)`` ->
+``SolveTrajectory``. Construit l'``Evaluator`` (targets) 1× et le backend (Plan A) 1×, puis boucle sur les
+trames : f=0 -> ``compute_q_init`` (graine Holosoma) + budget ``n_iter_first`` ; f>0 -> ``warm_start``
+(porte de f-1) + budget ``n_iter_per_frame``. ``prof.span`` (sequence) vit ici. Reste pinocchio/torch-free
+(cinématique cachée dans ``ctx.robot``) ; cvxpy arrive seulement via backend (lazy).
 
-``robot_name`` keys the style recipe (tracked links) of the ``Evaluator``: read from explicit
-argument, else from ``config.robot_name`` (cf. Plan B integration assumption)."""
+``robot_name`` clés la recette de style (liens suivis) de l'``Evaluator`` : lue depuis l'argument explicite,
+sinon depuis ``config.robot_name`` (voir Assumption intégration Plan B)."""
 from __future__ import annotations
 
 import numpy as np
@@ -21,18 +21,18 @@ from .loop import solve_frame
 
 def solve(grounded, ctx, frame_targets, config: SolveConfig, *, robot_name: str | None = None,
           prof=NULL) -> SolveTrajectory:
-    """Online loop over frames -> ``SolveTrajectory``. ``frame_targets`` = ``list[FrameTargets]``
-    (output of ``targets.pipeline``). ``grounded`` is accepted for public seam consistency (sourcing /
-    future centroidal targets); loop does not depend on it directly (all passes through
+    """Boucle en ligne sur les trames -> ``SolveTrajectory``. ``frame_targets`` = ``list[FrameTargets]``
+    (sortie de ``targets.pipeline``). ``grounded`` est accepté pour la cohérence publique de seam (sourcing /
+    cibles centroïdales futures) ; la boucle n'en dépend pas directement (tout passe par
     ``frame_targets`` + ``ctx``)."""
     name = robot_name if robot_name is not None else getattr(config, "robot_name", None)
     if name is None:
-        raise ValueError("robot_name required (explicit argument or config.robot_name) for Evaluator")
+        raise ValueError("robot_name requis (argument explicite ou config.robot_name) pour Evaluator")
 
     evaluator = Evaluator(ctx, name)
     backend = make_backend(config.backend)
     robot = ctx.robot
-    geo = ctx.channels                                     # geodesic/SDF context per channel (build_contact)
+    geo = ctx.channels                                     # contexte géodésique/SDF par canal (build_contact)
 
     q = None
     poses = None

@@ -1,13 +1,13 @@
-"""Point-cloud viewer — visual debug of the ``point_cloud`` bake (human + objects).
+"""Visualiseur de nuage de points — débogage visuel de la cuisson ``point_cloud`` (humain + objets).
 
-Builds the subject's sparse-skinned human cloud (reusing the correspondence's sampling) and each
-object's rigid cloud, then poses them per frame with the single ``pose_cloud`` op — the mesh-free,
-torch-free runtime path. The human points are coloured by their parity error against the TRUE posed
-SMPL surface (full forward), so one can SEE the LBS-on-cloud track the body and close joint creases;
-the object points (rigid K=1) are posed by their per-frame world pose and sit on the object surface.
-Pure consumer (drives the bake to get artifacts; no compute hooks).
+Construit le nuage humain creux éparpillé-skinned du sujet (réutilisant l'échantillonnage de la correspondance) et le
+nuage rigide de chaque objet, puis les pose par-frame avec la seule opération ``pose_cloud`` — le chemin d'exécution
+sans-maille, sans-torch. Les points humains sont coloriés par leur erreur de parité contre la VRAIE surface SMPL posée
+(avance complète), donc on peut SEE le LBS-on-cloud tracker du corps et ferme les creuses articulaires ;
+les points des objets (rigide K=1) sont posés par leur pose monde par-frame et s'assoient sur la surface objet.
+Consommateur pur (pilote la cuisson pour récupérer des artefacts ; pas de hooks de calcul).
 
-Run:
+Exécution :
     python -m src.viz.cloud --motion-path <smplx.npz> --model-dir <smplx_models> [--dataset hodome]
 """
 from __future__ import annotations
@@ -34,14 +34,14 @@ _DEFAULT_CORR = Path(__file__).resolve().parent.parent.parent / "cache" / "corre
 
 
 def _heat(err: np.ndarray, vmax: float) -> np.ndarray:
-    """(N,) error -> (N,3) uint8, blue (0) -> red (>= vmax). vmax in metres."""
+    """(N,) erreur → (N,3) uint8, bleu (0) → rouge (>= vmax). vmax en mètres."""
     t = np.clip(np.asarray(err) / vmax, 0.0, 1.0)[:, None]
     return (np.concatenate([t, np.zeros_like(t), 1.0 - t], axis=1) * 255).astype(np.uint8)
 
 
 def _object_world(cloud, pose7: np.ndarray) -> np.ndarray:
-    """(P,3) object cloud posed by one ``[x,y,z,qw,qx,qy,qz]`` world pose via the shared ``pose_cloud``."""
-    rot = _Rot.from_quat(np.asarray(pose7, np.float64)[[4, 5, 6, 3]]).as_matrix()   # wxyz -> xyzw
+    """(P,3) nuage d'objet posé par une ``[x,y,z,qw,qx,qy,qz]`` pose monde via le ``pose_cloud`` partagé."""
+    rot = _Rot.from_quat(np.asarray(pose7, np.float64)[[4, 5, 6, 3]]).as_matrix()   # wxyz → xyzw
     return pose_cloud(cloud, rot[None], np.asarray(pose7, np.float64)[:3][None])
 
 
@@ -61,7 +61,7 @@ def view_cloud(spec: SceneSpec, corr_path: Path, *, port: int = 8080, frame_step
     frames = list(range(0, raw.n_frames, frame_step))[:max_frames]
     F, N = len(frames), human.n_points
     V = body.rest_vertices(params).shape[0]
-    tri_v = body.faces[sampling.tri_idx]                            # (N,3) for the surface reference
+    tri_v = body.faces[sampling.tri_idx]                            # (N,3) pour la référence de surface
     posed = np.empty((F, N, 3), np.float32)
     verts = np.empty((F, V, 3), np.float32)
     colors = np.empty((F, N, 3), np.uint8)
@@ -70,9 +70,9 @@ def view_cloud(spec: SceneSpec, corr_path: Path, *, port: int = 8080, frame_step
           f"[{', '.join(str(c.n_points) for c in obj_clouds) or '-'}]; precomputing {F} frames ...")
     med = np.empty(F); p95 = np.empty(F)
     for i, t in enumerate(frames):
-        v = body.posed_vertices(params, t)                          # (V,3) full SMPL forward (parity ref)
+        v = body.posed_vertices(params, t)                          # (V,3) avance SMPL complète (réf parité)
         ref = np.einsum("nij,ni->nj", v[tri_v], sampling.bary.astype(np.float64))
-        pc = pose_cloud(human, *body.bone_transforms(params, t))    # (N,3) the mesh-free runtime path
+        pc = pose_cloud(human, *body.bone_transforms(params, t))    # (N,3) le chemin d'exécution sans-maille
         err = np.linalg.norm(pc - ref, axis=1)
         verts[i], posed[i], colors[i] = v, pc, _heat(err, vmax)
         med[i], p95[i] = np.median(err), np.percentile(err, 95)
@@ -109,8 +109,8 @@ def view_cloud(spec: SceneSpec, corr_path: Path, *, port: int = 8080, frame_step
         else:
             srv.scene.add_mesh_simple("/ghost", np.zeros((3, 3), np.float32), np.array([[0, 1, 2]]), opacity=0.0)
         info.content = (f"**frame {frames[f]}** ({f + 1}/{F})\n\n"
-                        f"human parity err — median **{med[f]*1000:.1f}mm**, p95 **{p95[f]*1000:.1f}mm**\n\n"
-                        f"human colour: blue 0 → red ≥ {vmax*1000:.0f}mm · objects: orange (rigid K=1)")
+                        f"err parité humain — médiane **{med[f]*1000:.1f}mm**, p95 **{p95[f]*1000:.1f}mm**\n\n"
+                        f"couleur humain : bleu 0 → rouge ≥ {vmax*1000:.0f}mm · objets : orange (rigide K=1)")
 
     for h in (sld, show_human, show_objs, show_mesh, size):
         h.on_update(render)

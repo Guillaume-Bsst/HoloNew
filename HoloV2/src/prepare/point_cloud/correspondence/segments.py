@@ -1,10 +1,12 @@
-"""The 15 body segments shared by the human (SMPL-X) and any humanoid robot, plus the maps that
-assign each SMPL-X joint and each robot link to one segment, and a helper labelling each human
-surface sample by its dominant skinning joint's segment.
+"""Les 15 segments corporels partagés par l'humain (SMPL-X) et n'importe quel robot humanoides,
+plus les cartes qui assignent chaque articulation SMPL-X et chaque lien du robot à un segment, et
+un assistant étiqueté chaque échantillon de surface humain par le segment de son articulation de
+skinning dominante.
 
-Per-segment optimal transport keeps hand->hand, foot->foot: a human point may only be coupled to
-robot points sharing its segment. One anatomical rule is applied identically to both bodies (no
-per-side tweaks), so segment X means the same body part on each.
+Le transport optimal par segment garde main→main, pied→pied : un point humain ne peut être associé
+qu'à des points du robot partageant son segment. Une règle anatomique unique est appliquée
+identiquement aux deux corps (pas d'ajustements par côté), donc le segment X signifie la même
+partie du corps sur chacun.
 """
 from __future__ import annotations
 
@@ -21,8 +23,8 @@ _SEG_IDX: dict[str, int] = {s: i for i, s in enumerate(SEGMENTS)}
 
 
 def _side_segment(name: str, side: str) -> str | None:
-    """Segment for a robot link known to belong to ``side`` ('left'/'right'), or None if not that side.
-    Anatomical rule: hip->thigh | knee->shank | ankle/foot->foot ; shoulder->upperarm |
+    """Segment pour un lien du robot connu pour appartenir au ``side`` ('left'/'right'), ou None
+    sinon. Règle anatomique : hip->thigh | knee->shank | ankle/foot->foot ; shoulder->upperarm |
     elbow/wrist->forearm | hand/fingers->hand."""
     if not (f"{side}_" in name or f"_{side[0].upper()}_" in name or name.startswith(f"{side[0].upper()}_")):
         return None
@@ -42,8 +44,8 @@ def _side_segment(name: str, side: str) -> str | None:
 
 
 def link_to_segment(link_name: str) -> str:
-    """Map a robot URDF link name to one of ``SEGMENTS`` via anatomical name heuristics
-    (hip/knee/ankle/shoulder/elbow/wrist…); waist/torso/head/unknown default to torso."""
+    """Mappe un nom de lien URDF du robot à l'un des ``SEGMENTS`` via des heuristiques de noms
+    anatomiques (hip/knee/ankle/shoulder/elbow/wrist…) ; waist/torso/head/unknown par défaut à torso."""
     if link_name in ("pelvis", "pelvis_contour_link"):
         return "pelvis"
     if "head" in link_name:
@@ -55,8 +57,9 @@ def link_to_segment(link_name: str) -> str:
     return "torso"
 
 
-# SMPL-X joint index -> segment, using the SAME anatomical rule as the robot links (ankle -> foot,
-# wrist -> forearm). Body joints 0..21 explicit; jaw/eyes 22..24 -> head; hands 25..54 below.
+# Index d'articulation SMPL-X → segment, en utilisant la MÊME règle anatomique que les liens du
+# robot (ankle → foot, wrist → forearm). Articulations du corps 0..21 explicites ; jaw/eyes 22..24 →
+# head ; hands 25..54 ci-dessous.
 _SMPLX_BODY: dict[int, str] = {
     0: "pelvis",
     1: "left_thigh", 2: "right_thigh",
@@ -78,22 +81,22 @@ for _j in range(40, 55):
 
 
 def seg_index(name: str) -> int:
-    """Index of segment ``name`` in ``SEGMENTS``."""
+    """Indice du segment ``name`` dans ``SEGMENTS``."""
     return _SEG_IDX[name]
 
 
 def _vertex_segment_indices(lbs_weights: np.ndarray) -> np.ndarray:
-    """(V,) int segment index per SMPL-X vertex, from its dominant skinning joint."""
+    """(V,) indice int de segment par sommet SMPL-X, à partir de son articulation de skinning dominante."""
     dom_joint = np.asarray(lbs_weights).argmax(axis=1)               # (V,)
     return np.array([_SEG_IDX[SMPLX_JOINT_TO_SEGMENT[int(j)]] for j in dom_joint], dtype=np.int64)
 
 
 def point_segments(lbs_weights: np.ndarray, faces: np.ndarray,
                    tri_idx: np.ndarray, bary: np.ndarray) -> np.ndarray:
-    """(N,) int segment index per surface sample: the segment of its triangle vertex with the
-    largest barycentric weight (the body location it sits closest to)."""
+    """(N,) indice int de segment par échantillon de surface : le segment du sommet de son triangle
+    avec le poids barycentrique le plus grand (la localisation du corps auquel il est le plus proche)."""
     vseg = _vertex_segment_indices(lbs_weights)                     # (V,)
-    tri_v = np.asarray(faces)[np.asarray(tri_idx)]                  # (N, 3) vertex ids
+    tri_v = np.asarray(faces)[np.asarray(tri_idx)]                  # (N, 3) ids de vertex
     dom_corner = np.asarray(bary).argmax(axis=1)                    # (N,) in {0,1,2}
     dom_vertex = tri_v[np.arange(len(tri_idx)), dom_corner]
     return vseg[dom_vertex].astype(np.int64)

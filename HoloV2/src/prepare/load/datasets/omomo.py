@@ -1,20 +1,20 @@
-"""OMOMO loader (InterMimic ``.pt`` motion + OMOMO subject pickle) -> RawMotion.
+"""Chargeur OMOMO (motion ``.pt`` InterMimic + pickle sujet OMOMO) -> RawMotion.
 
-OMOMO object-manipulation sequences come from two places:
-  - the InterMimic ``.pt`` (``spec.motion_path``): a ``(T, 591)`` state tensor carrying per-joint
-    SMPL-H joint positions and global orientations (MuJoCo order, Z-up) plus the object's world
-    pose;
-  - the original OMOMO release (``spec.dataset_root``): joblib pickles keyed by sequence name with
-    the subject ``betas``/``gender`` and per-frame ``obj_scale``, plus the captured unit object
-    meshes under ``data/captured_objects/``.
+Les séquences de manipulation d'objet OMOMO proviennent de deux sources :
+  - le ``.pt`` InterMimic (``spec.motion_path``) : un tenseur d'état ``(T, 591)`` portant les positions
+    de joints par joint SMPL-H et les orientations globales (ordre MuJoCo, Z-up) plus la pose du monde
+    de l'objet ;
+  - la release OMOMO originale (``spec.dataset_root``) : pickles joblib indexés par nom de séquence avec
+    les ``betas``/``gender`` du sujet et ``obj_scale`` par frame, plus les meshes d'objets capturés sous
+    ``data/captured_objects/``.
 
-Simplification over the previous HoloNew: the body is **SMPL-X** (16 betas), so we reuse the
-SMPL-X ``BodyModel`` directly -- the .pt's 52 body+hand joints map cleanly onto SMPL-X's
-``body_pose`` + ``left/right_hand_pose`` (the 3 face joints stay at zero). No SMPL-H body model
-is needed. The .pt stores GLOBAL orientations (like SFU), already Z-up (PHC/IsaacGym), so we
-reconstruct the local ``SmplParams`` with the shared ``local_rotvecs_from_global`` and slice
-body/hands out of the SMPL-H 52-joint layout; ``BodyModel`` re-applies Q (Y->Z) to those params.
-Scale/grounding is NOT done here -- it belongs to ``prepare/calibration/`` (as for SFU/HODome).
+Simplification par rapport au HoloNew précédent : le corps est **SMPL-X** (16 betas), donc nous réutilisons
+directement le ``BodyModel`` SMPL-X -- les joints corps+main du .pt (52) se cartographient proprement sur
+``body_pose`` + ``left/right_hand_pose`` de SMPL-X (les 3 joints face restent zéro). Aucun modèle de corps
+SMPL-H n'est nécessaire. Le .pt stocke les orientations GLOBALES (comme SFU), déjà Z-up (PHC/IsaacGym),
+donc nous reconstruisons le ``SmplParams`` local avec le ``local_rotvecs_from_global`` partagé et tranchons
+corps/mains hors du layout SMPL-H 52-joints ; ``BodyModel`` ré-applique Q (Y->Z) à ces params. La mise à
+l'échelle/l'ancrage ne se font PAS ici -- c'est du ressort de ``prepare/calibration/`` (comme pour SFU/HODome).
 """
 from __future__ import annotations
 
@@ -30,27 +30,27 @@ from ..smpl import SMPLX_BODY_JOINTS, local_rotvecs_from_global, rest_body_model
 
 _MESH_CACHE = Path(tempfile.gettempdir()) / "holov2_omomo_meshes"
 
-# InterMimic .pt column layout (the stored per-frame state vector).
-_PT_JOINTS = slice(162, 162 + 52 * 3)   # (52,3) joint positions, MuJoCo order, Z-up
-_PT_OBJECT = slice(318, 325)            # [tx,ty,tz, qx,qy,qz,qw] object world pose
-_PT_QUATS = slice(383, 383 + 52 * 4)    # (52,4) per-joint global orientations, MuJoCo order, xyzw
+# Layout de colonne du .pt InterMimic (le vecteur d'état per-frame stocké).
+_PT_JOINTS = slice(162, 162 + 52 * 3)   # (52,3) positions de joints, ordre MuJoCo, Z-up
+_PT_OBJECT = slice(318, 325)            # [tx,ty,tz, qx,qy,qz,qw] pose monde de l'objet
+_PT_QUATS = slice(383, 383 + 52 * 4)    # (52,4) orientations globales par joint, ordre MuJoCo, xyzw
 
-# Right-multiplier undoing InterMimic's PHC "upright_start" twist baked into the stored global
-# quats (interact2mimic writes global_rot * Q^-1, xyzw); applying it yields true SMPL-X globals.
+# Multiplicateur-droit défaisant la torsion PHC "upright_start" d'InterMimic cuite dans les quats globaux
+# stockés (interact2mimic écrit global_rot * Q^-1, xyzw) ; l'appliquer produit les vrais globaux SMPL-X.
 _UPRIGHT_FIX_XYZW = np.array([0.5, 0.5, 0.5, 0.5])
 
-# smpl_2_mujoco (from InterAct): SMPL_2_MUJOCO[mujoco_idx] = smpl_idx. The .pt arrays are MuJoCo
-# order; scattering by this index puts each joint into its SMPL-H 52-joint slot (body 0-21, left
-# hand 22-36, right hand 37-51).
+# smpl_2_mujoco (de InterAct) : SMPL_2_MUJOCO[mujoco_idx] = smpl_idx. Les tableaux .pt sont en ordre
+# MuJoCo ; la dispersion par cet indice place chaque joint dans son slot SMPL-H 52-joint (corps 0-21,
+# main gauche 22-36, main droite 37-51).
 _SMPL_2_MUJOCO = np.array([
     0, 1, 4, 7, 10, 2, 5, 8, 11, 3, 6, 9, 12, 15, 13, 16, 18, 20,
     22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 14, 17, 19, 21,
     37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51])
 
-# SMPL-H 52-joint parent tree (body 0-21 identical to SMPL-X; left hand 22-36 / right hand 37-51
-# are the MANO sub-tree off the wrists 20/21). Turns the scattered globals into parent-relative
-# locals; the 15 hand locals are layout-invariant, so they feed SMPL-X's left/right_hand_pose
-# (SMPL-X hand slots 25-39 / 40-54) unchanged. Validated to <1e-6 m against the .pt joints.
+# Arbre parent SMPL-H 52-joint (corps 0-21 identique à SMPL-X ; main gauche 22-36 / main droite 37-51
+# sont le sous-arbre MANO des poignets 20/21). Transforme les globaux dispersés en locals parent-relatifs ;
+# les 15 locals de main sont layout-invariants, donc ils alimentent left/right_hand_pose de SMPL-X
+# (slots de main SMPL-X 25-39 / 40-54) inchangés. Validé à <1e-6 m contre les joints .pt.
 _SMPLH_PARENTS = np.array(
     [-1, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 12, 13, 14, 16, 17, 18, 19,
      20, 22, 23, 20, 25, 26, 20, 28, 29, 20, 31, 32, 20, 34, 35,
@@ -58,14 +58,14 @@ _SMPLH_PARENTS = np.array(
 
 
 def _object_token(seq: str) -> str:
-    """Object name = 2nd '_'-segment of the sequence (sub16_largetable_008 -> largetable)."""
+    """Nom d'objet = 2e segment '_' de la séquence (sub16_largetable_008 -> largetable)."""
     parts = seq.split("_")
     return parts[1] if len(parts) >= 2 else seq
 
 
 def _load_pt(path: Path):
-    """Read an InterMimic .pt -> (joints (T,52,3) MuJoCo Z-up, object_pose (T,7) pos-first wxyz,
-    quats (T,52,4) MuJoCo wxyz with the upright-start twist undone)."""
+    """Lire un .pt InterMimic -> (joints (T,52,3) MuJoCo Z-up, object_pose (T,7) pos-first wxyz,
+    quats (T,52,4) MuJoCo wxyz avec la torsion upright-start défaite)."""
     import torch
 
     d = torch.load(str(path), map_location="cpu").detach().numpy()
@@ -80,9 +80,9 @@ def _load_pt(path: Path):
 
 
 def _subject_meta(dataset_root: Path | None, seq: str):
-    """``(betas (16,)|None, gender, obj_scale|None)`` for ``seq`` from the OMOMO pickle (train then
-    test). Degrades to ``(None, "neutral", None)`` when the release / sequence is absent -> neutral
-    mean shape, native object size."""
+    """``(betas (16,)|None, gender, obj_scale|None)`` pour ``seq`` du pickle OMOMO (train puis test).
+    Se dégrade en ``(None, "neutral", None)`` quand la release / séquence est absente -> shape neutre
+    moyenne, taille d'objet native."""
     if dataset_root is None:
         return None, "neutral", None
     import joblib
@@ -102,9 +102,9 @@ def _subject_meta(dataset_root: Path | None, seq: str):
 
 
 def _object_mesh(token: str, dataset_root: Path | None, scale: float | None, cache_dir: Path):
-    """Captured unit mesh -> recentred + per-sequence-scaled mesh in the frame the .pt poses
-    expect (centroid at the origin), cached. Returns None when the mesh or its scale is missing
-    (then the sequence degrades to body/ground-only, as the V1 builder does)."""
+    """Mesh d'unité capturé -> mesh recentré + mis à l'échelle par séquence dans le frame que les poses
+    .pt attendent (centroïde à l'origine), caché. Retourne None quand le mesh ou son échelle manque
+    (alors la séquence se dégrade en corps/sol uniquement, comme le fait le builder V1)."""
     if dataset_root is None or scale is None:
         return None
     import trimesh
@@ -125,7 +125,7 @@ def _object_mesh(token: str, dataset_root: Path | None, scale: float | None, cac
 
 @register_loader("omomo")
 class OmomoLoader:
-    """SceneSpec -> RawMotion for an OMOMO/InterMimic manipulation sequence (one object)."""
+    """SceneSpec -> RawMotion pour une séquence de manipulation OMOMO/InterMimic (un objet)."""
 
     def load(self, spec: SceneSpec) -> RawMotion:
         if spec.smpl_model_dir is None:
@@ -134,13 +134,13 @@ class OmomoLoader:
         joints_mj, object_pose, quats_mj = _load_pt(Path(spec.motion_path))
         T = joints_mj.shape[0]
 
-        # MuJoCo -> SMPL-H 52-joint order (body 0-21, left hand 22-36, right hand 37-51).
+        # MuJoCo -> ordre SMPL-H 52-joint (corps 0-21, main gauche 22-36, main droite 37-51).
         joints = np.empty_like(joints_mj); joints[:, _SMPL_2_MUJOCO] = joints_mj
         quats = np.empty_like(quats_mj);   quats[:, _SMPL_2_MUJOCO] = quats_mj
 
         betas, gender, scale = _subject_meta(spec.dataset_root, seq)
         if betas is None:
-            betas = np.zeros(16, np.float32)                        # neutral mean shape fallback
+            betas = np.zeros(16, np.float32)                        # secours de shape neutre moyenne
         rest = rest_body_model(betas, gender, Path(spec.smpl_model_dir))
 
         local, transl = local_rotvecs_from_global(

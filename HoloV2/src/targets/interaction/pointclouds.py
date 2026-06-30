@@ -1,12 +1,13 @@
-"""Poses a ``PointCloud`` for one frame from its parts' world transforms — the single op shared by
-every cloud kind (human K~4, object K=1, robot K=1), so there is no per-kind code path (homogeneity).
+"""Pose un ``PointCloud`` pour une frame à partir de ses transformations du monde des parties — l'op unique
+partagée par tout type de nuage (humain K~4, objet K=1, robot K=1), donc pas de chemin de code par type
+(homogénéité).
 
 ``p[i] = sum_k weights[i,k] * (R[parts[i,k]] @ offsets[i,k] + t[parts[i,k]])``
 
-The caller supplies the per-part transforms that match the cloud: the human cloud's parts are SMPL
-bones (``BodyModel.bone_transforms``), an object cloud's single part is the object pose
-(``R[None]``, ``t[None]``), a robot cloud's parts are links (FK). Pure, vectorised, no Python loop
-over points; torch-free and mesh-free.
+L'appelant fournit les transformations par partie qui correspondent au nuage : les parties du nuage humain
+sont des os SMPL (``BodyModel.bone_transforms``), la partie unique d'un nuage objet est la pose objet
+(``R[None]``, ``t[None]``), les parties d'un nuage robot sont des liens (FK). Pur, vectorisé, pas de boucle
+Python sur les points ; sans torch et sans mesh.
 """
 from __future__ import annotations
 
@@ -16,9 +17,9 @@ from ...prepare.contracts import PointCloud
 
 
 def pose_cloud(cloud: PointCloud, part_rot: np.ndarray, part_pos: np.ndarray) -> np.ndarray:
-    """(P, 3) world points. ``part_rot (J,3,3)`` and ``part_pos (J,3)`` are the world transform of
-    every part the cloud can reference (bones / object / links); ``cloud.parts`` gathers per point."""
+    """(P, 3) points mondiaux. ``part_rot (J,3,3)`` et ``part_pos (J,3)`` sont la transformation du monde
+    de chaque partie que le nuage peut référencer (os / objet / liens) ; ``cloud.parts`` rassemble par point."""
     rot = part_rot[cloud.parts]                                     # (P, K, 3, 3)
     pos = part_pos[cloud.parts]                                     # (P, K, 3)
-    contrib = np.einsum("pkij,pkj->pki", rot, cloud.offsets) + pos  # (P, K, 3) each bone's placement
-    return np.einsum("pk,pki->pi", cloud.weights, contrib)         # (P, 3) skinning blend
+    contrib = np.einsum("pkij,pkj->pki", rot, cloud.offsets) + pos  # (P, K, 3) placement de chaque os
+    return np.einsum("pk,pki->pi", cloud.weights, contrib)         # (P, 3) blend de skinning

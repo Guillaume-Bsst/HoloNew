@@ -1,9 +1,10 @@
-"""Loads an object/terrain mesh from a path into local-frame geometry (trimesh-backed).
+"""Charge un mesh d'objet/terrain d'un chemin dans une géométrie local-frame (appuyé par trimesh).
 
-Single trimesh entry point for the offline geometry consumers — ``prepare/sdf`` (builds the SDF) and
-``prepare/point_cloud/objects`` (samples the surface). Both must read the SAME local frame, so the
-mesh is loaded ONCE here. The dataset loaders (``prepare/load/datasets/*``) already centred + cached
-each mesh on the centroid its poses are calibrated against, so this is a plain geometry read.
+Point d'entrée unique pour les consommateurs de géométrie hors ligne — ``prepare/sdf`` (construit l'SDF)
+et ``prepare/point_cloud/objects`` (échantillonne la surface). Les deux doivent lire le MÊME frame local,
+donc le mesh est chargé UNE FOIS ici. Les chargeurs de dataset (``prepare/load/datasets/*``) ont déjà
+centré + caché chaque mesh sur le centroïde dont ses poses sont calibrées, donc c'est une simple lecture
+de géométrie.
 """
 from __future__ import annotations
 
@@ -13,11 +14,12 @@ import numpy as np
 
 
 def load_mesh(path: Path) -> tuple[np.ndarray, np.ndarray]:
-    """Mesh at ``path`` -> (vertices (V, 3) float64, faces (F, 3) int64), local frame, geometry only.
+    """Mesh au ``path`` -> (vertices (V, 3) float64, faces (F, 3) int64), frame local, géométrie uniquement.
 
-    ``skip_materials`` drops textures (irrelevant to the SDF/cloud); ``process=True`` welds duplicate
-    vertices so ``mesh.contains`` has a watertight surface to sign against. The dataset loader already
-    fixed the centring/frame, which welding preserves (it dedupes positions, never moves them)."""
+    ``skip_materials`` supprime les textures (non pertinent pour l'SDF/nuage) ; ``process=True`` soude
+    les sommets dupliqués pour que ``mesh.contains`` ait une surface étanche à signer. Le chargeur de
+    dataset a déjà fixé le centrage/frame, que le soudage préserve (il déduplique les positions, ne les
+    déplace jamais)."""
     import trimesh
     m = trimesh.load(str(path), force="mesh", process=True, skip_materials=True)
     return np.asarray(m.vertices, np.float64), np.asarray(m.faces, np.int64)

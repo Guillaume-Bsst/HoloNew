@@ -1,19 +1,22 @@
-"""Sample a robot's surface, per link, in a given rest configuration (offline, for the OT build).
+"""Échantillonne la surface d'un robot, par lien, dans une configuration au repos donnée (hors ligne,
+pour la construction OT).
 
-Robot-agnostic: it takes a URDF path and the rest-pose joint angles as inputs (the robot-specific
-angles live in ``prepare/load/robot.py``, keyed by robot name). Each sampled point is stored in the
-frame of the link it belongs to (``offset_local``), so re-posing the robot by FK relocates it for
-free. A T-pose-like rest (limbs spread) keeps the limb clouds well separated for the per-segment OT.
+Indépendant du robot : il prend un chemin URDF et les angles articulaires au repos comme entrées
+(les angles spécifiques au robot vivent dans ``prepare/load/robot.py``, indexés par le nom du
+robot). Chaque point échantillonné est stocké dans le repère du lien auquel il appartient
+(``offset_local``), donc re-poser le robot par FK le relocalise gratuitement. Un repos de type
+T-pose (membres écartés) garde les nuages de membres bien séparés pour l'OT par segment.
 
-The robot geometry + kinematics come from **pinocchio** (the single robot model of the project — the
-same engine as ``prepare/load/robot.PinRobot``): the visual ``GeometryModel`` gives, per geometry, the
-owning link (``parentFrame``, authoritative — no scene-graph heuristic), the rest-pose world placement
-(``updateGeometryPlacements``), and the mesh file (or a primitive shape). Only the mesh sampling stays
-on ``trimesh``.
+La géométrie du robot + cinématique proviennent de **pinocchio** (le modèle de robot unique du
+projet — le même moteur que ``prepare/load/robot.PinRobot``) : le ``GeometryModel`` visuel donne,
+par géométrie, le lien propriétaire (``parentFrame``, faisant autorité — pas d'heuristique de
+graphe de scène), le placement mondial au repos (``updateGeometryPlacements``), et le fichier de
+maillage (ou une forme primitive). Seul l'échantillonnage du maillage reste sur ``trimesh``.
 
-Each link mesh is first reduced to its watertight OUTER SHELL so samples land only on the true
-outside: raw visual meshes are non-watertight and carry internal geometry, so plain surface sampling
-would land many points inside the body.
+Chaque maillage de lien est d'abord réduit à sa COQUE EXTERNE étanche pour que les échantillons
+ne touchent que le véritable extérieur : les maillages visuels bruts ne sont pas étanches et portent
+de la géométrie interne, donc l'échantillonnage de surface ordinaire atterrirait beaucoup de points
+à l'intérieur du corps.
 """
 from __future__ import annotations
 
@@ -28,14 +31,14 @@ from .segments import link_to_segment, seg_index
 @dataclass(frozen=True)
 class RobotSurface:
     points_world: np.ndarray   # (M, 3) sampled points, rest pose, world frame
-    link_idx: np.ndarray       # (M,)   index into link_names
+    link_idx: np.ndarray       # (M,)   index dans link_names
     offset_local: np.ndarray   # (M, 3) point in its link's frame
-    seg: np.ndarray            # (M,)   segment index (into segments.SEGMENTS)
+    seg: np.ndarray            # (M,)   index de segment (dans segments.SEGMENTS)
     link_names: tuple[str, ...]
 
 
 def _rest_q(model, rest_angles: dict[str, float]) -> np.ndarray:
-    """Free-flyer neutral config with the named actuated joints set to ``rest_angles`` (absent -> 0)."""
+    """Config neutre free-flyer avec les articulations commandées nommées définies à ``rest_angles`` (absent → 0)."""
     q = np.asarray(__import__("pinocchio").neutral(model), np.float64)
     qadr = {model.names[j]: model.joints[j].idx_q for j in range(2, model.njoints)}
     for name, a in rest_angles.items():
@@ -45,8 +48,9 @@ def _rest_q(model, rest_angles: dict[str, float]) -> np.ndarray:
 
 
 def _geometry_mesh(geom_obj):
-    """A ``trimesh.Trimesh`` for one ``GeometryObject``: its mesh file, or a primitive (sphere / box /
-    cylinder / capsule) rebuilt from the coal shape. Returns ``None`` for an unsupported shape."""
+    """Un ``trimesh.Trimesh`` pour un ``GeometryObject`` : son fichier de maillage, ou une primitive
+    (sphère / boîte / cylindre / capsule) reconstruite à partir de la forme coal. Retourne ``None``
+    pour une forme non supportée."""
     import trimesh
     mp = geom_obj.meshPath or ""
     if mp and Path(mp).suffix.lower() in (".obj", ".stl", ".dae", ".ply"):
@@ -67,9 +71,10 @@ def _geometry_mesh(geom_obj):
 
 
 def _outer_shell(mesh):
-    """Watertight outer shell of a (possibly triangle-soup) mesh via voxelise -> fill -> marching
-    cubes, keeping only the true outside and closing holes. Pitch adapts to the thinnest extent so
-    small links survive; falls back to the input mesh if the remesh is degenerate."""
+    """Coque extérieure étanche d'un maillage (possiblement soupe de triangles) via voxélisation →
+    remplissage → marching cubes, gardant uniquement le vrai extérieur et fermant les trous. Le pas
+    s'adapte à l'étendue la plus fine pour que les petits liens survivent ; revient au maillage
+    d'entrée si le remaillage est dégénéré."""
     ext = mesh.bounds[1] - mesh.bounds[0]
     pitch = float(np.clip(ext.min() / 6.0, 0.003, 0.008))
     try:
@@ -87,12 +92,14 @@ def _outer_shell(mesh):
 
 def sample_robot_surface(urdf_path: Path, rest_angles: dict[str, float],
                          density: float) -> RobotSurface:
-    """Surface-sample every link mesh at ``density`` pts/m^2, posed in the rest config.
+    """Échantillonne la surface de chaque maillage de lien à ``density`` pts/m^2, posé dans la
+    configuration au repos.
 
-    Each mesh is reduced to its watertight outer shell (samples land only on the true outside), then
-    each sample is snapped back onto the real mesh (the shell is dilated ~5 mm by voxelisation, so
-    sampling it directly would float the points off the surface) and pushed out 1 mm. Geometry +
-    placements come from pinocchio's visual ``GeometryModel`` (mesh sampling stays trimesh)."""
+    Chaque maillage est réduit à sa coque extérieure étanche (les échantillons ne touchent que le
+    vrai extérieur), puis chaque échantillon est attaché au vrai maillage (la coque est dilatée
+    ~5 mm par voxélisation, donc l'échantillonner directement ferait flotter les points de la
+    surface) et poussé de 1 mm. La géométrie + placements proviennent du ``GeometryModel`` visuel
+    de pinocchio (l'échantillonnage du maillage reste trimesh)."""
     import trimesh
     import pinocchio as pin
 
@@ -109,13 +116,13 @@ def sample_robot_surface(urdf_path: Path, rest_angles: dict[str, float],
     link_names: list[str] = []
     link_id: dict[str, int] = {}
     pw, li, ol, sg = [], [], [], []
-    rng = np.random.default_rng(0)                       # deterministic sampling
+    rng = np.random.default_rng(0)                       # échantillonnage déterministe
 
     for i, go in enumerate(geom.geometryObjects):
         mesh = _geometry_mesh(go)
         if mesh is None or len(mesh.vertices) == 0:
             continue
-        link = model.frames[go.parentFrame].name        # authoritative owning link (no heuristic)
+        link = model.frames[go.parentFrame].name        # lien propriétaire faisant autorité (pas d'heuristique)
 
         shell = _outer_shell(mesh)
         n = max(1, int(shell.area * density))
@@ -127,9 +134,9 @@ def sample_robot_surface(urdf_path: Path, rest_angles: dict[str, float],
             continue
         pts_file = pts_file + mesh.face_normals[face_idx] * 0.001     # push out 1 mm
 
-        oMg = gdata.oMg[i]                                            # geometry world placement
+        oMg = gdata.oMg[i]                                            # placement mondial de la géométrie
         pts_world = pts_file @ np.asarray(oMg.rotation).T + np.asarray(oMg.translation)
-        oMf = data.oMf[go.parentFrame]                               # link world placement
+        oMf = data.oMf[go.parentFrame]                               # placement mondial du lien
         offset = (pts_world - np.asarray(oMf.translation)) @ np.asarray(oMf.rotation)
 
         if link not in link_id:
