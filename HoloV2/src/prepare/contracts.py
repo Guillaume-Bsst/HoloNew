@@ -85,6 +85,10 @@ class RobotModel(Protocol):
         aligned with ``link_names``. ``jac_lin``/``jac_ang`` are the LOCAL_WORLD_ALIGNED translational
         / angular frame Jacobians: ``dp_world = jac_lin @ v``, ``omega_world = jac_ang @ v``."""
 
+    def joint_pos_limits(self) -> tuple[np.ndarray, np.ndarray]:
+        """Actuated joint position limits ``(lower (dof,), upper (dof,))`` (rad), aligned with the
+        joint DOFs ``v[6:6+dof]`` / ``q[7:7+dof]``. Used by ``solve`` to box the joint step."""
+
 
 class AssetBuilder(Protocol):
     """Common SHAPE of the offline deliverable builders (``prepare/``): calibration, sdf,

@@ -105,6 +105,13 @@ class PinRobot:
             jac_lin[i] = J6[0:3, :]; jac_ang[i] = J6[3:6, :]
         return rot, pos, jac_lin, jac_ang
 
+    def joint_pos_limits(self) -> tuple[np.ndarray, np.ndarray]:
+        """Actuated joint position limits from the URDF (rad), the joint slice of the free-flyer
+        config (q[:7] is the base): ``(lower (dof,), upper (dof,))``."""
+        lo = np.asarray(self.model.lowerPositionLimit, np.float64)[7:7 + self.dof]
+        hi = np.asarray(self.model.upperPositionLimit, np.float64)[7:7 + self.dof]
+        return lo, hi
+
 
 def build_robot_model(spec: RobotSpec) -> PinRobot:
     """Build the pinocchio ``RobotModel`` for ``spec`` (FK + Jacobians, no meshes)."""
