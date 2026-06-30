@@ -1,10 +1,10 @@
-"""loop — l'itéré SQP/trust-region par frame. Flux LINÉAIRE explicite (le point que V1 ratait) :
-``evaluate -> assemble -> backend.solve -> retract -> converge``. Une seule passe, pas de classe-dieu.
+"""loop — the SQP/trust-region iterate per frame. Explicit LINEAR flow (the point V1 missed):
+``evaluate -> assemble -> backend.solve -> retract -> converge``. Single pass, no god class.
 
-``evaluate`` est le wrapper du seam : l'``Evaluator`` (targets) expose ``.style(q)`` + ``.contacts(q,
-object_rot, object_pos)`` mais pas un appel combiné — on convertit ``object_poses (N,7) -> (object_rot,
-object_pos)`` puis on assemble un ``FrameEval``. ``prof.span`` vit ici (orchestrateur), jamais dans les
-ops pures."""
+``evaluate`` is the seam wrapper: the ``Evaluator`` (targets) exposes ``.style(q)`` + ``.contacts(q,
+object_rot, object_pos)`` but not a combined call — we convert ``object_poses (N,7) -> (object_rot,
+object_pos)`` then assemble a ``FrameEval``. ``prof.span`` lives here (orchestrator), never in pure
+ops."""
 from __future__ import annotations
 
 import numpy as np
@@ -16,8 +16,8 @@ from .retract import quat_wxyz_to_mat, retract
 
 
 def evaluate(evaluator, q: np.ndarray, object_poses: np.ndarray) -> FrameEval:
-    """Géométrie courante au ``(q, object_poses)`` : style FK + champ de contact. Convertit les poses
-    objet ``(N,7)`` (pos + quat wxyz) en ``(object_rot (N,3,3), object_pos (N,3))`` attendus par
+    """Current geometry at ``(q, object_poses)``: style FK + contact field. Converts object poses
+    ``(N,7)`` (pos + quat wxyz) to ``(object_rot (N,3,3), object_pos (N,3))`` expected by
     ``Evaluator.contacts``."""
     poses = np.asarray(object_poses, np.float64)
     n = poses.shape[0]
@@ -31,8 +31,8 @@ def evaluate(evaluator, q: np.ndarray, object_poses: np.ndarray) -> FrameEval:
 
 
 def cost_breakdown(problem: Problem, step: Step) -> dict[str, float]:
-    """‖A·dv + A_obj·dξ + c‖² par NOM de terme au pas résolu (l'outil n°1 de tuning des poids).
-    Les blocs de même nom s'agrègent."""
+    """‖A·dv + A_obj·dξ + c‖² by TERM NAME at solved step (tool #1 for tuning weights).
+    Blocks with same name aggregate."""
     dv = np.asarray(step.dv, np.float64)
     dxi = None if step.dxi is None else np.asarray(step.dxi, np.float64).reshape(-1)
     out: dict[str, float] = {}
@@ -46,9 +46,9 @@ def cost_breakdown(problem: Problem, step: Step) -> dict[str, float]:
 
 def solve_frame(evaluator, frame_targets_f, geo, robot, backend, cfg, q0, poses0,
                 n_iter: int | None = None, prof=NULL) -> tuple[np.ndarray, np.ndarray, FrameInfo]:
-    """Un itéré SQP sur UNE frame depuis le seed ``(q0, poses0)``. Trust-region FIXE (adaptatif =
-    incrément futur). Convergence : ``max|dv| < cfg.step_tol`` ou ``n_iter`` atteint (par défaut
-    ``cfg.n_iter_per_frame`` ; le runner passe ``cfg.n_iter_first`` au cold start f=0)."""
+    """One SQP iterate on ONE frame from seed ``(q0, poses0)``. FIXED trust-region (adaptive =
+    future increment). Convergence: ``max|dv| < cfg.step_tol`` or ``n_iter`` reached (default
+    ``cfg.n_iter_per_frame``; runner passes ``cfg.n_iter_first`` at cold start f=0)."""
     max_iter = cfg.n_iter_per_frame if n_iter is None else n_iter
     q = np.array(q0, np.float64, copy=True)
     poses = np.array(poses0, np.float64, copy=True)
@@ -60,8 +60,8 @@ def solve_frame(evaluator, frame_targets_f, geo, robot, backend, cfg, q0, poses0
             step = backend.solve(problem)
             status, cost = step.status, step.value
             if step.dv is None or not np.all(np.isfinite(step.dv)):
-                break                                       # backend non-optimal -> arrêt (avant cost_breakdown,
-                                                            # qui ferait np.asarray(None) sur un dv manquant)
+                break                                       # backend non-optimal -> stop (before cost_breakdown,
+                                                            # which would np.asarray(None) on missing dv)
             cost_by_term = cost_breakdown(problem, step)    # seulement sur un pas valide
             q, poses = retract(q, poses, step, robot)
             if float(np.max(np.abs(step.dv))) < cfg.step_tol:

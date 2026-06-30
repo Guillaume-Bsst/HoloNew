@@ -1,10 +1,10 @@
-"""assemble — (evals + refs + geo + robot + cfg) -> ``Problem``. Le pont entre les ÉVALUATIONS
-courantes (``FrameEval`` : style FK + champ de contact) et le sous-problème QP linéarisé : appelle les
-builders ``terms/`` (poids repliés) et ``terms/constraints`` (limites articulaires + trust-region box),
-concatène en UN ``Problem``. PUR — aucune cinématique ici (déléguée aux Eval), aucun cvxpy.
+"""assemble — (evals + refs + geo + robot + cfg) -> ``Problem``. The bridge between current
+EVALUATIONS (``FrameEval``: style FK + contact field) and the linearized QP subproblem: calls
+``terms/`` builders (folded weights) and ``terms/constraints`` (joint limits + trust-region box),
+concatenates into ONE ``Problem``. PURE — no kinematics here (delegated to Eval), no cvxpy.
 
-``geo`` = le contexte géodésique par canal que ``build_contact`` lit pour le résidu witness C-X (sourcé
-``ctx.channels`` côté runner — chaque ``Channel`` porte son ``geodesic`` + ``sdf``)."""
+``geo`` = geodesic context per channel that ``build_contact`` reads for witness residual C-X (sourced
+from ``ctx.channels`` on runner side — each ``Channel`` carries its ``geodesic`` + ``sdf``)."""
 from __future__ import annotations
 
 import numpy as np
@@ -32,8 +32,8 @@ def _geo_field(channels, object_rot, object_pos) -> GeoField:
 
 
 def assemble(evals, frame_targets, geo, robot, cfg: SolveConfig) -> Problem:
-    """Construit le ``Problem`` d'UNE itération SQP. ``n_obj`` est dérivé des poses objet de la frame ;
-    si ``n_obj = 0`` les builders objet ne produisent simplement aucun bloc ``A_obj``."""
+    """Builds the ``Problem`` for ONE SQP iteration. ``n_obj`` is derived from frame object poses;
+    if ``n_obj = 0`` the object builders simply produce no ``A_obj`` blocks."""
     se, ce = evals.style, evals.contact
     blocks = []
     blocks += list(build_style(se, frame_targets.style, cfg))
