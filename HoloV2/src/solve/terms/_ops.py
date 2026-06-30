@@ -77,7 +77,9 @@ def _log_one(E: np.ndarray) -> np.ndarray:
 
 def so3_log(R_ref: np.ndarray, R_cur: np.ndarray) -> np.ndarray:
     """World-frame orientation error per row: ``log(R_cur·R_refᵀ)`` (L,3,3),(L,3,3) -> (L,3).
-    Pairs with the world angular Jacobian ``jac_rot`` (Gauss-Newton: ``A=jac_rot``, ``c=so3_log``)."""
+    Gauss-Newton residual ``c = so3_log(R_ref, R_cur)``; the EXACT first-order Jacobian of a world
+    (left) bump is ``A = J_l⁻¹(c)·jac_rot``, NOT the raw ``jac_rot`` — the inverse-left-Jacobian factor
+    matters at finite error (see ``style._so3_left_jac_inv``; omitting it fails the S-rot FD test)."""
     R_ref = np.asarray(R_ref, np.float64); R_cur = np.asarray(R_cur, np.float64)
     E = np.einsum("lij,lkj->lik", R_cur, R_ref)         # R_cur · R_refᵀ
     return np.stack([_log_one(E[l]) for l in range(E.shape[0])])

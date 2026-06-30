@@ -53,7 +53,8 @@ def test_srot_linearization_vs_fd():
     R_ref = quat_to_rot(tgt.orientation)
     assert np.allclose(sr.c, (cfg.w_rot * so3_log(R_ref, ev.rotation)).reshape(-1))
     # FD: perturb world orientation by jac_rot·v (R_cur(v) = exp([jac_rot·v]x) R_cur). Check A·v matches
-    # the first-order change of so3_log -> validates A = w_rot·jac_rot (the world-frame convention).
+    # the first-order change of so3_log -> validates A = w_rot·J_l⁻¹(r0)·jac_rot (inverse-left-Jacobian
+    # factor is required: raw jac_rot is only exact at r0=0, fails here at finite error 0.2-2 rad).
     v = rng.standard_normal(nv) * 1e-5
     R_pert = np.empty_like(ev.rotation)
     for l in range(L):
