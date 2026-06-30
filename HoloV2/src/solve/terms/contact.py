@@ -17,7 +17,7 @@ from ..contracts import ResidualBlock
 from ..config import SolveConfig
 from ._ops import GeoField, dist_jac, geo_chain, scatter_obj, world_normal
 from ...targets.contracts import ContactEval, RobotInteractionTargets
-from ...targets.interaction.geodesic import geo_value_grad, nearest_index
+from ...targets import geo_value_grad, nearest_index   # surface publique (re-export racine), pas l'interne
 
 
 def _alpha(d_ref: np.ndarray, cfg: SolveConfig) -> np.ndarray:
