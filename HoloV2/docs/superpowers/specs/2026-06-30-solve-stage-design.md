@@ -61,6 +61,8 @@ solve/
     cvxpy.py       CvxpyBackend  (le premier ; cvxpy importé ICI uniquement)
   assemble.py    (evals, refs, geo, config) -> Problem   [appelle terms/ + constraints]
   retract.py     q ⊕ dv (robot.integrate) ; pose_objet ⊕ dξ (exp SE(3) numpy)
+  init.py        compute_q_init(frame_targets[0], robot) : seed f=0 (base à la cible pelvis + joints
+                 neutres ; objets à leur pose observée) ; warm_start(prev) : carry pour f>0
   loop.py        l'itéré SQP : evaluate -> assemble -> backend.solve -> retract -> converge
   runner.py      ENTRÉE PUBLIQUE : solve(grounded, ctx, frame_targets, config) -> SolveTrajectory
   __init__.py    surface publique
@@ -172,12 +174,15 @@ trust-region **box** par-DOF. [non-pénétration `d ≥ 0` = incrément suivant.
 
 ## Boucle + rétraction
 
-- `loop.py` : l'itéré SQP par frame (voir Flux). Warm-start frame `f>0` depuis `f-1` ; **`f=0` = joints
-  neutres + base flottante placée à la cible pelvis de style** (`StyleTargets` pelvis : position +
-  orientation) — c'est l'**init natif de Holosoma** (`q_init = [human pelvis pos, human root quat,
-  joints=0]`), bien meilleur qu'une base à l'origine (seuls les joints convergent ; `n_iter_first`
-  absorbe ce raffinement). Convergence `‖dv‖ < step_tol` ou `n_iter`. Trust-region **fixe** (adaptatif =
-  incrément suivant). `prof.span` ici.
+- `init.py` : `compute_q_init(frame_targets[0], robot)` — seed de la frame 0 **à la Holosoma** : base
+  flottante = cible pelvis de style (`StyleTargets` pelvis : position + orientation), joints **neutres**,
+  objets à leur pose observée (`q_init = [pelvis_pos, pelvis_quat, joints=0]`) — bien meilleur qu'une base
+  à l'origine. `warm_start(prev)` : carry de `f-1` pour `f>0`. Fonction **pure** (consomme une Ref +
+  `RobotModel`, pas l'Evaluator). NB : pour G1 le lien root URDF = `pelvis`, donc base ≡ cible pelvis
+  direct (un offset root↔pelvis se composerait ici, un seul endroit).
+- `loop.py` : l'itéré SQP par frame (voir Flux). `f=0` → `init.compute_q_init` ; `f>0` → `init.warm_start`
+  (depuis `f-1`). `n_iter_first` absorbe le raffinement des joints au cold start. Convergence
+  `‖dv‖ < step_tol` ou `n_iter`. Trust-region **fixe** (adaptatif = incrément suivant). `prof.span` ici.
 - `retract.py` : `q ⊕ dv` via `robot.integrate` (Protocol, pinocchio-free) ; `pose_objet ⊕ dξ` via exp SE(3)
   numpy (quaternion exp + translation). Pur.
 - `runner.py` : entrée publique `solve(grounded, ctx, frame_targets, config) -> SolveTrajectory` ; construit
