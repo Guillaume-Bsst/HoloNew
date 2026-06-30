@@ -29,10 +29,22 @@ class ObjectsLayer:
 
     def update(self, frame: VizFrame, ui: UiState) -> None:
         """Rafraîchit les géométries et couleurs des nuages objets pour le frame courant,
-        selon le mode couleur sélectionné (uniforme / distance / masque actif)."""
+        selon le mode couleur sélectionné (uniforme / distance / masque actif).
+        No-op (masque tous les handles) si les données sont absentes ou le canal inconnu."""
+        # Garde no-op : données manquantes ou canal inconnu → masquer tous les handles et sortir
+        if (frame.targets is None
+                or frame.object_clouds_world is None
+                or ui.channel not in self._channel_names):
+            for h in self._handles:
+                h.visible = False
+            return
         c = self._channel_names.index(ui.channel)
         env = frame.targets.env_interaction.per_object
         for k, h in enumerate(self._handles):
+            # Aligner sur les données disponibles : handle sans nuage → masquer
+            if k >= len(frame.object_clouds_world) or k >= len(env):
+                h.visible = False
+                continue
             pts = np.asarray(frame.object_clouds_world[k], np.float32)
             if ui.color_mode == "distance":
                 col = colors.heat_distance(env[k].distance[c], self._margin)

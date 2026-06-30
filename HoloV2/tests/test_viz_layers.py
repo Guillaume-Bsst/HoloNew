@@ -1,7 +1,6 @@
-"""Couches minces — conformité structurelle (chacune est une Layer avec le bon dossier). La
-conformité par-pixel du rendu est vérifiée par la comparaison manuelle (Task 12) ; ``update()`` est
-quasi-pur assignement de poignée donc il n'y a pas de test unitaire significatif par couche (cf.
-section tests du design)."""
+"""Couches minces — conformité structurelle et comportement de ``update()`` en cas de données
+manquantes. Chaque layer doit exposer le dossier GUI correct ET ne jamais lever en cas de données
+absentes (masquage silencieux du handle)."""
 import numpy as np
 import pytest
 
@@ -100,16 +99,24 @@ class FakePose:
         self.bone_pos = bone_pos
 
 
+# Sentinelle pour distinguer « non fourni » de « explicitement None »
+_UNSET = object()
+
+
 class FakeFrame:
-    """Fake VizFrame avec pose et vertices."""
-    def __init__(self, bone_pos=None, smpl_verts_world=None, human_cloud_world=None,
-                 object_clouds_world=None, human_field=None, targets=None):
+    """Fake VizFrame avec pose et vertices. Passer ``None`` à ``human_field`` ou ``targets``
+    produit vraiment ``None`` (utile pour tester les gardes no-op) ; omettre le paramètre
+    fournit des données valides par défaut."""
+    def __init__(self, bone_pos=None, smpl_verts_world=None, human_cloud_world=_UNSET,
+                 object_clouds_world=_UNSET, human_field=_UNSET, targets=_UNSET):
         self.pose = FakePose(bone_pos)
         self.smpl_verts_world = smpl_verts_world
-        self.human_cloud_world = human_cloud_world if human_cloud_world is not None else np.random.randn(10, 3).astype(np.float32)
-        self.object_clouds_world = object_clouds_world if object_clouds_world is not None else [np.random.randn(10, 3).astype(np.float32)]
-        self.human_field = human_field if human_field is not None else FakeField(2, 10)
-        self.targets = targets if targets is not None else FakeTargets(1, 2, 10)
+        self.human_cloud_world = (np.random.randn(10, 3).astype(np.float32)
+                                  if human_cloud_world is _UNSET else human_cloud_world)
+        self.object_clouds_world = ([np.random.randn(10, 3).astype(np.float32)]
+                                    if object_clouds_world is _UNSET else object_clouds_world)
+        self.human_field = FakeField(2, 10) if human_field is _UNSET else human_field
+        self.targets = FakeTargets(1, 2, 10) if targets is _UNSET else targets
 
 
 class FakeUiState:
@@ -195,3 +202,139 @@ def test_ghost_layer_update_with_valid_verts():
     # Le handle doit être créé et visible
     assert layer._handle is not None
     assert layer._handle.visible == True
+
+
+# ---------------------------------------------------------------------------
+# HumanCloudLayer — gardes no-op + chemin nominal
+# ---------------------------------------------------------------------------
+
+def test_human_cloud_update_human_field_none():
+    """Garde no-op : human_field=None → update() ne lève pas ET masque le handle."""
+    layer = HumanCloudLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(human_field=None)
+    layer.update(frame, FakeUiState())
+
+    assert layer._handle.visible == False
+
+
+def test_human_cloud_update_human_cloud_none():
+    """Garde no-op : human_cloud_world=None → update() ne lève pas ET masque le handle."""
+    layer = HumanCloudLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(human_cloud_world=None)
+    layer.update(frame, FakeUiState())
+
+    assert layer._handle.visible == False
+
+
+def test_human_cloud_update_unknown_channel():
+    """Garde no-op : canal inconnu → update() ne lève pas (pas de ValueError) ET masque le handle."""
+    layer = HumanCloudLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame()
+    ui = FakeUiState(channel="canal_inexistant")
+    layer.update(frame, ui)
+
+    assert layer._handle.visible == False
+
+
+def test_human_cloud_update_happy_path():
+    """Chemin nominal : données valides + canal connu → points/colors mis à jour, handle visible."""
+    layer = HumanCloudLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    pts = np.random.randn(10, 3).astype(np.float32)
+    frame = FakeFrame(human_cloud_world=pts)
+    ui = FakeUiState(channel="ground", color_mode="uniform")
+    layer.update(frame, ui)
+
+    assert layer._handle.points is not None
+    assert layer._handle.colors is not None
+    assert layer._handle.visible == True
+
+
+# ---------------------------------------------------------------------------
+# ObjectsLayer — gardes no-op + chemin nominal
+# ---------------------------------------------------------------------------
+
+def test_objects_update_targets_none():
+    """Garde no-op : targets=None → update() ne lève pas ET masque tous les handles."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(targets=None)
+    layer.update(frame, FakeUiState())
+
+    for h in layer._handles:
+        assert h.visible == False
+
+
+def test_objects_update_object_clouds_none():
+    """Garde no-op : object_clouds_world=None → update() ne lève pas ET masque tous les handles."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(object_clouds_world=None)
+    layer.update(frame, FakeUiState())
+
+    for h in layer._handles:
+        assert h.visible == False
+
+
+def test_objects_update_unknown_channel():
+    """Garde no-op : canal inconnu → update() ne lève pas ET masque tous les handles."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame()
+    ui = FakeUiState(channel="canal_inexistant")
+    layer.update(frame, ui)
+
+    for h in layer._handles:
+        assert h.visible == False
+
+
+class FakeContextTwoObjects(FakeContext):
+    """Contexte avec 2 objets pour tester les gardes d'index."""
+    n_objects = 2
+
+
+def test_objects_update_fewer_clouds_than_handles():
+    """Garde d'index : moins de nuages que de handles → pas d'IndexError, handles excédentaires masqués."""
+    # Contexte avec 2 handles mais seulement 1 nuage dans le frame
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContextTwoObjects())
+
+    # Un seul nuage pour 2 handles
+    single_cloud = [np.random.randn(10, 3).astype(np.float32)]
+    frame = FakeFrame(
+        object_clouds_world=single_cloud,
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+    )
+    layer.update(frame, FakeUiState())
+
+    # Le premier handle doit avoir des données, le second doit être masqué
+    assert layer._handles[0].points is not None
+    assert layer._handles[1].visible == False
+
+
+def test_objects_update_happy_path():
+    """Chemin nominal : données valides + canal connu → points/colors mis à jour, handle visible."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    pts = np.random.randn(10, 3).astype(np.float32)
+    frame = FakeFrame(
+        object_clouds_world=[pts],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+    )
+    ui = FakeUiState(channel="ground", color_mode="uniform")
+    layer.update(frame, ui)
+
+    assert layer._handles[0].points is not None
+    assert layer._handles[0].colors is not None
+    assert layer._handles[0].visible == True

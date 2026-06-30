@@ -28,7 +28,15 @@ class HumanCloudLayer:
 
     def update(self, frame: VizFrame, ui: UiState) -> None:
         """Rafraîchit les géométries et couleurs du nuage humain pour le frame courant,
-        selon le mode couleur sélectionné (uniforme / distance / masque actif)."""
+        selon le mode couleur sélectionné (uniforme / distance / masque actif).
+        No-op (masque la poignée) si les données sont absentes ou le canal inconnu."""
+        # Garde no-op : données manquantes ou canal inconnu → masquer et sortir
+        if (frame.human_field is None
+                or frame.human_cloud_world is None
+                or ui.channel not in self._channel_names):
+            if self._handle is not None:
+                self._handle.visible = False
+            return
         c = self._channel_names.index(ui.channel)
         field = frame.human_field
         if ui.color_mode == "distance":
