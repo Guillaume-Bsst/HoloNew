@@ -101,3 +101,24 @@ consommateurs solve se masquent. Couches/panels concernés :
 `app.py --solve` câble `BakeSource(solve=True)` + `RobotLayer` + `CostDashboard`. Invariant tenu :
 `viz` n'importe que les surfaces publiques (`solve.runner`/`solve.contracts`, `targets.Evaluator`) ;
 `targets`/`solve` restent inchangés.
+
+## Couches d'interaction (roadmap #3 / #4 / #6 / #7)
+
+Couches composables ajoutées au viewer prod (`app.py`), une par fichier `layers/`, lisant le SEUL
+view-model. Géométrie d'affichage pure (testée en unitaire) + classe `Layer` mince (handles viser
+persistants). Les deux premières sont **solve-gated** (no-op si `frame.solved is None`).
+
+| Couche | Fichier | Donnée (view-model) | Solve-gated |
+|---|---|---|---|
+| **Contacts (robot)** (#3) | `layers/contacts.py` · `ContactsLayer` | `targets.robot_interaction.field` (cible) vs `solved.contact_achieved.field` (atteint) sur `solved.robot_points_world` | oui |
+| **Correspondance SMPL↔G1** (#4) | `layers/correspondence.py` · `CorrespondenceLayer` | `human_cloud_world[ctx.correspondence.smpl_idx]` → `solved.robot_points_world` | oui |
+| **SDF iso (surface)** (#6) | `layers/sdf_iso.py` · `SdfIsoLayer` | bande `|d|<band` des `ctx.channels[c].sdf`, posée par `frame.pose` | non |
+| **Champ géodésique** (#7) | `layers/geodesic.py` · `GeodesicLayer` | `ctx.channels[c].geodesic` (points/normales + heat mono-source `geo[src]`), posée par `frame.pose` | non |
+
+Assets statiques consommés : `VizContext.channels` (chaque `Channel` porte `sdf` + `geodesic` +
+`object_idx`) et `VizContext.correspondence` — ajoutés au view-model et peuplés par `BakeSource` depuis
+l'`InteractionContext` de `prepare`.
+
+**Roadmap #5 « activité des contraintes » : hors périmètre / BLOQUÉ.** Afficher le slack par-contrainte
+exige que `solve/` l'exporte dans `Step`/`FrameInfo` (changement de contrat `solve`, pas une tâche viz) ;
+tant que `SolvedFrame` ne porte pas ce slack, #5 ne peut pas être une couche.
