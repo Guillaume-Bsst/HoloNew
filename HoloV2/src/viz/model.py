@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..prepare.contracts import SDF
+from ..prepare.contracts import Channel, CorrespondenceTable, SDF
 from ..targets.contracts import (ContactEval, FramePose, FrameTargets, MultiChannelField, StyleEval)
 
 
@@ -29,6 +29,11 @@ class VizContext:
     smpl_faces: np.ndarray               # (F, 3) int — topologie mesh SMPL (couche ghost)
     smpl_parents: np.ndarray             # (J,) int — parents d'os SMPL (couche skeleton)
     n_objects: int
+    # --- assets statiques d'interaction (consommés par les couches contacts/correspondence/sdf_iso/
+    # geodesic) : on porte les Channel COMPLETS (chaque Channel tient son SDF, sa GeodesicTable et son
+    # object_idx -> binding de pose), plus l'appariement SMPL<->robot. channel_names en reste dérivable.
+    channels: tuple[Channel, ...]           # ground (object_idx=None) + un par objet, ordre prepare
+    correspondence: CorrespondenceTable     # appariement statique SMPL<->robot (smpl_idx / link_idx)
     robot_urdf_path: Path                # G1 URDF (couche robot, phase B)
     has_solve: bool                      # True une fois que la Source cuit solve -> SolvedFrame
     ground_sdf: SDF                      # SDF du canal ground (channels[0]) — surface couche ground

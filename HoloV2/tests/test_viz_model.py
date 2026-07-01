@@ -4,7 +4,7 @@ pipeline réel (numpy-only, pas de viser)."""
 import numpy as np
 import pytest
 
-from src.prepare.contracts import SDF
+from src.prepare.contracts import Channel, CorrespondenceTable, SDF
 from src.targets.contracts import (FramePose, FrameTargets, MultiChannelField,
                                     RobotInteractionTargets, EnvironmentInteractionTargets, StyleTargets)
 from src.viz.model import SolvedFrame, VizContext, VizFrame
@@ -15,12 +15,35 @@ def _sdf() -> SDF:
                origin=np.zeros(3), spacing=0.1, name="ground")
 
 
+def _channels(n_objects: int = 0) -> tuple:
+    """Channels minimaux : ground + N objets factices."""
+    ground = Channel(name="ground", object_idx=None, sdf=_sdf(), geodesic=None)
+    objs = tuple(
+        Channel(name=f"obj{i}", object_idx=i, sdf=_sdf(), geodesic=None)
+        for i in range(n_objects)
+    )
+    return (ground,) + objs
+
+
+def _correspondence() -> CorrespondenceTable:
+    """CorrespondenceTable minimale (1 point) pour les tests unitaires."""
+    return CorrespondenceTable(
+        smpl_idx=np.array([0], dtype=np.int64),
+        link_idx=np.array([0], dtype=np.int64),
+        offset_local=np.zeros((1, 3), dtype=np.float64),
+        link_names=("link0",),
+    )
+
+
 def _ctx(n_objects: int = 0) -> VizContext:
     return VizContext(
         channel_names=tuple(["ground"] + [f"obj{i}" for i in range(n_objects)]),
         margin=0.05, style_link_names=("a", "b"),
         smpl_faces=np.zeros((4, 3), np.int64), smpl_parents=np.array([-1, 0, 1]),
-        n_objects=n_objects, robot_urdf_path=__import__("pathlib").Path("/tmp/g1.urdf"),
+        n_objects=n_objects,
+        channels=_channels(n_objects),
+        correspondence=_correspondence(),
+        robot_urdf_path=__import__("pathlib").Path("/tmp/g1.urdf"),
         has_solve=False, ground_sdf=_sdf())
 
 
@@ -56,6 +79,7 @@ def test_context_bad_channel_count_raises():
         VizContext(channel_names=("ground",), margin=0.05, style_link_names=(),
                    smpl_faces=np.zeros((4, 3), np.int64), smpl_parents=np.array([-1]),
                    n_objects=2,  # 2 objets mais seulement 1 nom de canal -> désaccord
+                   channels=_channels(2), correspondence=_correspondence(),
                    robot_urdf_path=__import__("pathlib").Path("/x"), has_solve=False, ground_sdf=_sdf())
 
 
@@ -63,6 +87,7 @@ def test_context_bad_faces_raises():
     with pytest.raises(ValueError):
         VizContext(channel_names=("ground",), margin=0.05, style_link_names=(),
                    smpl_faces=np.zeros((4, 4), np.int64), smpl_parents=np.array([-1]), n_objects=0,
+                   channels=_channels(0), correspondence=_correspondence(),
                    robot_urdf_path=__import__("pathlib").Path("/x"), has_solve=False, ground_sdf=_sdf())
 
 

@@ -133,7 +133,10 @@ class BakeSource:
             for f in shown
         ]
 
-        # Contexte statique de la scène — construit UNE FOIS depuis grounded/ctx
+        # Contexte statique de la scène — construit UNE FOIS depuis grounded/ctx.
+        # channels + correspondence : simple ré-exposition depuis l'InteractionContext (pas de
+        # recompute — règle d'or : consommateur pur). Channel/CorrespondenceTable sont numpy-only,
+        # donc ce module reste viser/torch-free.
         self._context = VizContext(
             channel_names=ctx.channel_names,
             margin=float(ctx.margin),
@@ -141,6 +144,8 @@ class BakeSource:
             smpl_faces=np.asarray(body.faces),
             smpl_parents=np.asarray(body.parents),  # type: ignore[attr-defined]
             n_objects=grounded.n_objects,
+            channels=ctx.channels,                 # Channel complets (sdf + geodesic + object_idx)
+            correspondence=ctx.correspondence,     # appariement SMPL<->robot statique
             robot_urdf_path=spec.robot.urdf_path,
             has_solve=solve,
             ground_sdf=ctx.channels[0].sdf,
