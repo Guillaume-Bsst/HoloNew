@@ -59,6 +59,32 @@ $PY -c "import sys; print(sys.executable)"   # doit pointer vers .../envs/holone
 
 ## 1. Visualiseurs (viser, dans le navigateur → http://localhost:8080)
 
+### 🎬 Démos prêtes à l'emploi (copier-coller)
+
+> Prérequis : le **Setup §0** (`export PY=…`, `export HOLOV2=…`, `cd "$HOLOV2"`) + un `paths.toml`
+> configuré (le tien l'est). Puis ouvre **http://localhost:8080**. Séquences ci-dessous vérifiées
+> présentes sur cette machine.
+
+```bash
+# ── DÉMO A · humain + cibles (pré-solve, rapide) — HODome "baseball" (avec objet)
+$PY -m src.viz.app --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 30
+
+# ── DÉMO B · ⭐ LE ROBOT G1 RÉSOLU + cost dashboard (un solve/frame → max-frames bas, ~1 min de bake)
+$PY -m src.viz.app --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 8 --solve
+
+# ── DÉMO C · locomotion sans objet — SFU jogging (ajoute --solve pour le robot)
+$PY -m src.viz.app --dataset sfu --motion-path 0005/0005_Jogging001_stageii.npz --max-frames 30
+
+# ── DÉMO D · check INSTANTANÉ sans aucune donnée — SDF d'un sol plan (pure géométrie)
+$PY -m src.viz.debug.sdf --plane 4.0 --spacing 0.02
+```
+
+Dans le navigateur : les dossiers de gauche = une checkbox par couche (actives **même en pause**).
+Avec `--solve`, coche **robot G1 résolu** / **contact cible↔atteint** / **lignes SMPL↔G1** ; le panel
+**cost dashboard** trace le coût par terme (frames non-convergées en rouge). Port occupé → `fuser -k 8080/tcp`.
+
+### Détail des flags
+
 Le viewer prod (`src.viz.app`) + les debug `scene`/`cloud` partagent les mêmes flags de scène :
 `--dataset`, `--motion-path`, `--model-dir`, `--dataset-root` (objets/betas), `--port 8080`,
 `--frame-step N`, `--max-frames N`, `--person-id`, `--object-names a,b`. (`debug.sdf` et
