@@ -186,6 +186,12 @@ class BakeSource:
         """Nombre de frames cuits disponibles via ``get``."""
         return len(self._frames)
 
+    @property
+    def frames(self) -> list[VizFrame]:
+        """Séquence complète des frames cuits — utilisée par les panels qui lisent toute la
+        séquence (ex. CostDashboard agrège ``solved.cost_by_term`` sur tous les frames)."""
+        return list(self._frames)
+
     def get(self, i: int) -> VizFrame:
         """Retourne le ``VizFrame`` cuit à l'index ``i``."""
         return self._frames[int(i)]

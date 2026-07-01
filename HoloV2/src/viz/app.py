@@ -21,20 +21,32 @@ from .layers.ghost import GhostLayer
 from .layers.ground import GroundLayer
 from .layers.human_cloud import HumanCloudLayer
 from .layers.objects import ObjectsLayer
+from .layers.robot import RobotLayer
 from .layers.skeleton import SkeletonLayer
 from .layers.style import StyleLayer
+from .panels.cost_dashboard import CostDashboard
 from .sources import BakeSource
 
 
 def run_app(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_frames: int = 200,
             solve: bool = False) -> None:
-    """Construit BakeSource -> Player -> les 7 couches portées -> sert. ``solve`` (phase B) cuit le
-    côté robot ; laissé à False ici (la seam SolvedFrame est câblée mais pas remplie)."""
+    """Construit BakeSource -> Player -> les 8 couches portées (7 + RobotLayer) -> sert.
+
+    ``solve=True`` (phase B) :
+    - la source cuit ``SolvedFrame`` pour chaque frame (BakeSource exécute le solveur SQP) ;
+    - ``RobotLayer`` affiche le robot résolu (elle se masque d'elle-même si ``solved is None``) ;
+    - ``CostDashboard`` est ajouté comme panel et agrège les coûts sur toute la séquence.
+
+    ``solve=False`` : comportement identique à la phase A (7 couches + RobotLayer masquée,
+    aucun panel coût), non régressé."""
     source = BakeSource(spec, PrepareConfig(), solve=solve, frame_step=frame_step,
                         max_frames=max_frames)
+    # RobotLayer ajoutée toujours : elle se masque si frame.solved is None (solve désactivé)
     layers = [GroundLayer(), GhostLayer(), SkeletonLayer(), HumanCloudLayer(),
-              ObjectsLayer(), FieldsLayer(), StyleLayer()]
-    Player(source, layers, port=port).run()
+              ObjectsLayer(), FieldsLayer(), StyleLayer(), RobotLayer()]
+    # CostDashboard seulement utile avec solve (lit solved.* sur toute la séquence)
+    panels = [CostDashboard()] if solve else []
+    Player(source, layers, port=port, panels=panels).run()
 
 
 def main() -> None:

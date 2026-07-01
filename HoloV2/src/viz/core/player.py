@@ -19,19 +19,26 @@ from .layer import Layer, UiState
 
 class Player:
     """Pilote une liste de ``Layer`` sur une ``Source``. ``run()`` construit le serveur viser + la
-    GUI et sert; le pur ``_dispatch`` (frame -> chaque layer.update) est unit-testable sans viser."""
+    GUI et sert; le pur ``_dispatch`` (frame -> chaque layer.update) est unit-testable sans viser.
 
-    def __init__(self, source, layers: list[Layer], *, port: int = 8080) -> None:
-        """Initialise le joueur avec une source et une liste de couches.
+    ``panels`` : panels 2D optionnels (ex. ``CostDashboard``) dont le ``setup(server, gui, frames)``
+    est appelé une seule fois dans ``run()``, après les couches. Les panels lisent toute la séquence
+    (fournie via ``source.frames`` si disponible, sinon reconstituée via ``source.get``)."""
+
+    def __init__(self, source, layers: list[Layer], *, port: int = 8080,
+                 panels: list | None = None) -> None:
+        """Initialise le joueur avec une source, une liste de couches et des panels optionnels.
 
         Args:
-            source: Source (duck-typed: .context, .n_frames, .get(i)).
+            source: Source (duck-typed: .context, .n_frames, .get(i), optionnel .frames).
             layers: Liste de Layer à piloter.
             port: Port viser (défaut 8080).
+            panels: Panels 2D additionnels (ex. CostDashboard) setup une fois avec toute la séquence.
         """
         self.source = source
         self.layers = list(layers)
         self.port = port
+        self.panels = list(panels) if panels else []
 
     @property
     def n_frames(self) -> int:
@@ -71,6 +78,17 @@ class Player:
         # Initialise chaque couche
         for layer in self.layers:
             layer.setup(srv, srv.gui, ctx)
+
+        # Initialise les panels (une seule fois avec toute la séquence)
+        if self.panels:
+            # Récupère la séquence complète : .frames si la source l'expose (BakeSource),
+            # sinon reconstituée via get() (source quelconque).
+            all_frames = (
+                self.source.frames if hasattr(self.source, "frames")
+                else [self.source.get(i) for i in range(self.n_frames)]
+            )
+            for panel in self.panels:
+                panel.setup(srv, srv.gui, all_frames)
 
         def render(_=None):
             """Callback de rendu : récupère le frame courant, assemble l'UiState, dispatche aux
