@@ -10,6 +10,7 @@ l'erreur de parité, conversion quaternion→R) est déjà couverte par ``debug.
 provient bien de ``core.player`` (pas re-roulé dans le viewer). Aucune nouvelle op pure n'est
 ajoutée dans ``scene.py``, donc un smoke structurel suffit."""
 from src.viz.core.colors import diverging, parity  # noqa: F401  (utilisés dans les tâches 4–6)
+from src.viz.core.geometry import node_coords
 from src.viz.core.player import play_loop
 
 
@@ -36,7 +37,7 @@ def test_sdf_imports():
     from src.viz.debug import sdf
     assert callable(sdf.view_sdf) and callable(sdf.main)
     assert sdf.diverging is diverging                       # consomme core/colors.diverging
-    assert callable(sdf.node_coords)                        # consomme le helper pur core.geometry
+    assert sdf.node_coords is node_coords                   # consomme le helper pur core.geometry (identité)
 
 
 def test_hoim3_imports():
