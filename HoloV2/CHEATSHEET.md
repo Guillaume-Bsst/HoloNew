@@ -81,26 +81,26 @@ $PY -m src.viz.app --dataset hodome \
     --max-frames 30 --frame-step 2 --port 8080
 ```
 
-### Étapes de debug incrémentales (viewers focalisés)
+### Étapes de debug incrémentales (viewers focalisés — `src/viz/debug/`)
 
 ```bash
-# scene.py : étape load/grounding (mesh SMPL posé, squelette, objets, sol)
-$PY -m src.viz.scene  --dataset hodome \
+# debug/scene.py : étape load/grounding (mesh SMPL posé, squelette, objets, sol)
+$PY -m src.viz.debug.scene  --dataset hodome \
     --motion-path $DATA/HODome/smplx/subject01_baseball.npz \
     --model-dir $SMPLX --dataset-root $DATA/HODome --max-frames 30
 
-# cloud.py : bake du point_cloud (nuage humain posé + nuages objets) ; --corr = table OT
-$PY -m src.viz.cloud  --dataset hodome \
+# debug/cloud.py : bake du point_cloud (nuage humain posé + nuages objets) ; --corr = table OT
+$PY -m src.viz.debug.cloud  --dataset hodome \
     --motion-path $DATA/HODome/smplx/subject01_baseball.npz \
     --model-dir $SMPLX --dataset-root $DATA/HODome \
     --corr cache/correspondence/corr_neutral.npz --max-frames 30
 
-# sdf.py : inspecter un SDF (objet/terrain) ou un sol plan
-$PY -m src.viz.sdf --mesh models/largebox/largebox.obj --spacing 0.02 --margin 0.05
-$PY -m src.viz.sdf --plane 4.0 --spacing 0.02         # sol plat 4×4 m
+# debug/sdf.py : inspecter un SDF (objet/terrain) ou un sol plan
+$PY -m src.viz.debug.sdf --mesh models/largebox/largebox.obj --spacing 0.02 --margin 0.05
+$PY -m src.viz.debug.sdf --plane 4.0 --spacing 0.02         # sol plat 4×4 m
 
-# hoim3_multiperson.py : scène multi-personnes (HOI-M3)
-$PY -m src.viz.hoim3_multiperson --motion-path <human.npz> --model-dir $SMPLX --max-frames 30
+# debug/hoim3.py : scène multi-personnes (HOI-M3)
+$PY -m src.viz.debug.hoim3 --motion-path <human.npz> --model-dir $SMPLX --max-frames 30
 ```
 
 ### Autres datasets (mêmes flags, change `--dataset` + chemins)

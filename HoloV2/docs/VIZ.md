@@ -52,11 +52,25 @@ sa checkbox bascule la visibilité localement.
 run()`. CLI : `python -m src.viz.app --motion-path … --model-dir … [--dataset … --max-frames …]`
 (flags partagés via `_scene_args`). `viz.run_app` / `viz.main` sont re-exportés.
 
-## Viewers de debug par étape
+## Visualiseurs de debug incrémentaux (par étape) — réécrits sur `viz/core`
 
-`viz/scene.py` · `viz/cloud.py` · `viz/sdf.py` · `viz/hoim3_multiperson.py` — consommateurs purs
-focalisés par étape (load / point_cloud / sdf / multi-personne). Leur réécriture sur `core/` est la
-**phase 6** de la migration (indépendante des couches prod).
+Des viewers focalisés valident chaque étape (consommateurs purs, viser confiné à `core/viser_ops` +
+le viewer, socle `core/` partagé : Player/colors/viser_ops). Ils gardent le droit de **piloter les
+internes de l'étage** qu'ils visualisent (exception ARCHITECTURE.md) :
+
+- `viz/debug/scene.py` : étape **load/grounding** (mesh SMPL posé, squelette, objets, sol, debug
+  grounding : offsets, slider foot-percentile, marqueurs point-bas).
+  `python -m src.viz.debug.scene`.
+- `viz/debug/cloud.py` : bake **`point_cloud`** — nuage humain posé par `pose_cloud` (coloré par la
+  parité vs surface SMPL pleine, `core.colors.parity`) + nuages objets rigides.
+  `python -m src.viz.debug.cloud`.
+- `viz/debug/sdf.py` : build **`prepare/sdf`** — tranche/bande/witness, `core.colors.diverging`
+  (parser propre `--mesh`/`--plane`, pas de frames donc pas de Player).
+  `python -m src.viz.debug.sdf`.
+- `viz/debug/hoim3.py` : **load multi-personnes** HOI-M3 (toutes les personnes + objets).
+  `python -m src.viz.debug.hoim3`.
+- `viz/debug/_args.py` : glue CLI partagée (ex-`_scene_args.py`) ; `viz/debug/_geometry.py` :
+  helpers géométriques purs testés (point-bas, surface barycentrique de parité, node_coords).
 
 ## Tests
 
