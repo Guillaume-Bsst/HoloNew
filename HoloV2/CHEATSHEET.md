@@ -59,26 +59,44 @@ $PY -c "import sys; print(sys.executable)"   # doit pointer vers .../envs/holone
 
 ## 1. Visualiseurs (viser, dans le navigateur → http://localhost:8080)
 
-Tous les viewers partagent les mêmes flags : `--dataset`, `--motion-path`, `--model-dir`,
-`--dataset-root` (objets/betas), `--port 8080`, `--frame-step N`, `--max-frames N`,
-`--person-id`, `--object-names a,b`. **Garde `--max-frames` bas** (debug : 3–30) — un bake long est lent.
+Le viewer prod (`src.viz.app`) + les debug `scene`/`cloud` partagent les mêmes flags de scène :
+`--dataset`, `--motion-path`, `--model-dir`, `--dataset-root` (objets/betas), `--port 8080`,
+`--frame-step N`, `--max-frames N`, `--person-id`, `--object-names a,b`. (`debug.sdf` et
+`debug.hoim3` ont **leurs propres parsers** — voir plus bas.) **Garde `--max-frames` bas** (debug :
+3–30 ; **3–10 avec `--solve`**) — un bake long est lent, un solve par frame encore plus.
 
-### Viewer principal — `FrameTrace` (humain + cibles style/interaction)
+> 💡 Libère le port D'ABORD si besoin : `fuser -k 8080/tcp` (ne jamais `pkill -f` le script viewer :
+> il se tuerait lui-même).
+
+### Viewer principal unifié — `src.viz.app` (humain/cibles **+ robot résolu**)
+
+`BakeSource → Player → 12 couches composables`, chacune avec sa checkbox (actives **même en pause**) :
+sol (SDF réel) · ghost SMPL · squelette · clouds objets · champ humain (witness/normales) · cibles
+style (points/frames/labels) · **robot G1 résolu** · contact cible-vs-atteint · lignes SMPL↔G1 ·
+iso-surface SDF · champ géodésique. GUI : dossier **Playback** (slider/play/fps) + **Selectors**
+(canal / mode couleur uniform-distance-active / taille des points).
 
 ```bash
-# Forme courte (lit [models].smplx + [datasets.<nom>] depuis paths.toml ; motion relative à `motion`)
+# Pré-solve (humain + cibles ; le robot et les couches solve-gated restent masqués)
+# Forme courte : lit [models].smplx + [datasets.<nom>] de paths.toml ; --motion-path relatif à `motion`
 $PY -m src.viz.app --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 30
 $PY -m src.viz.app --dataset sfu    --motion-path 0005/0005_Jogging001_stageii.npz --max-frames 30
-# OMOMO : motion relative à [datasets.omomo].motion (= OMOMO_new) — plus besoin d'absolu
 $PY -m src.viz.app --dataset omomo  --motion-path sub10_clothesstand_000.pt --max-frames 30
 ```
 
 ```bash
-# HODome (objets) — exemple complet
+# --solve : BakeSource lance le solveur SQP par frame → rend le G1 RÉSOLU (ViserUrdf) superposé à
+#           l'humain/aux cibles + active le panel "cost dashboard" (coût par terme empilé sur la
+#           séquence, frames non-convergées marquées en rouge). Lent → garde --max-frames très bas.
+$PY -m src.viz.app --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 8 --solve
+```
+
+```bash
+# HODome (objets) — exemple complet, chemins explicites (marche sans paths.toml)
 $PY -m src.viz.app --dataset hodome \
     --motion-path $DATA/HODome/smplx/subject01_baseball.npz \
     --model-dir $SMPLX --dataset-root $DATA/HODome \
-    --max-frames 30 --frame-step 2 --port 8080
+    --max-frames 30 --frame-step 2 --port 8080 [--solve]
 ```
 
 ### Étapes de debug incrémentales (viewers focalisés — `src/viz/debug/`)
@@ -219,7 +237,7 @@ print(prof.render())          # arbre des spans + durées
 | `docs/ARCHITECTURE.md` | structure complète + flux `prepare → targets → solve` |
 | `docs/PREPARE.md` | étage offline (load, calibration, sdf, point_cloud, correspondence) |
 | `docs/TARGETS.md` | étage online per-frame (interaction + style) |
-| `docs/VIZ.md` | viewer `FrameTrace` + viewers de debug par étape |
+| `docs/VIZ.md` | viewer unifié `app` (seam `Source→VizFrame→Layers`, robot résolu, cost dashboard) + viewers debug sous `debug/` |
 | `docs/CACHE.md` | stratégie de cache par dépendance |
 | `docs/OBS.md` | `obs.Profile` (spans, profiling) |
 </content>
