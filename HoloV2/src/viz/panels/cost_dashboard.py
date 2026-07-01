@@ -57,7 +57,8 @@ def _render_chart(names, mat, total, status) -> np.ndarray:
     Retourne une image RGB uint8 (H, W, 3) passable à ``gui.add_image``."""
     # Import différé : matplotlib n'est pas nécessaire au niveau module (tests purs headless)
     import matplotlib
-    matplotlib.use("Agg")
+    if matplotlib.get_backend().lower() != "agg":
+        matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     F = mat.shape[0]
@@ -72,7 +73,7 @@ def _render_chart(names, mat, total, status) -> np.ndarray:
     ax.plot(x, total, color="k", lw=1.5, label="total")
 
     # Marqueurs rouges pour les frames non-convergées
-    bad = [i for i, st in enumerate(status) if st not in _OK]
+    bad = [i for i, st in enumerate(status) if st not in _OK and st]
     if bad:
         ax.scatter(bad, total[np.asarray(bad)], color="r", zorder=5, s=20, label="non-converged")
 
