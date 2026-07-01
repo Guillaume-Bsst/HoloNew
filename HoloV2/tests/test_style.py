@@ -206,18 +206,23 @@ def test_style_on_real_data(tmp_path, capsys):
     assert np.isfinite(min_foot_z)
 
 
-def test_style_default_scales_root_xy_by_ratio():
-    """Défaut SceneScaleConfig() = None,None -> ratio partout : le xy du root (pelvis) est scalé par
-    ratio (alors que le natif le garde brut)."""
+def test_style_default_scales_root_xy_by_scene_ratio_z_by_morph():
+    """Le xy du root (pelvis) suit le ratio de PLACEMENT de scène ``robot.height/stature`` (trajectoire
+    cohérente avec les objets), tandis que le z du root suit le ratio MORPHOLOGIE ``stature/human_height``
+    (table GMR, inchangée). Le natif (scale_xy=1.0) garde le xy brut."""
     pose = _synthetic_pose()
     stature = 0.9
-    ratio = stature / _CFG.human_height_assumption                    # 0.5
-    st_default = style.build(pose, _robot(), stature=stature)         # SceneScaleConfig() défaut
-    st_native = style.build(pose, _robot(), stature=stature, scene=SceneScaleConfig(scale_xy=1.0))
+    robot = _robot()
+    ratio_scene = robot.height / stature                             # 1.3 / 0.9 (placement scène)
+    ratio_morph = stature / _CFG.human_height_assumption             # 0.5 (morphologie corps)
+    st_default = style.build(pose, robot, stature=stature)           # SceneScaleConfig() défaut
+    st_native = style.build(pose, robot, stature=stature, scene=SceneScaleConfig(scale_xy=1.0))
     i = st_default.link_names.index("pelvis")
     root = pose.bone_pos[SMPL_BODY_INDEX["pelvis"]]
-    # défaut : pelvis xy = ratio * root_xy ; natif : pelvis xy = root_xy
-    np.testing.assert_allclose(st_default.position[i][:2], root[:2] * ratio, atol=1e-9)
+    # défaut : pelvis xy = ratio_scene * root_xy (robot/stature) ; natif : pelvis xy = root_xy brut
+    np.testing.assert_allclose(st_default.position[i][:2], root[:2] * ratio_scene, atol=1e-9)
     np.testing.assert_allclose(st_native.position[i][:2], root[:2], atol=1e-9)
-    # z identique dans les deux (z = scale_torso_legs * ratio * root_z, scale_z=None dans les deux)
+    # z du root = morphologie GMR (scale_torso_legs * ratio_morph), identique défaut/natif (scale_z=None)
+    exp_z = _CFG.ground_height + (root[2] - _CFG.ground_height) * _CFG.scale_torso_legs * ratio_morph
+    np.testing.assert_allclose(st_default.position[i][2], exp_z, atol=1e-9)
     np.testing.assert_allclose(st_default.position[i][2], st_native.position[i][2], atol=1e-9)

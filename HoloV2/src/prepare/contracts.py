@@ -44,9 +44,10 @@ class BodyModel(Protocol):
     faces: np.ndarray  # (F, 3) int — topologie, frame-invariant
     n_bones: int       # J_bones (52 SMPL-H / 55 SMPL-X)
     stature: float     # stature au repos du sujet (m), betas-FK — propriété pure rest-mesh (pas de mouvement).
-                       # Vit sur le corps (son propriétaire naturel), PAS sur la calibration ; alimente
-                       # le ratio du style : ``ratio = stature / StyleConfig.human_height_assumption``,
-                       # appliqué dans ``targets`` via ``targets.config.SceneScaleConfig``.
+                       # Vit sur le corps (son propriétaire naturel), PAS sur la calibration. Alimente DEUX
+                       # ratios dans ``targets`` : MORPHOLOGIE du corps ``stature/StyleConfig.human_height_assumption``
+                       # (z du pelvis + membres, dans ``style.build``) ET PLACEMENT de scène
+                       # ``RobotSpec.height/stature`` (xy du root + objets + sol, via ``SceneScaleConfig``).
 
     def posed_vertices(self, params: "SmplParams", t: int) -> np.ndarray:
         """(V, 3) sommets mesh monde au frame ``t`` (usage offline : sampling, viz)."""
@@ -125,11 +126,12 @@ class RobotSpec:
     urdf_path: Path
     link_names: tuple[str, ...]
     dof: int
-    height: float                  # hauteur robot nominale (m) ; NON utilisée par la calibration
-                                   # (robot-free). L'échelle de scène des refs n'utilise PAS
-                                   # ``robot_height/stature`` — elle utilise
-                                   # ``ratio = stature / StyleConfig.human_height_assumption``
-                                   # (ratio du style), appliqué dans ``targets.config.SceneScaleConfig``.
+    height: float                  # hauteur robot nominale (m) ; NON utilisée par la calibration (robot-free).
+                                   # UTILISÉE par l'échelle de PLACEMENT de scène des refs :
+                                   # ``ratio_scene = robot.height / stature`` (trajectoire du root en xy +
+                                   # objets xy/z + sol) — la scène est ramenée à la stature réelle du robot.
+                                   # Distinct du ratio MORPHOLOGIE du corps
+                                   # (``stature / StyleConfig.human_height_assumption``, dans ``style.build``).
 
 
 @dataclass(frozen=True)
@@ -229,9 +231,10 @@ class Calibration:
     """ANCRAGE per-(sujet, prise). ROBOT-FREE *ET* BODY-FREE : construit à partir des joints démo mocap
     (sol humain) et des meshes/poses objets (sol objet) seuls — pas de betas/body nécessaires — donc
     cache par prise indépendamment du robot cible. La ``stature`` du sujet vit sur ``BodyModel`` (son
-    propriétaire naturel rest-mesh), et l'échelle human→robot n'y appartient PAS — l'échelle de scène
-    des refs utilise ``ratio = stature / StyleConfig.human_height_assumption`` (le ratio du style),
-    appliquée dans ``targets`` via ``targets.config.SceneScaleConfig``.
+    propriétaire naturel rest-mesh), et l'échelle human→robot n'y appartient PAS — l'échelle de PLACEMENT
+    de scène des refs utilise ``ratio_scene = RobotSpec.height / stature`` (objets + sol + xy du root),
+    appliquée dans ``targets`` via ``targets.config.SceneScaleConfig`` ; distincte du ratio MORPHOLOGIE
+    du corps (``stature / StyleConfig.human_height_assumption``, dans ``style.build``).
 
     Mono-humain, multi-objet : l'humain et les objets s'ancrent chacun par leur PROPRE décalage z
     (l'humain peut flotter tandis que les objets reposent déjà au sol, donc un décalage scène partagé

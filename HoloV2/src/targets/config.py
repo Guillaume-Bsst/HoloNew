@@ -56,10 +56,11 @@ class SceneScaleConfig:
     finale sur les RÉFÉRENCES (jamais avant l'éval des contacts). Similarité diagonale ancrée
     statiquement : xy autour de l'origine monde, z autour du sol (``StyleConfig.ground_height``).
 
-    ``None`` => le facteur de cet axe est ``ratio = stature / StyleConfig.human_height_assumption``
-    (le MÊME ratio que le style, pour la cohérence style↔interaction). Un float = facteur fixe.
-    Défaut ``(None, None)`` => ``ratio`` partout. ``scale_xy=1.0, scale_z=None`` reproduit le
-    comportement style natif (xy non scalé, z par ``ratio``)."""
+    ``None`` => le facteur de cet axe est le ratio de PLACEMENT de scène ``ratio_scene =
+    RobotSpec.height / stature`` (la scène ramenée à la stature réelle du robot ; le MÊME ratio que
+    le xy du root de ``style``, pour la cohérence robot↔objets). Un float = facteur fixe.
+    Défaut ``(None, None)`` => ``ratio_scene`` partout. ``scale_xy=1.0`` fige le xy non scalé.
+    NB : le z du root robot suit la MORPHOLOGIE (``stature/human_height_assumption``), pas ce ratio."""
 
     scale_xy: float | None = None   # facteur xy autour de l'origine ; None -> ratio
     scale_z: float | None = None    # facteur z autour du sol ; None -> ratio

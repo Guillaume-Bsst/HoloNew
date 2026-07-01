@@ -51,20 +51,26 @@ def build(pose: FramePose, robot: RobotSpec, stature: float,
     pos_offset dans le frame ré-orienté).
     """
     table = style_table(robot.name)
+    # DEUX ratios distincts (voir contrat RobotSpec.height) :
+    #  * ratio_morph = stature / human_height_assumption -> MORPHOLOGIE du corps (z du pelvis via
+    #    scale_torso_legs + longueurs de membres) : la table GMR portée, robot encodé dans scale_*.
+    #  * ratio_scene = robot.height / stature -> PLACEMENT de scène (xy du root/trajectoire) : ramène la
+    #    scène à la stature RÉELLE du robot, cohérent avec le scaling objets/sol de ``pipeline`` (même
+    #    ancre origine/sol) pour que la géométrie robot<->objet reste consistante.
     ratio = stature / cfg.human_height_assumption
+    ratio_scene = robot.height / stature
 
     bone_rot = np.asarray(pose.bone_rot, np.float64)                   # (J_bones, 3, 3)
     bone_pos = np.asarray(pose.bone_pos, np.float64)                   # (J_bones, 3)
 
     # Ancre SCALE : la position mondiale du root (pelvis) place rigidement le squelette entièrement scalé.
-    # Défaut SceneScaleConfig() (None,None) → s_xy=ratio, s_z=ratio (xy ET z scalés par ratio).
-    # scale_xy=1.0, scale_z=None reproduit le natif (xy brut, z morphologique·ratio). Les proportions du
-    # corps (pelvis-local) restent inchangées sinon.
+    # xy du root = PLACEMENT de scène (ratio_scene = robot/stature) autour de l'origine — cohérent avec
+    # les objets/sol de ``pipeline``. z du root = MORPHOLOGIE (scale_torso_legs · ratio_morph) autour du
+    # sol. Défaut SceneScaleConfig() (None,None) prend le ratio de chaque axe ; scale_xy=1.0 force le xy
+    # brut (natif GMR), scale_z override la morphologie z. Les proportions du corps (pelvis-local) sinon inchangées.
     root_pos = bone_pos[SMPL_BODY_INDEX[ROOT_BODY]]                    # (3,)
-    # PLACEMENT du root via l'échelle de scène (None -> ratio) ; xy autour de l'origine, z autour du
-    # sol. Le morphologique du pelvis (scale_torso_legs, le pelvis est torse/jambes) reste sur z.
-    # scale_xy=1.0, scale_z=None reproduit le natif : xy brut, z = scale_torso_legs * ratio.
-    s_xy, s_z = resolve_scale(scene, ratio)
+    s_xy, _ = resolve_scale(scene, ratio_scene)   # xy du root = PLACEMENT scène (robot/stature)
+    _, s_z = resolve_scale(scene, ratio)          # z du root  = MORPHOLOGIE GMR (stature/human_height)
     base_z = cfg.scale_torso_legs * s_z
     scaled_root = np.array([root_pos[0] * s_xy, root_pos[1] * s_xy,
                             cfg.ground_height + (root_pos[2] - cfg.ground_height) * base_z])

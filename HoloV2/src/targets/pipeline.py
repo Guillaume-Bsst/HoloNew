@@ -87,7 +87,10 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
                 for i, ow in enumerate(object_worlds))
         with prof.span("interaction.transport"):
             robot_field = transport(human_field, ctx.correspondence)
-        ratio = grounded.body.stature / cfg.style.human_height_assumption
+        # PLACEMENT de scène (trajectoire objets xy+z + sol) = robot/humain : la scène est ramenée à la
+        # stature RÉELLE du robot (même ancre origine/sol que le xy du root de ``style``). Distinct du
+        # ratio MORPHOLOGIE du corps (stature/human_height, appliqué DANS style.build). Voir RobotSpec.height.
+        ratio = robot.height / grounded.body.stature
         s_xy, s_z = resolve_scale(cfg.scene_scale, ratio)
         ground_h = cfg.style.ground_height
         scaled_object_pos = apply_scene_scale(pose.object_pos, s_xy, s_z, ground_h)  # (N, 3) centre objet

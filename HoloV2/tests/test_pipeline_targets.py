@@ -107,7 +107,7 @@ def test_object_pos_scaled_by_scene():
     from src.targets.config import StyleConfig, TargetsConfig, SceneScaleConfig
     g, ctx = _grounded(n_obj=1), _ctx(n_obj=1)
     robot = RobotSpec(name="g1", urdf_path=Path("g1.urdf"), link_names=(), dof=29, height=1.3)
-    ratio = g.body.stature / StyleConfig().human_height_assumption          # 1.7 / 1.8
+    ratio = robot.height / g.body.stature                                   # PLACEMENT de scène = robot/humain (1.3 / 1.7)
     identity = TargetsConfig(scene_scale=SceneScaleConfig(scale_xy=1.0, scale_z=1.0))
     ft_native = process_frame(g, ctx, robot, f=0, cfg=identity)
     ft_scaled = process_frame(g, ctx, robot, f=0)                            # défaut None,None -> ratio
