@@ -1,7 +1,7 @@
 """BakeSource — la cuisson headless du vue-modèle sur les données HODome réelles (sans serveur
 viser). Déterminisme (build ×2 identique), formes/dtypes des VizFrame (nuages monde float32,
-solved=None), et le seam solve=True (NotImplementedError jusqu'à la phase B). Même garde de skip
-/ spec que test_viewer_bake.py."""
+solved=None). Le seam solve=True est testé dans test_viz_solved_frame.py (Phase B). Même garde de
+skip / spec que test_viewer_bake.py."""
 import shutil
 from pathlib import Path
 
@@ -89,7 +89,5 @@ def test_determinism_build_twice_identical(cache):
             assert np.array_equal(oa, ob)
 
 
-@_SKIP
-def test_solve_true_not_implemented(cache):
-    with pytest.raises(NotImplementedError):
-        BakeSource(_spec(cache), PrepareConfig(), solve=True, frame_step=8, max_frames=2)
+# test_solve_true_not_implemented supprimé en phase B : BakeSource(solve=True) est désormais
+# implémenté. Le comportement est vérifié dans tests/test_viz_solved_frame.py.
