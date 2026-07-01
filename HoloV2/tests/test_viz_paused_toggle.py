@@ -151,7 +151,13 @@ def _contacts_frame(*, solved: bool = True, M: int = 4) -> types.SimpleNamespace
 
 
 def _contacts_ctx() -> types.SimpleNamespace:
-    return types.SimpleNamespace(channel_names=("ground", "obj0"), margin=0.1)
+    # channels : nécessaire depuis l'ajout du witness (contacts.py accède ctx.channels[c].object_idx)
+    # canal 0 = ground (object_idx=None), canal 1 = obj0 (object_idx=0)
+    channels = (
+        types.SimpleNamespace(object_idx=None),  # ground : sol monde, pas de pose objet
+        types.SimpleNamespace(object_idx=0),      # obj0   : objet 0
+    )
+    return types.SimpleNamespace(channel_names=("ground", "obj0"), margin=0.1, channels=channels)
 
 
 def _corr_frame(*, solved: bool = True, M: int = 2) -> types.SimpleNamespace:
