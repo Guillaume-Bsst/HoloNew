@@ -127,12 +127,29 @@ _UNSET = object()
 
 
 class FakeSolvedFrame:
-    """Fake SolvedFrame avec object_poses (N, 7) — pose identité par défaut (xyz=0, qw=1)."""
-    def __init__(self, n_objects=1):
+    """Fake SolvedFrame avec object_poses (N, 7) — pose identité par défaut (xyz=0, qw=1).
+
+    ``style_achieved`` : StyleEval résolu ou None (None par défaut, pour les couches qui n'en
+    ont pas besoin comme ObjectsLayer ; renseigné pour tester le rendu résolu de StyleLayer)."""
+    def __init__(self, n_objects=1, style_achieved=None):
         # (N, 7) : [x, y, z, qw, qx, qy, qz] — quaternion identité
         poses = np.zeros((n_objects, 7), dtype=np.float64)
         poses[:, 3] = 1.0   # qw=1
         self.object_poses = poses
+        self.style_achieved = style_achieved
+
+
+def _fake_style_eval(n_links=2, nv=6):
+    """Construit un StyleEval réel (numpy-only, importable sans écran) pour tester le rendu
+    résolu de StyleLayer. Rotations = identité (colonnes = axes monde canoniques), positions
+    aléatoires. jac_pos/jac_rot sont des remplissages (non lus par la couche viz)."""
+    from src.targets.contracts import StyleEval
+    pos = np.random.randn(n_links, 3).astype(np.float64)                    # (L, 3)
+    rot = np.tile(np.eye(3, dtype=np.float64), (n_links, 1, 1))             # (L, 3, 3) identité
+    return StyleEval(
+        position=pos, rotation=rot,
+        jac_pos=np.zeros((n_links, 3, nv)), jac_rot=np.zeros((n_links, 3, nv)),
+        link_names=tuple(f"link_{chr(ord('a') + i)}" for i in range(n_links)))
 
 
 class FakeCheckboxCapture:
@@ -540,6 +557,101 @@ def test_style_update_style_none():
     assert layer._frames.visible == False
     for h in layer._labels:
         assert h.visible == False
+
+
+# ---------------------------------------------------------------------------
+# StyleLayer — cibles RÉSOLUES (solve-gaté, toggle repères, paused-toggle)
+# ---------------------------------------------------------------------------
+
+def test_style_solved_drawn_on_happy_frame():
+    """Chemin nominal résolu : solved.style_achieved peuplé + toggles ON (FakeCheckbox=True)
+    → points résolus == se.position, verts, visibles ; repères résolus = 3L segments visibles."""
+    layer = StyleLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+    # FakeCheckbox.value = True → _cb_p_sol et _cb_f_sol valent True
+
+    se = _fake_style_eval(n_links=2)
+    frame = FakeFrame(
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10, n_links=2),
+        solved=FakeSolvedFrame(n_objects=1, style_achieved=se),
+    )
+    layer.update(frame, FakeUiState())
+
+    # Points résolus : positions == se.position, visibles, verts distincts de l'orange de réf
+    assert np.allclose(layer._pts_sol.points, se.position)
+    assert layer._pts_sol.visible == True
+    assert not np.array_equal(layer._pts.colors[0], layer._pts_sol.colors[0])
+    # Repères résolus : 3 axes × L liens = 3L segments (chacun (2, 3)), visibles
+    assert layer._frames_sol.points.shape == (3 * 2, 2, 3)
+    assert layer._frames_sol.visible == True
+    # La référence reste rendue normalement (comportement historique intact)
+    assert layer._pts.points is not None
+    assert layer._pts.visible == True
+
+
+def test_style_solved_hidden_when_solved_none():
+    """Solve-gaté : frame.solved=None → handles résolus masqués, référence inchangée, sans lever."""
+    layer = StyleLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10, n_links=2),
+        solved=None,
+    )
+    layer.update(frame, FakeUiState())
+
+    # Résolu masqué
+    assert layer._pts_sol.visible == False
+    assert layer._frames_sol.visible == False
+    # Référence intacte
+    assert layer._pts.points is not None
+    assert layer._pts.visible == True
+    assert layer._frames.visible == True
+
+
+def test_style_solved_hidden_when_style_achieved_none():
+    """Solve-gaté : solved présent mais style_achieved=None → handles résolus masqués sans lever."""
+    layer = StyleLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    frame = FakeFrame(
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10, n_links=2),
+        solved=FakeSolvedFrame(n_objects=1, style_achieved=None),
+    )
+    layer.update(frame, FakeUiState())
+
+    assert layer._pts_sol.visible == False
+    assert layer._frames_sol.visible == False
+
+
+def test_style_solved_paused_toggle_redraws_frames():
+    """Paused-toggle : les repères résolus sont OFF par défaut (_cb_f_sol initial=False) ;
+    leur activation en pause re-dessine les repères résolus sans nudge du slider."""
+    gui = FakeGuiCapturing()
+    layer = StyleLayer()
+    layer.setup(FakeServer(), gui, FakeContext())
+    # Ordre des cases : 0=_cb_p, 1=_cb_f, 2=_cb_l, 3=_cb_p_sol, 4=_cb_f_sol
+    assert gui.checkboxes[4].value is False   # repères résolus OFF par défaut
+
+    se = _fake_style_eval(n_links=2)
+    frame = FakeFrame(
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10, n_links=2),
+        solved=FakeSolvedFrame(n_objects=1, style_achieved=se),
+    )
+    ui = FakeUiState()
+
+    # 1ère update : _cb_f_sol=False → repères résolus masqués ; points résolus visibles (_cb_p_sol=True)
+    layer.update(frame, ui)
+    assert layer._frames_sol.visible == False
+    assert layer._pts_sol.visible == True
+
+    # Activation du toggle repères résolus EN PAUSE (sans nudge du slider)
+    gui.checkboxes[4].value = True
+    gui.checkboxes[4].fire(None)   # déclenche _on_change → re-invoque update()
+
+    # Les repères résolus doivent maintenant être visibles sans nouvel appel manuel à update()
+    assert layer._frames_sol.visible == True
+    assert layer._frames_sol.points.shape == (3 * 2, 2, 3)
 
 
 # ---------------------------------------------------------------------------

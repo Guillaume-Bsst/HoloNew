@@ -13,6 +13,12 @@ sélectionné, dessinées via ``_contact_ops.witness_segments``.
     canal est un canal objet, sinon identité (canal sol déjà en monde).
   - Witness ATTEINT : mappé via la pose objet RÉSOLUE (``solved.object_poses[oi]``).
 
+Ajout : lignes normales de contact (sonde → sonde + normale·length) pour les mêmes probes actives,
+dessinées via ``_contact_ops.normal_segments``. La normale est un vecteur direction (« surface →
+point ») : mappage local→monde par ROTATION SEULE de la pose canal RÉSOLUE (identité pour le sol).
+  - Normale CIBLE  : ``tgt.direction[c]`` mappée par ``R_sol``, ancrée aux sondes robot.
+  - Normale ATTEINT : ``ach.direction[c]`` mappée par le même ``R_sol``.
+
 Couche SOLVE-GATED : sans ``solved`` les M points n'ont pas de position monde -> masquée. Pure
 consommatrice ; viser confiné ici."""
 from __future__ import annotations
@@ -25,7 +31,7 @@ from ..core.layer import UiState
 from ..core.viser_ops import quat_wxyz_to_R
 from ..model import VizContext, VizFrame
 from ...targets.contracts import MultiChannelField
-from ._contact_ops import witness_segments
+from ._contact_ops import normal_segments, witness_segments
 
 # Teintes uniformes (uint8 RGB) quand mode == "uniform"
 _TARGET_RGB = np.array([255, 170, 0], np.uint8)     # cible : orange
@@ -34,6 +40,10 @@ _ACHIEVED_RGB = np.array([0, 200, 120], np.uint8)   # atteint : vert
 # Couleurs des lignes witness (uint8 RGB) — mêmes teintes que les nuages
 _WIT_TARGET_RGB = np.array([255, 170, 0], np.uint8)    # witness cible : orange
 _WIT_ACHIEVED_RGB = np.array([0, 200, 120], np.uint8)  # witness atteint : vert
+
+# Couleurs des lignes normales (uint8 RGB) — mêmes teintes que les witness/nuages
+_NRM_TARGET_RGB = np.array([255, 170, 0], np.uint8)    # normale cible : orange
+_NRM_ACHIEVED_RGB = np.array([0, 200, 120], np.uint8)  # normale atteint : vert
 
 
 def contact_colors(field: MultiChannelField, channel_idx: int, mode: str, margin: float,
@@ -66,7 +76,7 @@ class ContactsLayer:
     folder = "Contacts (robot)"
 
     def setup(self, server, gui, ctx: VizContext) -> None:
-        """Crée les quatre poignées persistantes (2 nuages + 2 witness) et les checkboxes GUI."""
+        """Crée les six poignées persistantes (2 nuages + 2 witness + 2 normales) et les checkboxes GUI."""
         self._ctx = ctx
         self._last_frame = None   # dernier VizFrame reçu (re-rendu en pause)
         self._last_ui = None      # dernière UiState reçue (re-rendu en pause)
@@ -81,11 +91,15 @@ class ContactsLayer:
             self._cb_achieved = gui.add_checkbox("contact atteint", True)
             self._cb_wit_target = gui.add_checkbox("witness cible", False)
             self._cb_wit_achieved = gui.add_checkbox("witness atteint", False)
+            self._cb_nrm_target = gui.add_checkbox("normales cible", False)
+            self._cb_nrm_achieved = gui.add_checkbox("normales atteint", False)
 
         self._cb_target.on_update(_on_change)
         self._cb_achieved.on_update(_on_change)
         self._cb_wit_target.on_update(_on_change)
         self._cb_wit_achieved.on_update(_on_change)
+        self._cb_nrm_target.on_update(_on_change)
+        self._cb_nrm_achieved.on_update(_on_change)
 
         # Poignées nuages de points (cible + atteint)
         zero = np.zeros((1, 3), np.float32)
@@ -102,6 +116,12 @@ class ContactsLayer:
         self._h_wit_achieved = viser_ops.add_line_segments(
             server, "/contacts/witness_achieved", zero_seg, zero_seg_col, line_width=1.5)
 
+        # Poignées lignes normales de contact (cible + atteint)
+        self._h_nrm_target = viser_ops.add_line_segments(
+            server, "/contacts/normal_target", zero_seg, zero_seg_col, line_width=1.5)
+        self._h_nrm_achieved = viser_ops.add_line_segments(
+            server, "/contacts/normal_achieved", zero_seg, zero_seg_col, line_width=1.5)
+
     def update(self, frame: VizFrame, ui: UiState) -> None:
         """Rafraîchit les nuages et les lignes witness pour le frame courant.
 
@@ -109,8 +129,8 @@ class ContactsLayer:
           - ``frame.solved is None``                           (couche solve-gated)
           - ``frame.targets`` ou ``robot_interaction`` est None
           - ``ui.channel`` absent de ``ctx.channel_names``
-        Le nuage atteint et le witness atteint sont masqués seuls si ``contact_achieved`` est
-        None (résolution partielle)."""
+        Le nuage atteint, le witness atteint et la normale atteint sont masqués seuls si
+        ``contact_achieved`` est None (résolution partielle)."""
         # Mémorise le frame et l'état UI pour permettre le re-rendu en pause (bascule toggle)
         self._last_frame = frame
         self._last_ui = ui
@@ -121,6 +141,8 @@ class ContactsLayer:
             self._h_achieved.visible = False
             self._h_wit_target.visible = False
             self._h_wit_achieved.visible = False
+            self._h_nrm_target.visible = False
+            self._h_nrm_achieved.visible = False
             return
 
         # --- Garde 2 : cible robot manquante ---
@@ -129,6 +151,8 @@ class ContactsLayer:
             self._h_achieved.visible = False
             self._h_wit_target.visible = False
             self._h_wit_achieved.visible = False
+            self._h_nrm_target.visible = False
+            self._h_nrm_achieved.visible = False
             return
 
         # --- Garde 3 : canal inconnu (UI en transition) ---
@@ -137,6 +161,8 @@ class ContactsLayer:
             self._h_achieved.visible = False
             self._h_wit_target.visible = False
             self._h_wit_achieved.visible = False
+            self._h_nrm_target.visible = False
+            self._h_nrm_achieved.visible = False
             return
 
         c = self._ctx.channel_names.index(ui.channel)
@@ -169,11 +195,20 @@ class ContactsLayer:
                 np.array([[[255, 170, 0]]], np.uint8), (len(segs_tgt), 2, 1))
         self._h_wit_target.visible = bool(self._cb_wit_target.value) and len(segs_tgt) > 0
 
+        # --- Normale CIBLE (mappée par rotation seule de la pose canal RÉSOLUE) ---
+        nrm_tgt = normal_segments(pts, tgt.direction[c], tgt.active[c], R_sol, length=0.05)
+        if bool(self._cb_nrm_target.value) and len(nrm_tgt):
+            self._h_nrm_target.points = nrm_tgt
+            self._h_nrm_target.colors = np.tile(
+                np.array([[[255, 170, 0]]], np.uint8), (len(nrm_tgt), 2, 1))
+        self._h_nrm_target.visible = bool(self._cb_nrm_target.value) and len(nrm_tgt) > 0
+
         # --- Nuage ATTEINT (réévalué à q résolu) ---
         if frame.solved.contact_achieved is None:
-            # Résolution partielle : éval contact absente -> masquer atteint + witness atteint
+            # Résolution partielle : éval contact absente -> masquer atteint + witness + normale
             self._h_achieved.visible = False
             self._h_wit_achieved.visible = False
+            self._h_nrm_achieved.visible = False
             return
 
         ach = frame.solved.contact_achieved.field                      # (C, M)
@@ -190,3 +225,11 @@ class ContactsLayer:
             self._h_wit_achieved.colors = np.tile(
                 np.array([[[0, 200, 120]]], np.uint8), (len(segs_ach), 2, 1))
         self._h_wit_achieved.visible = bool(self._cb_wit_achieved.value) and len(segs_ach) > 0
+
+        # --- Normale ATTEINT (même pose RÉSOLUE que la cible, rotation seule) ---
+        nrm_ach = normal_segments(pts, ach.direction[c], ach.active[c], R_sol, length=0.05)
+        if bool(self._cb_nrm_achieved.value) and len(nrm_ach):
+            self._h_nrm_achieved.points = nrm_ach
+            self._h_nrm_achieved.colors = np.tile(
+                np.array([[[0, 200, 120]]], np.uint8), (len(nrm_ach), 2, 1))
+        self._h_nrm_achieved.visible = bool(self._cb_nrm_achieved.value) and len(nrm_ach) > 0

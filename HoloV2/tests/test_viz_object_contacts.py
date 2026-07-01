@@ -646,3 +646,118 @@ def test_toggle_noop_before_first_update():
     # Aucun update() encore appelé
     gui.checkboxes[0].value = False
     gui.checkboxes[0].trigger()   # ne doit pas lever
+
+
+# =============================================================================
+# 8. Normales de contact — chemin nominal + gardes + toggle
+# =============================================================================
+
+def test_happy_path_normal_segments_visible():
+    """Chemin nominal avec sondes actives → handles normales peuplés et visibles.
+
+    _field() a active[0]=[T,T,F,F] → 2 sondes actives et direction[...,2]=1 sur le canal ground.
+    Avec cloud=0, R_sol=I, length=0.05 : chaque segment = [[0,0,0],[0,0,0.05]].
+    """
+    layer = _build_layer(cb_val=True, n_objects=1)
+    frame = _make_frame(solved=True, targets=True, pose=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_targets[0].points is not None
+    assert layer._h_nrm_targets[0].points.shape == (2, 2, 3)
+    assert layer._h_nrm_targets[0].visible is True
+    assert layer._h_nrm_achieved[0].points is not None
+    assert layer._h_nrm_achieved[0].points.shape == (2, 2, 3)
+    assert layer._h_nrm_achieved[0].visible is True
+    # Extrémité = sonde + [0,0,1]*0.05 = [0,0,0.05]
+    np.testing.assert_allclose(layer._h_nrm_targets[0].points[0, 1], [0.0, 0.0, 0.05], atol=1e-5)
+
+
+def test_normal_cb_false_makes_handles_not_visible():
+    """Checkboxes normales désactivées (cb_val=False) → handles normales non visibles."""
+    layer = _build_layer(cb_val=False, n_objects=1)
+    frame = _make_frame(solved=True, targets=True, pose=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_targets[0].visible is False
+    assert layer._h_nrm_achieved[0].visible is False
+
+
+def test_normal_solved_none_hides_all():
+    """solved=None → handles normales masqués, aucune levée."""
+    layer = _build_layer(n_objects=1)
+    frame = _make_frame(solved=False)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_targets[0].visible is False
+    assert layer._h_nrm_achieved[0].visible is False
+
+
+def test_normal_contact_achieved_none_hides_achieved_normal_only():
+    """contact_achieved=None → normale cible visible, normale atteint masquée."""
+    layer = _build_layer(cb_val=True, n_objects=1)
+    frame = _make_frame(solved=True, targets=True, pose=True, contact_achieved=False)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_targets[0].visible is True     # cible : données présentes → visible
+    assert layer._h_nrm_achieved[0].visible is False   # atteint : contact_achieved absent → masquée
+
+
+def test_fewer_objects_masks_extra_normals():
+    """Deux handles créés, frame avec 1 cloud → le 2e handle normale est masqué."""
+    layer = _build_layer(n_objects=2, cb_val=True)
+
+    single_cloud = (np.zeros((4, 3), np.float32),)
+    tgt_field = _field(C=2, P=4)
+    env_int_ns = types.SimpleNamespace(per_object=(tgt_field,))
+    tgts_ns = types.SimpleNamespace(env_interaction=env_int_ns)
+    pose_ns = types.SimpleNamespace(
+        object_rot=np.tile(np.eye(3), (1, 1, 1)),
+        object_pos=np.zeros((1, 3)),
+    )
+    object_poses = np.zeros((1, 7))
+    object_poses[0, 3] = 1.0
+    env_evals = (types.SimpleNamespace(field=tgt_field),)
+    ach_ns = types.SimpleNamespace(env=env_evals)
+    solved_ns = types.SimpleNamespace(object_poses=object_poses, contact_achieved=ach_ns)
+
+    frame = types.SimpleNamespace(
+        solved=solved_ns, targets=tgts_ns, pose=pose_ns, object_clouds_world=single_cloud,
+    )
+    ui = UiState(channel="ground", color_mode="uniform", point_size=0.01)
+    layer.update(frame, ui)
+
+    # Objet k=1 : absent → normales masquées sans levée
+    assert layer._h_nrm_targets[1].visible is False
+    assert layer._h_nrm_achieved[1].visible is False
+
+
+def test_toggle_normale_cible_paused():
+    """Décocher 'normales cible' (index 4) en pause → masquage immédiat.
+
+    Ordre des checkboxes créées par setup() :
+      0 = 'cloud cible'    1 = 'cloud atteint'
+      2 = 'witness cible'  3 = 'witness atteint'
+      4 = 'normales cible' 5 = 'normales atteint'
+    """
+    layer, gui = _build_layer_capture(cb_val=True, n_objects=1)
+    frame = _make_frame(solved=True, targets=True, pose=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_targets[0].visible is True, "prérequis : normale cible visible"
+
+    gui.checkboxes[4].value = False
+    gui.checkboxes[4].trigger()
+
+    assert layer._h_nrm_targets[0].visible is False, \
+        "bascule pause : normale cible doit être masquée"
+    assert layer._h_nrm_achieved[0].visible is True   # normale atteint non affectée

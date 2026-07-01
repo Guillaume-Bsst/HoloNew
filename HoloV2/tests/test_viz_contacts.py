@@ -652,3 +652,186 @@ def test_witness_toggle_noop_before_first_update():
     # Aucun update() encore appelé — le callback doit être silencieux
     gui.checkboxes[2].value = False
     gui.checkboxes[2].trigger()   # ne doit pas lever
+
+
+# =============================================================================
+# 8. Tests normales — chemin nominal (canal ground)
+# =============================================================================
+
+def test_normal_target_handle_populated_and_visible_on_happy_path():
+    """Chemin nominal canal ground : _h_nrm_target peuplé (≥1 sonde active) et visible=True.
+
+    _field() a active[0]=[T,T,F,F] → 2 sondes actives et direction[...,2]=1 sur le canal ground.
+    Avec robot_points_world=0, R_sol=I, length=0.05 : chaque segment = [[0,0,0],[0,0,0.05]].
+    """
+    layer = _build_layer(cb_val=True)
+    frame = _make_frame(solved=True, targets=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_target.points is not None, "_h_nrm_target.points doit être défini"
+    assert layer._h_nrm_target.points.shape == (2, 2, 3), "2 segments (S=2 actives)"
+    assert layer._h_nrm_target.visible is True
+    # Extrémité = sonde + [0,0,1]*0.05 = [0,0,0.05]
+    np.testing.assert_allclose(layer._h_nrm_target.points[0, 1], [0.0, 0.0, 0.05], atol=1e-5)
+
+
+def test_normal_achieved_handle_populated_and_visible_on_happy_path():
+    """Chemin nominal canal ground : _h_nrm_achieved peuplé (≥1 sonde active) et visible=True."""
+    layer = _build_layer(cb_val=True)
+    frame = _make_frame(solved=True, targets=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_achieved.points is not None, "_h_nrm_achieved.points doit être défini"
+    assert layer._h_nrm_achieved.points.shape == (2, 2, 3), "2 segments (S=2 actives)"
+    assert layer._h_nrm_achieved.visible is True
+
+
+def test_normal_cb_false_makes_handles_not_visible():
+    """Checkboxes normales désactivées (cb_val=False) -> handles normales non visibles."""
+    layer = _build_layer(cb_val=False)
+    frame = _make_frame(solved=True, targets=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_target.visible is False
+    assert layer._h_nrm_achieved.visible is False
+
+
+# =============================================================================
+# 9. Tests normales — gardes de données manquantes
+# =============================================================================
+
+def test_normal_solved_none_hides_all_handles():
+    """solved=None -> handles normales tous masqués, aucune levée."""
+    layer = _build_layer()
+    frame = _make_frame(solved=False)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_target.visible is False
+    assert layer._h_nrm_achieved.visible is False
+
+
+def test_normal_targets_none_hides_all_handles():
+    """targets=None -> handles normales masqués, aucune levée."""
+    layer = _build_layer()
+    frame = _make_frame(targets=False)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_target.visible is False
+    assert layer._h_nrm_achieved.visible is False
+
+
+def test_normal_unknown_channel_hides_all_handles():
+    """Canal inconnu -> handles normales masqués, aucune levée."""
+    layer = _build_layer()
+    frame = _make_frame(solved=True, targets=True)
+    ui = UiState(channel="canal_inconnu", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_target.visible is False
+    assert layer._h_nrm_achieved.visible is False
+
+
+def test_normal_contact_achieved_none_hides_achieved_normal_only():
+    """contact_achieved=None (résolution partielle) : normale cible visible, atteint masquée."""
+    layer = _build_layer(cb_val=True)
+    frame = _make_frame(solved=True, targets=True, contact_achieved=False)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    # Normale cible : actif (2 sondes actives, cb=True) → visible
+    assert layer._h_nrm_target.visible is True
+    # Normale atteint : contact_achieved absent → masquée
+    assert layer._h_nrm_achieved.visible is False
+
+
+# =============================================================================
+# 10. Tests normales — mapping de pose (canal objet, rotation seule)
+# =============================================================================
+
+def test_normal_mapped_by_rotation_only_solved_pose():
+    """Canal objet : la normale est mappée par ROTATION SEULE (pas de translation).
+
+    Pose résolue : R=I, t=[20,0,0] (translation NON appliquée à un vecteur direction).
+    direction locale = [0,0,1] → extrémité = sonde + [0,0,1]*0.05, sans décalage de +20 en x.
+    Avec robot_points_world = 0, extrémité attendue = [0, 0, 0.05].
+    """
+    R_src = np.eye(3)
+    t_src = np.array([5.0, 0.0, 0.0])
+    R_sol = np.eye(3)
+    t_sol = np.array([20.0, 0.0, 0.0])
+
+    # Le canal obj0 (canal 1) porte direction[...,2]=1 (défini dans _make_frame_obj)
+    wit_local = np.zeros((4, 3))
+    active_mask = np.array([True, False, False, False])
+
+    frame = _make_frame_obj(R_src, t_src, R_sol, t_sol, wit_local, active_mask)
+    layer = _build_layer(cb_val=True)
+    ui = UiState(channel="obj0", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_target.points is not None
+    assert layer._h_nrm_target.points.shape == (1, 2, 3)
+    # Rotation seule (R=I) : extrémité = sonde(0) + [0,0,1]*0.05 = [0,0,0.05] (pas de +20 en x)
+    np.testing.assert_allclose(layer._h_nrm_target.points[0, 1], [0.0, 0.0, 0.05], atol=1e-5,
+                                err_msg="normale mappée par rotation seule, sans translation")
+
+
+# =============================================================================
+# 11. Tests normales — toggle en pause
+# =============================================================================
+
+def test_normal_target_toggle_paused():
+    """Décocher 'normales cible' (index 4) en pause -> masquage immédiat.
+
+    Ordre des checkboxes créées par setup() :
+      0 = 'contact cible'  1 = 'contact atteint'
+      2 = 'witness cible'  3 = 'witness atteint'
+      4 = 'normales cible' 5 = 'normales atteint'
+    """
+    layer, gui = _build_layer_capture(cb_val=True)
+    frame = _make_frame(solved=True, targets=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_target.visible is True, "prérequis : normale cible visible avant le clic"
+
+    gui.checkboxes[4].value = False    # index 4 = cb_nrm_target
+    gui.checkboxes[4].trigger()
+
+    assert layer._h_nrm_target.visible is False, \
+        "bascule en pause : _h_nrm_target doit être masqué immédiatement"
+    # Les autres handles ne doivent pas être affectés par ce toggle
+    assert layer._h_nrm_achieved.visible is True
+    assert layer._h_wit_target.visible is True
+
+
+def test_normal_achieved_toggle_paused():
+    """Décocher 'normales atteint' (index 5) en pause -> masquage immédiat."""
+    layer, gui = _build_layer_capture(cb_val=True)
+    frame = _make_frame(solved=True, targets=True)
+    ui = UiState(channel="ground", color_mode="distance", point_size=0.01)
+
+    layer.update(frame, ui)
+
+    assert layer._h_nrm_achieved.visible is True, "prérequis : normale atteint visible avant le clic"
+
+    gui.checkboxes[5].value = False    # index 5 = cb_nrm_achieved
+    gui.checkboxes[5].trigger()
+
+    assert layer._h_nrm_achieved.visible is False, \
+        "bascule en pause : _h_nrm_achieved doit être masqué immédiatement"
+    assert layer._h_nrm_target.visible is True

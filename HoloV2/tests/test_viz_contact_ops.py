@@ -9,7 +9,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.viz.layers._contact_ops import object_cloud_solved, witness_segments
+from src.viz.layers._contact_ops import (
+    normal_segments,
+    object_cloud_solved,
+    witness_segments,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -260,5 +264,145 @@ class TestWitnessSegments:
             probe_pts, witness_local, active,
             R_obj=np.eye(3), t_obj=np.zeros(3)
         )
+
+        assert segs.dtype == np.float32
+
+
+# ---------------------------------------------------------------------------
+# normal_segments
+# ---------------------------------------------------------------------------
+
+class TestNormalSegments:
+    """Vérifie la construction des segments sonde → sonde + normale·length."""
+
+    def _rot_z(self, angle: float) -> np.ndarray:
+        """Rotation autour de Z d'angle ``angle`` (radians)."""
+        c, s = np.cos(angle), np.sin(angle)
+        return np.array([[c, -s, 0.], [s, c, 0.], [0., 0., 1.]])
+
+    def test_known_segments_identity(self):
+        """Canal sol (R_obj=I) → extrémité = sonde + normale·length, vérifiable à la main."""
+        # 2 sondes, toutes deux actives
+        probe_pts = np.array([[0.0, 0.0, 0.0],
+                              [1.0, 2.0, 3.0]], np.float64)
+        # Normales locales unitaires
+        direction_local = np.array([[0.0, 0.0, 1.0],
+                                    [1.0, 0.0, 0.0]], np.float64)
+        active = np.array([True, True])
+
+        segs = normal_segments(probe_pts, direction_local, active,
+                               R_obj=np.eye(3), length=0.05)
+
+        assert segs.shape == (2, 2, 3)
+        assert segs.dtype == np.float32
+
+        # Sonde 0 : départ = [0,0,0], extrémité = [0,0,0] + [0,0,1]*0.05 = [0,0,0.05]
+        np.testing.assert_allclose(segs[0, 0], [0., 0., 0.], atol=1e-6)
+        np.testing.assert_allclose(segs[0, 1], [0., 0., 0.05], atol=1e-6)
+
+        # Sonde 1 : départ = [1,2,3], extrémité = [1,2,3] + [1,0,0]*0.05 = [1.05,2,3]
+        np.testing.assert_allclose(segs[1, 0], [1., 2., 3.], atol=1e-6)
+        np.testing.assert_allclose(segs[1, 1], [1.05, 2., 3.], atol=1e-6)
+
+    def test_rotation_only_no_translation(self):
+        """Canal objet : la normale est mappée par rotation SEULE (pas de translation)."""
+        probe_pts = np.array([[0.0, 0.0, 0.0]], np.float64)
+        # Normale locale [1,0,0]
+        direction_local = np.array([[1.0, 0.0, 0.0]], np.float64)
+        active = np.array([True])
+
+        # Rotation 90° autour de Z (x→y), translation ignorée (vecteur direction)
+        R_obj = self._rot_z(np.pi / 2)
+
+        segs = normal_segments(probe_pts, direction_local, active,
+                               R_obj=R_obj, length=1.0)
+
+        assert segs.shape == (1, 2, 3)
+        # dir_monde = [1,0,0] @ R_obj.T = R_obj @ [1,0,0] = [cos90, sin90, 0] = [0, 1, 0]
+        # extrémité = sonde + dir_monde * 1.0 = [0, 1, 0]
+        np.testing.assert_allclose(segs[0, 0], [0., 0., 0.], atol=1e-6)
+        np.testing.assert_allclose(segs[0, 1], [0., 1., 0.], atol=1e-6)
+
+    def test_length_scaling(self):
+        """La longueur ``length`` met la normale à l'échelle sur le segment dessiné."""
+        probe_pts = np.array([[0.0, 0.0, 0.0]], np.float64)
+        direction_local = np.array([[0.0, 1.0, 0.0]], np.float64)
+        active = np.array([True])
+
+        segs = normal_segments(probe_pts, direction_local, active,
+                               R_obj=np.eye(3), length=0.2)
+
+        # extrémité = [0,0,0] + [0,1,0]*0.2 = [0, 0.2, 0]
+        np.testing.assert_allclose(segs[0, 1], [0., 0.2, 0.], atol=1e-6)
+
+    def test_only_active_probes_included(self):
+        """Seules les sondes actives apparaissent dans les segments."""
+        probe_pts = np.array([[0., 0., 0.],
+                              [1., 0., 0.],
+                              [2., 0., 0.]])
+        direction_local = np.array([[0., 0., 1.],
+                                    [0., 0., 1.],
+                                    [0., 0., 1.]])
+        # Seule la sonde 1 est active
+        active = np.array([False, True, False])
+
+        segs = normal_segments(probe_pts, direction_local, active,
+                               R_obj=np.eye(3), length=0.05)
+
+        assert segs.shape == (1, 2, 3)
+        np.testing.assert_allclose(segs[0, 0], [1., 0., 0.], atol=1e-6)
+        np.testing.assert_allclose(segs[0, 1], [1., 0., 0.05], atol=1e-6)
+
+    def test_empty_active_returns_0_2_3(self):
+        """Aucune sonde active → forme (0, 2, 3) float32."""
+        P = 10
+        probe_pts = np.zeros((P, 3))
+        direction_local = np.zeros((P, 3))
+        active = np.zeros(P, bool)
+
+        segs = normal_segments(probe_pts, direction_local, active,
+                               R_obj=np.eye(3))
+
+        assert segs.shape == (0, 2, 3)
+        assert segs.dtype == np.float32
+
+    def test_subsample_cap_exact_count(self):
+        """Plus de cap sondes actives → exactement cap segments retournés (P>400 → S==400)."""
+        P = 500   # au-delà du plafond par défaut _MAX_SEG=400
+        rng = np.random.default_rng(3)
+        probe_pts = rng.standard_normal((P, 3))
+        direction_local = rng.standard_normal((P, 3))
+        active = np.ones(P, bool)
+
+        segs = normal_segments(probe_pts, direction_local, active,
+                               R_obj=np.eye(3))
+
+        assert segs.shape == (400, 2, 3)
+
+    def test_subsample_deterministic(self):
+        """Le sous-échantillonnage avec graine 0 est reproductible à l'appel identique."""
+        cap = 10
+        P = 100
+        rng = np.random.default_rng(11)
+        probe_pts = rng.standard_normal((P, 3))
+        direction_local = rng.standard_normal((P, 3))
+        active = np.ones(P, bool)
+
+        segs_a = normal_segments(probe_pts, direction_local, active,
+                                 R_obj=np.eye(3), cap=cap)
+        segs_b = normal_segments(probe_pts, direction_local, active,
+                                 R_obj=np.eye(3), cap=cap)
+
+        np.testing.assert_array_equal(segs_a, segs_b)
+
+    def test_output_dtype_float32(self):
+        """Le tableau retourné est float32 (pour le rendu viser)."""
+        probe_pts = np.ones((3, 3), np.float64)
+        direction_local = np.zeros((3, 3), np.float64)
+        direction_local[:, 2] = 1.0
+        active = np.ones(3, bool)
+
+        segs = normal_segments(probe_pts, direction_local, active,
+                               R_obj=np.eye(3))
 
         assert segs.dtype == np.float32

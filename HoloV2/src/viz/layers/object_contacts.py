@@ -15,6 +15,12 @@ l'objet DU CANAL c (pas de l'objet k) :
   - Witness ATTEINT : pose RÉSOLUE du canal-objet (``frame.solved.object_poses[oi]``).
   - Canal sol (``object_idx=None``) : identité (witness déjà en monde).
 
+Les lignes normales de contact (sonde → sonde + normale·length) sont dessinées en miroir des
+witness via ``_contact_ops.normal_segments``. La normale est un vecteur direction : mappage
+local→monde par ROTATION SEULE de la pose canal RÉSOLUE (identité pour le sol).
+  - Normale CIBLE  : ``tgt_field.direction[c]`` mappée par ``R_sol_ch``.
+  - Normale ATTEINT : ``ach_field.direction[c]`` mappée par ``R_sol_ch``.
+
 Couche SOLVE-GATED : sans ``solved``, tous les handles sont masqués.
 Consommatrice pure ; viser confiné ici."""
 from __future__ import annotations
@@ -27,7 +33,7 @@ from ..core.layer import UiState
 from ..core.viser_ops import quat_wxyz_to_R
 from ..model import VizContext, VizFrame
 from ...targets.contracts import MultiChannelField
-from ._contact_ops import object_cloud_solved, witness_segments
+from ._contact_ops import normal_segments, object_cloud_solved, witness_segments
 
 # Teintes uniformes (uint8 RGB) pour les deux états
 _TARGET_RGB = np.array([255, 170, 0], np.uint8)    # cible : orange
@@ -55,16 +61,18 @@ def _obj_contact_colors(
 
 
 class ObjectContactsLayer:
-    """Contact cible ET atteint (nuages + lignes witness) pour chaque objet k, en scène résolue.
+    """Contact cible ET atteint (nuages + lignes witness + lignes normales) par objet k, en scène résolue.
 
-    Pour chaque objet k, quatre handles sont créés :
+    Pour chaque objet k, six handles sont créés :
       - nuage CIBLE   : probes du cloud résolu, colorés distance/active/uniform par le champ cible.
       - nuage ATTEINT : probes du cloud résolu (transfo relative T_résolu ∘ T_source⁻¹), colorés
         par le champ atteint.
       - witness CIBLE   : segments (probe_résolu → witness_monde) via pose RÉSOLUE du canal.
       - witness ATTEINT : segments (probe_résolu → witness_monde) via pose RÉSOLUE du canal.
+      - normale CIBLE   : segments (probe_résolu → probe + normale·length) via rotation de la pose canal.
+      - normale ATTEINT : segments (probe_résolu → probe + normale·length) via rotation de la pose canal.
 
-    Les quatre checkboxes GUI contrôlent la visibilité de tous les handles d'un même type.
+    Les six checkboxes GUI (globales, tous k) contrôlent la visibilité de tous les handles d'un même type.
 
     Couche SOLVE-GATED : no-op + masquage si ``frame.solved is None``. Gardes données manquantes :
     masquage silencieux si ``targets``/``env_interaction`` est None, canal inconnu, ou nb objets
@@ -74,7 +82,7 @@ class ObjectContactsLayer:
     folder = "Contacts objets"
 
     def setup(self, server, gui, ctx: VizContext) -> None:
-        """Crée les handles (4 × n_objects) et les checkboxes GUI."""
+        """Crée les handles (6 × n_objects) et les checkboxes GUI."""
         self._ctx = ctx
         self._last_frame = None   # dernier VizFrame reçu (re-rendu en pause)
         self._last_ui = None      # dernière UiState reçue (re-rendu en pause)
@@ -89,12 +97,16 @@ class ObjectContactsLayer:
             self._cb_achieved = gui.add_checkbox("cloud atteint", True)
             self._cb_wit_target = gui.add_checkbox("witness cible", False)
             self._cb_wit_achieved = gui.add_checkbox("witness atteint", False)
+            self._cb_nrm_target = gui.add_checkbox("normales cible", False)
+            self._cb_nrm_achieved = gui.add_checkbox("normales atteint", False)
 
         # Câblage toggle-en-pause : ré-invocation update() lors d'un clic en pause
         self._cb_target.on_update(_on_change)
         self._cb_achieved.on_update(_on_change)
         self._cb_wit_target.on_update(_on_change)
         self._cb_wit_achieved.on_update(_on_change)
+        self._cb_nrm_target.on_update(_on_change)
+        self._cb_nrm_achieved.on_update(_on_change)
 
         # Poignées par objet k (listes parallèles)
         n = ctx.n_objects
@@ -106,6 +118,8 @@ class ObjectContactsLayer:
         self._h_achieved: list = []        # nuages ATTEINT
         self._h_wit_targets: list = []     # segments witness CIBLE
         self._h_wit_achieved: list = []    # segments witness ATTEINT
+        self._h_nrm_targets: list = []     # segments normale CIBLE
+        self._h_nrm_achieved: list = []    # segments normale ATTEINT
 
         for k in range(n):
             self._h_targets.append(
@@ -132,6 +146,18 @@ class ObjectContactsLayer:
                     zero_seg, zero_seg_col, line_width=1.5,
                 )
             )
+            self._h_nrm_targets.append(
+                viser_ops.add_line_segments(
+                    server, f"/object_contacts/k{k}/normal_target",
+                    zero_seg, zero_seg_col, line_width=1.5,
+                )
+            )
+            self._h_nrm_achieved.append(
+                viser_ops.add_line_segments(
+                    server, f"/object_contacts/k{k}/normal_achieved",
+                    zero_seg, zero_seg_col, line_width=1.5,
+                )
+            )
 
     def _hide_all(self) -> None:
         """Cache tous les handles (toutes les couches de tous les objets)."""
@@ -140,6 +166,8 @@ class ObjectContactsLayer:
             self._h_achieved[k].visible = False
             self._h_wit_targets[k].visible = False
             self._h_wit_achieved[k].visible = False
+            self._h_nrm_targets[k].visible = False
+            self._h_nrm_achieved[k].visible = False
 
     def update(self, frame: VizFrame, ui: UiState) -> None:
         """Rafraîchit les nuages et witness pour le frame courant.
@@ -198,6 +226,8 @@ class ObjectContactsLayer:
                 self._h_achieved[k].visible = False
                 self._h_wit_targets[k].visible = False
                 self._h_wit_achieved[k].visible = False
+                self._h_nrm_targets[k].visible = False
+                self._h_nrm_achieved[k].visible = False
                 continue
 
             per_obj = frame.targets.env_interaction.per_object
@@ -206,6 +236,8 @@ class ObjectContactsLayer:
                 self._h_achieved[k].visible = False
                 self._h_wit_targets[k].visible = False
                 self._h_wit_achieved[k].visible = False
+                self._h_nrm_targets[k].visible = False
+                self._h_nrm_achieved[k].visible = False
                 continue
 
             # Cloud source de l'objet k
@@ -248,12 +280,26 @@ class ObjectContactsLayer:
                 bool(self._cb_wit_target.value) and len(segs_tgt) > 0
             )
 
-            # --- Nuage ATTEINT + witness atteint (masqués si contact_achieved absent) ---
+            # --- Normale CIBLE (probe résolu → probe + normale·length, rotation pose canal) ---
+            nrm_tgt = normal_segments(
+                cloud_sol, tgt_field.direction[c], tgt_field.active[c], R_sol_ch, length=0.05,
+            )
+            if bool(self._cb_nrm_target.value) and len(nrm_tgt):
+                self._h_nrm_targets[k].points = nrm_tgt
+                self._h_nrm_targets[k].colors = np.tile(
+                    np.array([[[255, 170, 0]]], np.uint8), (len(nrm_tgt), 2, 1),
+                )
+            self._h_nrm_targets[k].visible = (
+                bool(self._cb_nrm_target.value) and len(nrm_tgt) > 0
+            )
+
+            # --- Nuage ATTEINT + witness/normale atteint (masqués si contact_achieved absent) ---
             if (frame.solved.contact_achieved is None
                     or k >= len(frame.solved.contact_achieved.env)):
                 # Résolution partielle ou nb objets incohérent : masquer atteint
                 self._h_achieved[k].visible = False
                 self._h_wit_achieved[k].visible = False
+                self._h_nrm_achieved[k].visible = False
                 continue
 
             ach_field = frame.solved.contact_achieved.env[k].field          # MultiChannelField
@@ -275,4 +321,17 @@ class ObjectContactsLayer:
                 )
             self._h_wit_achieved[k].visible = (
                 bool(self._cb_wit_achieved.value) and len(segs_ach) > 0
+            )
+
+            # --- Normale ATTEINT (probe résolu → probe + normale·length, rotation pose canal) ---
+            nrm_ach = normal_segments(
+                cloud_sol, ach_field.direction[c], ach_field.active[c], R_sol_ch, length=0.05,
+            )
+            if bool(self._cb_nrm_achieved.value) and len(nrm_ach):
+                self._h_nrm_achieved[k].points = nrm_ach
+                self._h_nrm_achieved[k].colors = np.tile(
+                    np.array([[[0, 200, 120]]], np.uint8), (len(nrm_ach), 2, 1),
+                )
+            self._h_nrm_achieved[k].visible = (
+                bool(self._cb_nrm_achieved.value) and len(nrm_ach) > 0
             )
