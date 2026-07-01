@@ -19,6 +19,13 @@ ET résolus** (les deux états), et d'ancrer les contacts/witness objets à leur
 
 ## Décisions cadrées
 
+> **CORRECTION (2026-07-01, post-implémentation, commit `ebef42f`).** La vue montre la **scène RÉSOLUE** :
+> `contacts` (robot) et `object_contacts` affichent **cible ET atteint sur la géométrie RÉSOLUE** (cloud +
+> pose objet résolus), seul le **CHAMP** diffère (cible = champ cible, atteint = champ atteint). Une ligne
+> witness part toujours d'un point du nuage affiché (résolu). ⇒ dans les lignes ci-dessous et les composants,
+> **toute mention « cible → cloud/pose SOURCE » est remplacée par « cible → cloud/pose RÉSOLU »**. Le nuage
+> **source** de chaque objet reste comparable via le toggle de la couche `objects` (source orange vs résolu vert).
+
 | Décision | Choix |
 |---|---|
 | Structure | **2 couches par-côté**, auto-contenues (distance + witness dedans) : `contacts` (robot, étendue) + `object_contacts` (objets, nouvelle). Pas de couches witness séparées. |

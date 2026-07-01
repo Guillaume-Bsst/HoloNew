@@ -124,8 +124,8 @@ persistants). Les couches contact/correspondance sont **solve-gated** (no-op si 
 
 | Couche | Fichier | Donnée (view-model) | Solve-gated |
 |---|---|---|---|
-| **Contacts robot** (#3) | `layers/contacts.py` · `ContactsLayer` | cible `targets.robot_interaction.field` vs atteint `solved.contact_achieved.field` sur `solved.robot_points_world` **+ witness cible/atteint** (lignes point→surface, mappées via la pose objet **source**/**résolue** du canal) | oui |
-| **Contacts objets** | `layers/object_contacts.py` · `ObjectContactsLayer` | cible `targets.env_interaction.per_object[k]` sur cloud **source** vs atteint `solved.contact_achieved.env[k].field` sur cloud **résolu** (`object_cloud_solved`) **+ witness** (mappé via l'objet du **canal**, pas l'objet-probe) | oui |
+| **Contacts robot** (#3) | `layers/contacts.py` · `ContactsLayer` | cible `targets.robot_interaction.field` vs atteint `solved.contact_achieved.field` sur `solved.robot_points_world` **+ witness cible/atteint** (lignes point→surface, mappées via la pose objet **résolue** du canal — les deux) | oui |
+| **Contacts objets** | `layers/object_contacts.py` · `ObjectContactsLayer` | cible `targets.env_interaction.per_object[k]` ET atteint `solved.contact_achieved.env[k].field`, **toutes deux sur le cloud RÉSOLU** (`object_cloud_solved`) — seul le CHAMP diffère ; **witness** via la pose **résolue** de l'objet du **canal** (pas l'objet-probe) | oui |
 | **Correspondance SMPL↔G1** (#4) | `layers/correspondence.py` · `CorrespondenceLayer` | `human_cloud_world[ctx.correspondence.smpl_idx]` → `solved.robot_points_world` | oui |
 | **SDF iso (surface)** (#6) | `layers/sdf_iso.py` · `SdfIsoLayer` | bande `|d|<band` des `ctx.channels[c].sdf`, posée par `frame.pose` | non |
 | **Champ géodésique** (#7) | `layers/geodesic.py` · `GeodesicLayer` | `ctx.channels[c].geodesic` (points/normales + heat mono-source `geo[src]`), posée par `frame.pose` | non |
@@ -136,9 +136,10 @@ l'`InteractionContext` de `prepare`.
 
 **Debug solve — état source vs résolu (les objets sont des variables de l'optimiseur).** La couche
 `objects` gagne un sous-toggle **« cloud objet résolu »** (posé à `solved.object_poses`, vert vs source
-orange, via `object_cloud_solved`) → on voit de combien l'optimiseur a déplacé chaque objet. Le fil
-source/résolu est appliqué partout : `contacts` (robot) et `object_contacts` ancrent la **cible** à
-l'état **source** et l'**atteint** à l'état **résolu** (nuages + witness). Helpers purs partagés :
+orange, via `object_cloud_solved`) → on voit de combien l'optimiseur a déplacé chaque objet. La vue
+montre la **scène résolue** : `contacts` (robot) et `object_contacts` affichent **cible ET atteint sur
+la même géométrie résolue** (seul le CHAMP diffère : cible = champ cible, atteint = champ atteint) — une
+ligne witness part toujours d'un point du nuage affiché (résolu). Helpers purs partagés :
 `layers/_contact_ops.py` (`object_cloud_solved`, `witness_segments`). Aucune donnée nouvelle plombée —
 `solved.contact_achieved.env[k]` (contact objet atteint) était déjà dans le view-model.
 
