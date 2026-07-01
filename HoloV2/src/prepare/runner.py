@@ -24,7 +24,7 @@ import numpy as np
 
 from ..obs import NULL
 from .config import PrepareConfig
-from .contracts import (Channel, GroundedScene, InteractionContext, SceneSpec)
+from .contracts import (Channel, GroundedScene, InteractionContext, ObjectMesh, SceneSpec)
 from . import scene
 from .calibration import CalibrationBuilder
 from .load import load
@@ -67,16 +67,22 @@ def _load_or_build(builder: Any, subdir: str, key: str, build: Callable[[], Any]
     return asset
 
 
+_GROUND_HALF_EXTENT = 5.0   # demi-côté du carré sol plat (m) : sol = 10 m × 10 m centré sur le motion
+
+
 def _scene_xy_bounds(grounded: GroundedScene) -> tuple[np.ndarray, np.ndarray]:
-    """``(xy_min (2,), xy_max (2,))`` étendue horizontale que le SDF plan sol-plat doit couvrir : les
-    joints démo ancrés (où vit le nuage humain) uniés avec les positions objets sur le clip.
-    ``build_plane_sdf`` rembourrre ceci davantage, donc la bande contact autour pieds/objets est dans
-    la grille (les sondes au-delà sont out-of-grid → inactives, comme tout SDF objet)."""
+    """``(xy_min (2,), xy_max (2,))`` étendue horizontale du SDF plan sol-plat : un carré FIXE de
+    ``2·_GROUND_HALF_EXTENT`` (10 m × 10 m) centré sur le CENTRE du motion (milieu de la bbox xy des
+    joints démo ∪ positions objets sur le clip). Choix simple et généreux — pas de bbox serrée ; les
+    sondes au-delà restent out-of-grid → inactives. Le plan étant affine, l'interpolation trilinéaire
+    reste EXACTE à toute résolution, donc l'étendue n'a qu'à couvrir la région de sondage."""
     xy = [np.asarray(grounded.joint_pos, np.float64)[:, :, :2].reshape(-1, 2)]
     for poses in grounded.object_poses:
         xy.append(np.asarray(poses, np.float64)[:, :2])
     pts = np.concatenate(xy, axis=0)
-    return pts.min(axis=0), pts.max(axis=0)
+    center = 0.5 * (pts.min(axis=0) + pts.max(axis=0))       # centre du motion (milieu de la bbox xy)
+    half = np.full(2, _GROUND_HALF_EXTENT)                   # demi-côté -> carré 10 m × 10 m
+    return center - half, center + half
 
 
 def _build_channels(grounded: GroundedScene, spec: SceneSpec, config: PrepareConfig,
@@ -236,3 +242,24 @@ def build_all(scene_spec: SceneSpec, config: PrepareConfig, prof=NULL):
     cache : exécute le ``build``+``save`` de chaque builder, ignorant le short-circuit de load. Retourne
     la ``(GroundedScene, InteractionContext)`` assemblée comme ``prepare``."""
     return _run(scene_spec, config, prof, force=True)
+
+
+def load_object_meshes(grounded: GroundedScene) -> tuple[ObjectMesh, ...]:
+    """Point d'entrée public OFFLINE/viz pour la géométrie MESH des objets de la scène.
+
+    ``prepare``/``solve`` n'en ont PAS besoin (la détection de contacts vit sur les SDF/nuages
+    pré-échantillonnés ; les meshes n'atteignent jamais le runtime — cf. ``ObjectMesh``). Seul un
+    consommateur offline comme ``viz`` veut le mesh translucide superposé au nuage source ; on le
+    charge donc À LA DEMANDE ici plutôt que de le trimballer dans ``GroundedScene``.
+
+    Pour chaque objet ``i`` : charge sa géométrie LOCALE ``(v (V,3), f (F,3))`` via ``load_mesh``
+    (le même chargeur interne utilisé par ``_run``) et l'emballe avec ses poses monde per-frame
+    ``grounded.object_poses[i]`` (T,7). Le ``name`` est le stem du chemin mesh (fallback ``objI``).
+    Retourne ``()`` si la scène n'a pas d'objets."""
+    meshes: list[ObjectMesh] = []
+    for i, path in enumerate(grounded.object_mesh_paths):
+        v, f = load_mesh(path)                          # v (V,3) f64, f (F,3) i64 — repère LOCAL
+        name = Path(path).stem or f"obj{i}"
+        meshes.append(ObjectMesh(vertices=v, faces=f, poses=grounded.object_poses[i],
+                                 name=name, static=False))
+    return tuple(meshes)

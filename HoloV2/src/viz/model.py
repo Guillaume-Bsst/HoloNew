@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..prepare.contracts import Channel, CorrespondenceTable, SDF
+from ..prepare.contracts import Channel, CorrespondenceTable, ObjectMesh, SDF
 from ..targets.contracts import (ContactEval, FramePose, FrameTargets, MultiChannelField, StyleEval)
 
 
@@ -37,6 +37,10 @@ class VizContext:
     robot_urdf_path: Path                # G1 URDF (couche robot, phase B)
     has_solve: bool                      # True une fois que la Source cuit solve -> SolvedFrame
     ground_sdf: SDF                      # SDF du canal ground (channels[0]) — surface couche ground
+    # Géométrie MESH des objets (consommée par ObjectsLayer pour le mesh source translucide). Défaut
+    # ``()`` : champ purement OFFLINE/viz, rétro-compatible (les constructions sans mesh restent valides,
+    # et une source non-BakeSource peut l'omettre). Chargé à la demande via ``prepare.runner.load_object_meshes``.
+    object_meshes: tuple[ObjectMesh, ...] = ()
 
     def __post_init__(self) -> None:
         if self.smpl_faces.ndim != 2 or self.smpl_faces.shape[1] != 3:

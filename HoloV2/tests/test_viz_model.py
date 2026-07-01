@@ -74,6 +74,24 @@ def test_context_ok_and_channel_count():
     assert ctx.has_solve is False
 
 
+def test_context_object_meshes_default_and_explicit():
+    """``object_meshes`` : défaut ``()`` (rétro-compat — les constructions existantes sans mesh
+    restent valides) ET accepté explicitement quand fourni."""
+    from src.prepare.contracts import ObjectMesh
+    # Défaut : _ctx ne passe pas object_meshes → tuple vide
+    assert _ctx(n_objects=0).object_meshes == ()
+    # Explicite : un ObjectMesh est accepté et exposé tel quel
+    m = ObjectMesh(vertices=np.zeros((3, 3)), faces=np.zeros((1, 3), np.int64),
+                   poses=np.zeros((1, 7)), name="m")
+    ctx = VizContext(
+        channel_names=("ground",), margin=0.05, style_link_names=(),
+        smpl_faces=np.zeros((4, 3), np.int64), smpl_parents=np.array([-1]), n_objects=0,
+        channels=_channels(0), correspondence=_correspondence(),
+        robot_urdf_path=__import__("pathlib").Path("/x"), has_solve=False, ground_sdf=_sdf(),
+        object_meshes=(m,))
+    assert ctx.object_meshes == (m,)
+
+
 def test_context_bad_channel_count_raises():
     with pytest.raises(ValueError):
         VizContext(channel_names=("ground",), margin=0.05, style_link_names=(),

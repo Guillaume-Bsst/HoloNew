@@ -110,10 +110,12 @@ class BakeSource:
         # Imports différés : ``prepare.runner`` tire torch/smplx/trimesh/pinocchio ;
         # ``targets.pipeline`` tire les ops cibles. Aucun des deux n'importe viser.
         # Différés ici (pas au niveau module) pour que l'import de ce module reste léger.
-        from ..prepare.runner import prepare
+        from ..prepare.runner import prepare, load_object_meshes
         from ..targets.pipeline import trace_frame
 
         grounded, ctx = prepare(spec, config)
+        # Géométrie mesh des objets — point d'entrée PUBLIC offline/viz (le solve n'en a pas besoin).
+        object_meshes = load_object_meshes(grounded)
         body = grounded.body
         if body is None:
             raise ValueError(
@@ -149,6 +151,7 @@ class BakeSource:
             robot_urdf_path=spec.robot.urdf_path,
             has_solve=solve,
             ground_sdf=ctx.channels[0].sdf,
+            object_meshes=object_meshes,           # mesh source translucide (ObjectsLayer)
         )
 
         # Solve optionnel (phase B) : exécute le solveur SQP sur les frames cuits.

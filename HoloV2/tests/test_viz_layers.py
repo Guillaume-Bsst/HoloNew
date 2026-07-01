@@ -73,6 +73,26 @@ class FakeContext:
     margin = 0.1
     n_objects = 1
     style_link_names = ("link_a", "link_b")   # pour StyleLayer
+    object_meshes = ()                        # défaut : aucun mesh objet source (ObjectsLayer)
+
+
+class RecordingScene(FakeScene):
+    """FakeScene qui CAPTURE les arguments de chaque add_mesh_simple (name, verts monde, faces,
+    kwargs, handle) — pour inspecter les sommets monde poussés par ObjectsLayer au mesh objet source."""
+    def __init__(self):
+        self.mesh_calls = []
+
+    def add_mesh_simple(self, name, verts, faces, **kwargs):
+        """Enregistre l'appel et retourne un fake handle inspectable."""
+        h = FakeHandle()
+        self.mesh_calls.append((name, verts, faces, kwargs, h))
+        return h
+
+
+class RecordingServer:
+    """Fake server dont la scène capture les add_mesh_simple."""
+    def __init__(self):
+        self.scene = RecordingScene()
 
 
 class FakeField:
@@ -782,3 +802,97 @@ def test_objects_paused_toggle_redraws_solved_cloud():
 
     # Le cloud résolu doit maintenant être visible sans nouvel appel à update()
     assert layer._handles_sol[0].visible == True
+
+
+# ---------------------------------------------------------------------------
+# ObjectsLayer — mesh objet SOURCE (translucide, PAS solve-gaté)
+# ---------------------------------------------------------------------------
+
+def _fake_object_mesh():
+    """Petit ObjectMesh synthétique (3 sommets, 1 face) — repère local, poses factices."""
+    from src.prepare.contracts import ObjectMesh
+    return ObjectMesh(
+        vertices=np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], np.float64),
+        faces=np.array([[0, 1, 2]], np.int64),
+        poses=np.zeros((1, 7), np.float64), name="m", static=False)
+
+
+class FakeContextWithMesh(FakeContext):
+    """Contexte portant un mesh objet source (pour tester le rendu mesh d'ObjectsLayer)."""
+    object_meshes = (_fake_object_mesh(),)
+
+
+def test_objects_source_mesh_posed_world_verts():
+    """Le mesh source est posé par world = verts_local @ R.T + t : avec R=I et t connu, les sommets
+    monde poussés au handle == verts_local + t. Handle visible (toggle ON par défaut)."""
+    server = RecordingServer()
+    layer = ObjectsLayer()
+    layer.setup(server, FakeGui(), FakeContextWithMesh())
+    # _cb_mesh.value = True (FakeCheckbox par défaut)
+
+    pose = FakePose(n_objects=1)                       # object_rot = identité
+    pose.object_pos = np.array([[1.0, 2.0, 3.0]])      # t connu
+    frame = FakeFrame(
+        object_clouds_world=[np.ones((10, 3), np.float32)],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        pose=pose,
+    )
+    layer.update(frame, FakeUiState(channel="ground"))
+
+    # Un seul mesh poussé ; ses sommets monde == verts_local + t (R = I)
+    assert len(server.scene.mesh_calls) == 1
+    _name, world, _faces, _kwargs, handle = server.scene.mesh_calls[-1]
+    expected = np.array([[2.0, 2.0, 3.0], [1.0, 3.0, 3.0], [1.0, 2.0, 4.0]], np.float32)
+    assert np.allclose(world, expected)
+    assert handle.visible == True
+    assert layer._mesh_handles[0] is handle
+
+
+def test_objects_source_mesh_toggle_off_hides():
+    """Toggle «object mesh» OFF → le handle mesh est masqué (re-rendu avec visible=False)."""
+    server = RecordingServer()
+    layer = ObjectsLayer()
+    layer.setup(server, FakeGui(), FakeContextWithMesh())
+    layer._cb_mesh.value = False   # désactiver le toggle mesh
+
+    frame = FakeFrame(
+        object_clouds_world=[np.ones((10, 3), np.float32)],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        pose=FakePose(n_objects=1),
+    )
+    layer.update(frame, FakeUiState(channel="ground"))
+
+    assert layer._mesh_handles[0].visible == False
+
+
+def test_objects_source_mesh_empty_no_mesh():
+    """object_meshes vide → aucun mesh n'est poussé, aucune poignée mesh."""
+    server = RecordingServer()
+    layer = ObjectsLayer()
+    layer.setup(server, FakeGui(), FakeContext())   # object_meshes = ()
+
+    frame = FakeFrame(
+        object_clouds_world=[np.ones((10, 3), np.float32)],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+    )
+    layer.update(frame, FakeUiState(channel="ground"))
+
+    assert server.scene.mesh_calls == []
+    assert layer._mesh_handles == []
+
+
+def test_objects_source_mesh_guard_pose_none():
+    """Garde : frame.pose=None → aucun mesh poussé (pas de pose pour le placer), pas de levée."""
+    server = RecordingServer()
+    layer = ObjectsLayer()
+    layer.setup(server, FakeGui(), FakeContextWithMesh())
+
+    frame = FakeFrame(
+        object_clouds_world=[np.ones((10, 3), np.float32)],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        pose=None,
+    )
+    layer.update(frame, FakeUiState(channel="ground"))
+
+    assert server.scene.mesh_calls == []
+    assert layer._mesh_handles[0] is None
