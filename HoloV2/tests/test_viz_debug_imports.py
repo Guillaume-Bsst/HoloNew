@@ -37,3 +37,12 @@ def test_sdf_imports():
     assert callable(sdf.view_sdf) and callable(sdf.main)
     assert sdf.diverging is diverging                       # consomme core/colors.diverging
     assert callable(sdf.node_coords)                        # consomme le helper pur core.geometry
+
+
+def test_hoim3_imports():
+    """Vérifie que ``src.viz.debug.hoim3`` s'importe, expose ``view``/``main`` et consomme
+    ``core.player.play_loop`` (assertion structurelle : la boucle de lecture vient bien du socle core,
+    pas re-roulée dans le viewer ; Player n'est pas importé inutilement)."""
+    from src.viz.debug import hoim3
+    assert callable(hoim3.view) and callable(hoim3.main)
+    assert hoim3.play_loop is play_loop                     # consomme core/play_loop (pas de Player ré-roulé)
