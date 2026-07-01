@@ -35,8 +35,8 @@ def test_app_layer_set_is_twelve_layers():
     assert all(isinstance(layer, Layer) for layer in layers)
 
 
-def test_robot_layer_is_last_in_canonical_order():
-    """RobotLayer doit être la 8ème couche (ajoutée en fin, après les 7 couches de base)."""
+def test_robot_layer_conforms_to_protocol():
+    """RobotLayer est conforme au protocole Layer et porte le bon dossier « Robot (solved) »."""
     from src.viz.layers.robot import RobotLayer
 
     layers = __import__("src.viz.layers.ground", fromlist=["GroundLayer"])
