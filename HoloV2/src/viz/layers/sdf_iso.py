@@ -85,6 +85,10 @@ class SdfIsoLayer:
                 h.visible = False
                 continue
             pts_local, dist = iso_band_points(ch.sdf, band)     # (K, 3) locale, (K,)
+            # Bande exclut tous les nœuds → masquer le canal et passer au suivant
+            if len(pts_local) == 0:
+                h.visible = False
+                continue
             if ch.object_idx is None:
                 # Canal ground : frame locale == monde (SDF posé en monde à la construction)
                 pts_world = pts_local

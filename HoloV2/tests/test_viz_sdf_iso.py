@@ -239,3 +239,25 @@ def test_update_object_idx_out_of_range_hides():
     layer.update(frame, ui)
 
     assert layer._handles[0].visible is False
+
+
+def test_update_empty_band_hides():
+    """Bande trop étroite (band=0.01) : aucun nœud dans |d|<0.01 -> handle masqué, aucune levée.
+
+    On construit un SDF dont tous les nœuds ont |d|=1.0 (très loin de la surface) ; avec
+    band=0.01, iso_band_points retourne 0 points -> la garde de bande vide doit masquer le canal
+    sans lever d'exception.
+    """
+    nx = ny = nz = 3
+    grid = np.ones((nx, ny, nz))                            # toutes distances = +1.0 >> 0.01
+    witness = np.zeros((nx, ny, nz, 3))
+    sdf_far = SDF(grid=grid, witness=witness, origin=np.zeros(3), spacing=1.0, name="far")
+    ch = Channel(name="ground", object_idx=None, sdf=sdf_far)
+
+    layer = _build_layer((ch,), cb_val=True, band_val=0.01)  # checkbox=True, bande=0.01 m
+    frame = _make_frame()
+    ui = UiState(channel="ground", color_mode="uniform", point_size=0.01)
+
+    layer.update(frame, ui)  # ne doit pas lever
+
+    assert layer._handles[0].visible is False
