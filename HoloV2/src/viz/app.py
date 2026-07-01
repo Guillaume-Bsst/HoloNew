@@ -18,6 +18,7 @@ from .debug._args import add_scene_args, scene_from_args
 from .core.player import Player
 from .layers.contacts import ContactsLayer
 from .layers.correspondence import CorrespondenceLayer
+from .layers.object_contacts import ObjectContactsLayer
 from .layers.fields import FieldsLayer
 from .layers.geodesic import GeodesicLayer
 from .layers.ghost import GhostLayer
@@ -34,7 +35,7 @@ from .sources import BakeSource
 
 def run_app(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_frames: int = 200,
             solve: bool = False) -> None:
-    """Construit BakeSource -> Player -> les 12 couches portées (7 + RobotLayer + 4 interaction) -> sert.
+    """Construit BakeSource -> Player -> les 13 couches portées (7 + RobotLayer + 5 interaction) -> sert.
 
     ``solve=True`` (phase B) :
     - la source cuit ``SolvedFrame`` pour chaque frame (BakeSource exécute le solveur SQP) ;
@@ -42,14 +43,15 @@ def run_app(spec: SceneSpec, *, port: int = 8080, frame_step: int = 2, max_frame
     - ``CostDashboard`` est ajouté comme panel et agrège les coûts sur toute la séquence.
 
     ``solve=False`` : comportement identique à la phase A (7 couches + RobotLayer masquée,
-    aucun panel coût), non régressé. Les couches solve-gated (contacts, correspondance) se masquent
-    d'elles-mêmes quand ``frame.solved is None``."""
+    aucun panel coût), non régressé. Les couches solve-gated (contacts, correspondance,
+    object_contacts) se masquent d'elles-mêmes quand ``frame.solved is None``."""
     source = BakeSource(spec, PrepareConfig(), solve=solve, frame_step=frame_step,
                         max_frames=max_frames)
     # RobotLayer ajoutée toujours : elle se masque si frame.solved is None (solve désactivé)
     layers = [GroundLayer(), GhostLayer(), SkeletonLayer(), HumanCloudLayer(),
               ObjectsLayer(), FieldsLayer(), StyleLayer(), RobotLayer(),
               ContactsLayer(),          # roadmap #3 — contact cible vs atteint (solve-gated)
+              ObjectContactsLayer(),    # roadmap #3b — contact objet cible vs atteint (solve-gated)
               CorrespondenceLayer(),    # roadmap #4 — lignes SMPL↔G1 (solve-gated)
               SdfIsoLayer(),            # roadmap #6 — bande iso ≈ surface des SDF
               GeodesicLayer()]          # roadmap #7 — champ géodésique des canaux
