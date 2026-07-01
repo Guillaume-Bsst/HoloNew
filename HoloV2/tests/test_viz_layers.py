@@ -126,13 +126,57 @@ class FakePose:
 _UNSET = object()
 
 
+class FakeSolvedFrame:
+    """Fake SolvedFrame avec object_poses (N, 7) — pose identité par défaut (xyz=0, qw=1)."""
+    def __init__(self, n_objects=1):
+        # (N, 7) : [x, y, z, qw, qx, qy, qz] — quaternion identité
+        poses = np.zeros((n_objects, 7), dtype=np.float64)
+        poses[:, 3] = 1.0   # qw=1
+        self.object_poses = poses
+
+
+class FakeCheckboxCapture:
+    """Fake checkbox qui capture les callbacks on_update (pour tests paused-toggle)."""
+    def __init__(self, initial_value=True):
+        self.value = initial_value
+        self._callbacks = []
+
+    def on_update(self, callback):
+        """Capture le callback au lieu de l'ignorer."""
+        self._callbacks.append(callback)
+
+    def fire(self, event=None):
+        """Déclenche tous les callbacks enregistrés (simule un changement de valeur GUI)."""
+        for cb in self._callbacks:
+            cb(event)
+
+
+class FakeGuiCapturing:
+    """Fake GUI qui retourne des FakeCheckboxCapture respectant la valeur initiale passée.
+    Permet de capturer les callbacks on_update et de tester le paused-toggle."""
+    def __init__(self):
+        self.checkboxes = []
+
+    def add_checkbox(self, *args, **kwargs):
+        """Crée un FakeCheckboxCapture avec la valeur initiale passée en 2ème arg positionnel."""
+        initial = args[1] if len(args) > 1 else kwargs.get("initial", True)
+        cb = FakeCheckboxCapture(initial_value=initial)
+        self.checkboxes.append(cb)
+        return cb
+
+
 class FakeFrame:
     """Fake VizFrame avec pose et vertices. Passer ``None`` à ``human_field`` ou ``targets``
     produit vraiment ``None`` (utile pour tester les gardes no-op) ; omettre le paramètre
-    fournit des données valides par défaut."""
+    fournit des données valides par défaut.
+
+    ``solved`` : FakeSolvedFrame ou None (None par défaut, simule l'absence de solve).
+    ``pose``   : FakePose ou None ; si omis, construit FakePose(bone_pos).  Passer
+                 explicitement None permet de tester les gardes ``frame.pose is None``."""
     def __init__(self, bone_pos=None, smpl_verts_world=None, human_cloud_world=_UNSET,
-                 object_clouds_world=_UNSET, human_field=_UNSET, targets=_UNSET):
-        self.pose = FakePose(bone_pos)
+                 object_clouds_world=_UNSET, human_field=_UNSET, targets=_UNSET,
+                 solved=None, pose=_UNSET):
+        self.pose = FakePose(bone_pos) if pose is _UNSET else pose
         self.smpl_verts_world = smpl_verts_world
         self.human_cloud_world = (np.random.randn(10, 3).astype(np.float32)
                                   if human_cloud_world is _UNSET else human_cloud_world)
@@ -140,6 +184,7 @@ class FakeFrame:
                                     if object_clouds_world is _UNSET else object_clouds_world)
         self.human_field = FakeField(2, 10) if human_field is _UNSET else human_field
         self.targets = FakeTargets(1, 2, 10) if targets is _UNSET else targets
+        self.solved = solved
 
 
 class FakeUiState:
@@ -495,3 +540,133 @@ def test_style_update_style_none():
     assert layer._frames.visible == False
     for h in layer._labels:
         assert h.visible == False
+
+
+# ---------------------------------------------------------------------------
+# ObjectsLayer — cloud résolu (solve-gaté, toggle, gardes, paused-toggle)
+# ---------------------------------------------------------------------------
+
+def test_objects_solved_cloud_drawn_on_happy_frame():
+    """Chemin nominal résolu : solved présent + toggle activé → cloud résolu visible, vert,
+    distinct du cloud source orange (couleur distincte par inspection du 1er pixel)."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+    # FakeCheckbox.value = True par défaut → _cb_solved.value = True
+
+    pts = np.ones((10, 3), np.float32)
+    frame = FakeFrame(
+        object_clouds_world=[pts],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        solved=FakeSolvedFrame(n_objects=1),
+    )
+    ui = FakeUiState(channel="ground", color_mode="uniform")
+    layer.update(frame, ui)
+
+    # Cloud résolu : handle renseigné et visible
+    assert layer._handles_sol[0].visible == True
+    assert layer._handles_sol[0].points is not None
+    assert layer._handles_sol[0].colors is not None
+    # Couleur résolue distincte de la couleur source (vert vs orange)
+    assert not np.array_equal(layer._handles[0].colors[0], layer._handles_sol[0].colors[0])
+
+
+def test_objects_solved_cloud_hidden_when_solved_none():
+    """Solve-gaté : frame.solved=None → cloud résolu masqué sans lever."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+
+    pts = np.ones((10, 3), np.float32)
+    frame = FakeFrame(
+        object_clouds_world=[pts],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        solved=None,
+    )
+    layer.update(frame, FakeUiState(channel="ground"))
+
+    assert layer._handles_sol[0].visible == False
+
+
+def test_objects_solved_cloud_hidden_when_toggle_off():
+    """Toggle off : _cb_solved.value=False → cloud résolu masqué même si solved présent."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+    layer._cb_solved.value = False   # désactiver manuellement le toggle résolu
+
+    pts = np.ones((10, 3), np.float32)
+    frame = FakeFrame(
+        object_clouds_world=[pts],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        solved=FakeSolvedFrame(n_objects=1),
+    )
+    layer.update(frame, FakeUiState(channel="ground"))
+
+    assert layer._handles_sol[0].visible == False
+
+
+def test_objects_solved_cloud_guard_pose_none():
+    """Garde : frame.pose=None → cloud résolu masqué, source cloud inchangé, pas de levée."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContext())
+    # _cb_solved.value = True (FakeCheckbox par défaut)
+
+    pts = np.ones((10, 3), np.float32)
+    frame = FakeFrame(
+        object_clouds_world=[pts],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        solved=FakeSolvedFrame(n_objects=1),
+        pose=None,
+    )
+    layer.update(frame, FakeUiState(channel="ground", color_mode="uniform"))
+
+    # Cloud résolu doit être masqué (pas de pose pour calculer la transformation)
+    assert layer._handles_sol[0].visible == False
+
+
+def test_objects_solved_cloud_guard_fewer_object_poses():
+    """Garde bornes : solved.object_poses plus court que _handles_sol → surplus masqué sans IndexError."""
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), FakeGui(), FakeContextTwoObjects())
+    # _cb_solved.value = True (FakeCheckbox par défaut)
+
+    pts0 = np.ones((10, 3), np.float32)
+    pts1 = np.ones((10, 3), np.float32)
+    frame = FakeFrame(
+        object_clouds_world=[pts0, pts1],
+        targets=FakeTargets(n_objects=2, n_channels=2, n_points=10),
+        solved=FakeSolvedFrame(n_objects=1),   # 1 seule pose pour 2 objets
+        pose=FakePose(n_objects=2),
+    )
+    layer.update(frame, FakeUiState(channel="ground", color_mode="uniform"))
+
+    # 1er objet : pose résolue disponible (k=0 < 1)
+    assert layer._handles_sol[0].visible == True
+    # 2ème objet : k=1 >= len(solved.object_poses)=1 → masqué
+    assert layer._handles_sol[1].visible == False
+
+
+def test_objects_paused_toggle_redraws_solved_cloud():
+    """Paused-toggle : activation de _cb_solved en pause re-dessine le cloud résolu
+    sans nudge du slider (via _last_frame/_last_ui mémorisés)."""
+    gui = FakeGuiCapturing()
+    layer = ObjectsLayer()
+    layer.setup(FakeServer(), gui, FakeContext())
+    # gui.checkboxes[0] = _cb (value=True), gui.checkboxes[1] = _cb_solved (value=False)
+
+    pts = np.ones((10, 3), np.float32)
+    frame = FakeFrame(
+        object_clouds_world=[pts],
+        targets=FakeTargets(n_objects=1, n_channels=2, n_points=10),
+        solved=FakeSolvedFrame(n_objects=1),
+    )
+    ui = FakeUiState(channel="ground")
+
+    # 1ère update : _cb_solved.value = False → cloud résolu masqué
+    layer.update(frame, ui)
+    assert layer._handles_sol[0].visible == False
+
+    # Simule l'activation du toggle résolu EN PAUSE (sans nudge du slider)
+    gui.checkboxes[1].value = True
+    gui.checkboxes[1].fire(None)   # déclenche _on_change → re-invoque update()
+
+    # Le cloud résolu doit maintenant être visible sans nouvel appel à update()
+    assert layer._handles_sol[0].visible == True
