@@ -112,8 +112,11 @@ def test_object_pos_scaled_by_scene():
     ft_native = process_frame(g, ctx, robot, f=0, cfg=identity)
     ft_scaled = process_frame(g, ctx, robot, f=0)                            # défaut None,None -> ratio
     np.testing.assert_allclose(ft_native.object_pos[0], [0.2, 0.3, 0.5], atol=1e-9)
-    # z scale uniforme par ratio car StyleConfig().ground_height == 0.0 (ancre sol = origine)
-    np.testing.assert_allclose(ft_scaled.object_pos[0], np.array([0.2, 0.3, 0.5]) * ratio, atol=1e-9)
+    # xy scalés par ratio autour de l'origine ; z ANCRÉ sur la frame 0 de l'objet (object_z0 = 0.5),
+    # on ne scale que la déviation temporelle. Ici l'objet reste à sa hauteur de référence (z == z0 à
+    # chaque frame) => déviation nulle => z invariant (0.5), PAS 0.5*ratio : l'ancre frame-0 empêche
+    # l'objet de taille fixe de s'enfoncer (régression anti-enfoncement vs l'ancienne ancre-sol).
+    np.testing.assert_allclose(ft_scaled.object_pos[0], [0.2 * ratio, 0.3 * ratio, 0.5], atol=1e-9)
     np.testing.assert_array_equal(ft_scaled.object_rot, ft_native.object_rot)   # rotation inchangée
 
 

@@ -19,7 +19,7 @@ from ..obs import NULL
 from ..prepare.contracts import GroundedScene, InteractionContext, RobotSpec
 from .config import TargetsConfig
 from .contracts import FramePose, FrameTargets, FrameTrace
-from .scale import apply_scene_scale, resolve_scale, scale_ground_channels
+from .scale import resolve_scale, scale_ground_channels, scale_object_trajectory
 from .interaction import (environment_interaction_targets, eval_fields, pose_cloud,
                           robot_interaction_targets, transport)
 from . import style
@@ -93,7 +93,11 @@ def _build_frame(grounded: GroundedScene, ctx: InteractionContext, robot: RobotS
         ratio = robot.height / grounded.body.stature
         s_xy, s_z = resolve_scale(cfg.scene_scale, ratio)
         ground_h = cfg.style.ground_height
-        scaled_object_pos = apply_scene_scale(pose.object_pos, s_xy, s_z, ground_h)  # (N, 3) centre objet
+        # object_z0 = z monde de la frame 0 de chaque objet (ancré calibration) = l'ancre Z de
+        # placement (V1 holosoma). Constante séquence, lue des poses grounded — pas de la FramePose
+        # per-frame. On ne scale que la déviation temporelle en z pour ne pas enfoncer l'objet.
+        object_z0 = np.array([poses[0, 2] for poses in grounded.object_poses], np.float64)  # (N,)
+        scaled_object_pos = scale_object_trajectory(pose.object_pos, object_z0, s_xy, s_z)  # (N, 3)
         ground_idx = tuple(c for c, ch in enumerate(ctx.channels) if ch.object_idx is None)
         robot_field = scale_ground_channels(robot_field, ground_idx, s_xy, s_z, ground_h)
         object_fields = tuple(
