@@ -120,11 +120,12 @@ consommateurs solve se masquent. Couches/panels concernés :
 
 Couches composables ajoutées au viewer prod (`app.py`), une par fichier `layers/`, lisant le SEUL
 view-model. Géométrie d'affichage pure (testée en unitaire) + classe `Layer` mince (handles viser
-persistants). Les deux premières sont **solve-gated** (no-op si `frame.solved is None`).
+persistants). Les couches contact/correspondance sont **solve-gated** (no-op si `frame.solved is None`).
 
 | Couche | Fichier | Donnée (view-model) | Solve-gated |
 |---|---|---|---|
-| **Contacts (robot)** (#3) | `layers/contacts.py` · `ContactsLayer` | `targets.robot_interaction.field` (cible) vs `solved.contact_achieved.field` (atteint) sur `solved.robot_points_world` | oui |
+| **Contacts robot** (#3) | `layers/contacts.py` · `ContactsLayer` | cible `targets.robot_interaction.field` vs atteint `solved.contact_achieved.field` sur `solved.robot_points_world` **+ witness cible/atteint** (lignes point→surface, mappées via la pose objet **source**/**résolue** du canal) | oui |
+| **Contacts objets** | `layers/object_contacts.py` · `ObjectContactsLayer` | cible `targets.env_interaction.per_object[k]` sur cloud **source** vs atteint `solved.contact_achieved.env[k].field` sur cloud **résolu** (`object_cloud_solved`) **+ witness** (mappé via l'objet du **canal**, pas l'objet-probe) | oui |
 | **Correspondance SMPL↔G1** (#4) | `layers/correspondence.py` · `CorrespondenceLayer` | `human_cloud_world[ctx.correspondence.smpl_idx]` → `solved.robot_points_world` | oui |
 | **SDF iso (surface)** (#6) | `layers/sdf_iso.py` · `SdfIsoLayer` | bande `|d|<band` des `ctx.channels[c].sdf`, posée par `frame.pose` | non |
 | **Champ géodésique** (#7) | `layers/geodesic.py` · `GeodesicLayer` | `ctx.channels[c].geodesic` (points/normales + heat mono-source `geo[src]`), posée par `frame.pose` | non |
@@ -132,6 +133,14 @@ persistants). Les deux premières sont **solve-gated** (no-op si `frame.solved i
 Assets statiques consommés : `VizContext.channels` (chaque `Channel` porte `sdf` + `geodesic` +
 `object_idx`) et `VizContext.correspondence` — ajoutés au view-model et peuplés par `BakeSource` depuis
 l'`InteractionContext` de `prepare`.
+
+**Debug solve — état source vs résolu (les objets sont des variables de l'optimiseur).** La couche
+`objects` gagne un sous-toggle **« cloud objet résolu »** (posé à `solved.object_poses`, vert vs source
+orange, via `object_cloud_solved`) → on voit de combien l'optimiseur a déplacé chaque objet. Le fil
+source/résolu est appliqué partout : `contacts` (robot) et `object_contacts` ancrent la **cible** à
+l'état **source** et l'**atteint** à l'état **résolu** (nuages + witness). Helpers purs partagés :
+`layers/_contact_ops.py` (`object_cloud_solved`, `witness_segments`). Aucune donnée nouvelle plombée —
+`solved.contact_achieved.env[k]` (contact objet atteint) était déjà dans le view-model.
 
 **Roadmap #5 « activité des contraintes » : hors périmètre / BLOQUÉ.** Afficher le slack par-contrainte
 exige que `solve/` l'exporte dans `Step`/`FrameInfo` (changement de contrat `solve`, pas une tâche viz) ;

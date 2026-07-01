@@ -80,7 +80,8 @@ $PY -m src.viz.debug.sdf --plane 4.0 --spacing 0.02
 ```
 
 Dans le navigateur : les dossiers de gauche = une checkbox par couche (actives **même en pause**).
-Avec `--solve`, coche **robot G1 résolu** / **contact cible↔atteint** / **lignes SMPL↔G1** ; le panel
+Avec `--solve`, coche **robot G1 résolu** / **contact robot cible↔atteint** (+ **witness cible/atteint**) /
+**contacts objets** / **cloud objet résolu** (vert vs source) / **lignes SMPL↔G1** ; le panel
 **cost dashboard** trace le coût par terme (frames non-convergées en rouge). Port occupé → `fuser -k 8080/tcp`.
 
 ### Détail des flags
@@ -96,10 +97,11 @@ Le viewer prod (`src.viz.app`) + les debug `scene`/`cloud` partagent les mêmes 
 
 ### Viewer principal unifié — `src.viz.app` (humain/cibles **+ robot résolu**)
 
-`BakeSource → Player → 12 couches composables`, chacune avec sa checkbox (actives **même en pause**) :
-sol (SDF réel) · ghost SMPL · squelette · clouds objets · champ humain (witness/normales) · cibles
-style (points/frames/labels) · **robot G1 résolu** · contact cible-vs-atteint · lignes SMPL↔G1 ·
-iso-surface SDF · champ géodésique. GUI : dossier **Playback** (slider/play/fps) + **Selectors**
+`BakeSource → Player → 13 couches composables`, chacune avec sa checkbox (actives **même en pause**) :
+sol (SDF réel) · ghost SMPL · squelette · clouds objets (source + **résolu**) · champ humain
+(witness/normales) · cibles style (points/frames/labels) · **robot G1 résolu** · contact robot
+cible-vs-atteint (+ **witness cible/atteint**) · **contacts objets** (cible/atteint + witness, en ref objet) ·
+lignes SMPL↔G1 · iso-surface SDF · champ géodésique. GUI : dossier **Playback** (slider/play/fps) + **Selectors**
 (canal / mode couleur uniform-distance-active / taille des points).
 
 ```bash
