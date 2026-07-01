@@ -1,63 +1,73 @@
 # HoloV2 — `viz/` (visualiseur)
 
-Module **top-level indépendant**, **consommateur pur** : il LIT des artefacts typés et les
-affiche. **Zéro hook** dans le calcul, jamais d'`if visualize` dans `prepare`/`targets`.
-`viz/` importe les types via la sortie publique des étages (`..prepare.contracts` /
-`..targets.contracts`) uniquement ; jamais l'inverse.
+Module **top-level indépendant**, **consommateur pur** (règle d'or 6) : il LIT des artefacts typés et
+les affiche. **Zéro hook** dans le calcul, jamais d'`if visualize` dans `prepare`/`targets`/`solve`.
+viser est confiné à `core/viser_ops`, aux `layers/`, au `Player` et à `app.py`.
 
-## Le seam : `trace_frame` -> `FrameTrace`
+## Fil rouge : Source → VizFrame → Layers (le Player orchestre)
 
-`targets/pipeline.py` expose DEUX entrées, mêmes fonctions pures (cœur partagé `_build_frame`) :
-- `process_frame(grounded, ctx, robot, f) -> FrameTargets`   (lean, prod)
-- `trace_frame(grounded, ctx, robot, f)   -> FrameTrace`      (instrumenté : garde chaque intermédiaire)
+`viz/` possède SON view-model par frame et le construit depuis la sortie publique du pipeline
+(`prepare` + `targets` (+ `solve`)). Les couches ne lisent QUE le view-model, jamais les contrats
+pipeline.
 
-`FrameTrace` (défini dans `targets/contracts.py`) bundle tous les artefacts d'une frame :
-`pose (FramePose)` · `human_cloud_world` · `object_clouds_world` · `human_field`
-(pré-transport) · `targets (FrameTargets)`. → intermédiaires explicites et typés, pas
-d'effets de bord.
+- **`model.py`** (numpy-only, sans viser/torch) :
+  - `VizContext` — assets STATIQUES par scène, fournis à chaque couche au `setup` (noms de canaux,
+    `margin`, links de style, faces/parents SMPL, `n_objects`, URDF robot, `has_solve`, SDF du sol).
+  - `VizFrame` — UNE frame (`Source.get(i)`) : `pose`, `smpl_verts_world`, `human_cloud_world`,
+    `object_clouds_world`, `human_field`, `targets`, `solved | None`.
+  - `SolvedFrame` — bundle post-solve (`q`, `object_poses`, points robot FK, transforms de liens,
+    `style_achieved`/`contact_achieved`, `cost`/`cost_by_term`/`n_iters`/`status`). `None` tant que
+    non résolu → les couches solve se masquent. **Optionnel de bout en bout.**
 
-## Design retenu : UN gros viewer viser, plein de toggles (pas un registry)
+- **`sources.py`** (numpy-only) — protocole `Source` (`get(i)->VizFrame`, `n_frames`, `context`) :
+  - `BakeSource(spec, config, *, solve=False, frame_step, max_frames)` : `prepare` 1×, puis bake
+    `trace_frame` + `smpl_verts_world` par frame montrée (playback fluide offline). `solve=False`
+    laisse `solved=None` ; `solve=True` (bake `SolveTrajectory` + `Evaluator`) = **phase B**.
+  - `LiveSource` : `trace_frame` (+ solve) à la volée — **différé** (même interface plus tard).
 
-`viz/viewer.py` = un seul `Viewer` viser avec beaucoup de paramètres activables/désactivables.
-Interne rangé proprement : **une méthode `_draw_<couche>` par couche**, gardée par sa checkbox.
-C'est le SEUL endroit qui connaît viser (effets confinés).
+- **`core/`** (socle partagé prod + debug) :
+  - `colors.py` — `heat_distance` · `diverging` · `parity` · `active_mask` · `AXIS_COLORS` (colormaps
+    uniques, ex-dup ×3).
+  - `viser_ops.py` — `quat_wxyz_to_R` · `hide` (tue le hack du triangle dégénéré) · wrappers add_*.
+  - `layer.py` — protocole `Layer` (`folder`, `setup(server, gui, ctx)`, `update(frame, ui)`) +
+    `UiState` (sélecteurs partagés : canal · mode couleur · taille de point).
+  - `player.py` — `Player` : folder Playback (slider/play/fps) + Selectors, le `render()` qui itère
+    `update` sur les couches, la boucle play/fps + le keep-alive (ex-dup ×4).
 
-### Entrées du viewer
-- assets STATIQUES de `prepare/` : `GroundedScene` (porte `body` + `calibration`), `InteractionContext`
-  (channels, nuages-rest, correspondance).
-- un fournisseur de frames `get(f) -> FrameTrace` :
-  - **bake** : précalcule tous les `FrameTrace` -> playback fluide (offline),
-  - **live** : `trace_frame(f)` à la volée (debug téléop).
-  Même viewer, on branche l'un ou l'autre.
+## Couches (`layers/`, 1 fichier = 1 toggle)
 
-### Couches (toggles), groupées
-- **Playback** : slider frame · play · fps
-- **Statique** : sol (SDF de plan) · mesh SMPL (ghost) · meshes objets · SDF (iso ≈ surface) ·
-  correspondance (lignes SMPL↔G1) · nuages-rest
-- **Style** : points cibles par lien · poids
-- **Interaction – humain** : nuage humain posé · witnesses · normales · masque actif
-- **Interaction – objets** : nuages objets posés · champs
-- **Interaction – robot** : points G1 (champ transporté)
-- **Sélecteurs globaux** : canal (dropdown : ground/obj0/…) · mode couleur (uni / heatmap
-  distance / actif) · taille des points
+Portées de l'ancien `viewer.py` : `ground` (lit le **SDF du canal sol** — plan/terrain réel, plus de
+box plat), `ghost` (mesh SMPL), `skeleton`, `human_cloud` (coloré par champ), `objects` (nuages +
+champ env), `fields` (witness + normales), `style` (points + frames + labels). Chaque couche garde
+ses handles persistants (créés au `setup`) et n'affecte que `.points/.colors/.visible` au `update` ;
+sa checkbox bascule la visibilité localement.
 
-### Statique vs dynamique (perf)
-- statique : ajouté UNE fois (handles gardés).
-- dynamique : mis à jour au slider depuis `FrameTrace` (handles `.points/.colors/.visible`).
+**Roadmap (phase B+)** : `robot` (G1 résolu, ViserUrdf, lit `solved.q`), `cost_dashboard` (panel 2D),
+`contacts`, `correspondence`, `sdf_iso`, `geodesic`. Ajouter une couche = 1 fichier `layers/x.py` +
+1 ligne dans la liste de `app.py`.
 
-## Visualiseurs de debug incrémentaux (par étape)
+## Entrée prod : `app.py`
 
-Avant le gros `viewer.py` (FrameTrace), des viewers viser **focalisés** valident chaque étape tôt —
-mêmes règles (consommateurs purs, viser confiné, toggles par couche) :
-- `viz/scene.py` : étape **load/grounding** (mesh SMPL posé, squelette, objets, sol, debug grounding).
-- `viz/cloud.py` : bake **`point_cloud`** — nuage humain posé par `pose_cloud` (coloré par l'écart de
-  parité vs la surface SMPL pleine) + nuages objets posés en monde (rigides). Runnable
-  `python -m src.viz.cloud --motion-path … --model-dir …`.
+`run_app(spec, *, port, frame_step, max_frames, solve=False)` câble `BakeSource → Player → 7 couches →
+run()`. CLI : `python -m src.viz.app --motion-path … --model-dir … [--dataset … --max-frames …]`
+(flags partagés via `_scene_args`). `viz.run_app` / `viz.main` sont re-exportés.
 
-Ils ne remplacent pas le viewer `FrameTrace` (qui viendra avec `targets/`) ; ce sont des outils de
-debug **par étape**, livrés au fil de l'implémentation.
+## Viewers de debug par étape
+
+`viz/scene.py` · `viz/cloud.py` · `viz/sdf.py` · `viz/hoim3_multiperson.py` — consommateurs purs
+focalisés par étape (load / point_cloud / sdf / multi-personne). Leur réécriture sur `core/` est la
+**phase 6** de la migration (indépendante des couches prod).
+
+## Tests
+
+`viz` = effets aux extrémités ; on ne teste pas le rendu viser. Helpers purs (`core/colors`,
+`viser_ops.quat_wxyz_to_R`/`hide`, `ground_surface_mesh`) → entrée connue/uint8 connu. `BakeSource` →
+déterminisme + formes/dtypes + chemin `solved=None` (sur données démo, `max_frames` très bas). Couches
+minces → conformité structurelle (`isinstance(layer, Layer)` + `folder`) ; parité visuelle = check
+manuel. Tests dans `HoloV2/tests/`, python de l'env `holonew`.
 
 ## Anti-spaghetti
-- viewer = 1 responsabilité (afficher), 1 méthode par couche, effets confinés ici.
-- lit `FrameTrace` + assets `prepare` via `..targets.contracts` / `..prepare.contracts` ; n'appelle aucune logique de calcul
-  (sauf le fournisseur `get(f)`, qui est juste `trace_frame` ou un bake).
+- Source → VizFrame → Layers, acyclique : `viz/` importe la sortie publique de prepare/targets/solve ;
+  rien n'importe `viz/`.
+- viser confiné (core/viser_ops + layers + Player + app) ; `model.py`/`sources.py` numpy-only.
+- `targets`/`solve` jamais modifiés (consommateur pur) ; `solved` optionnel partout.

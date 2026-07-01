@@ -67,15 +67,15 @@ Tous les viewers partagent les mêmes flags : `--dataset`, `--motion-path`, `--m
 
 ```bash
 # Forme courte (lit [models].smplx + [datasets.<nom>] depuis paths.toml ; motion relative à `motion`)
-$PY -m src.viz.viewer --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 30
-$PY -m src.viz.viewer --dataset sfu    --motion-path 0005/0005_Jogging001_stageii.npz --max-frames 30
+$PY -m src.viz.app --dataset hodome --motion-path smplx/subject01_baseball.npz --max-frames 30
+$PY -m src.viz.app --dataset sfu    --motion-path 0005/0005_Jogging001_stageii.npz --max-frames 30
 # OMOMO : motion relative à [datasets.omomo].motion (= OMOMO_new) — plus besoin d'absolu
-$PY -m src.viz.viewer --dataset omomo  --motion-path sub10_clothesstand_000.pt --max-frames 30
+$PY -m src.viz.app --dataset omomo  --motion-path sub10_clothesstand_000.pt --max-frames 30
 ```
 
 ```bash
 # HODome (objets) — exemple complet
-$PY -m src.viz.viewer --dataset hodome \
+$PY -m src.viz.app --dataset hodome \
     --motion-path $DATA/HODome/smplx/subject01_baseball.npz \
     --model-dir $SMPLX --dataset-root $DATA/HODome \
     --max-frames 30 --frame-step 2 --port 8080
@@ -107,12 +107,12 @@ $PY -m src.viz.hoim3_multiperson --motion-path <human.npz> --model-dir $SMPLX --
 
 ```bash
 # OMOMO (InterMimic .pt ; dataset-root = release OMOMO pour betas/scale/meshes)
-$PY -m src.viz.viewer --dataset omomo \
+$PY -m src.viz.app --dataset omomo \
     --motion-path $DATA/OMOMO_new/OMOMO_new/sub10_clothesstand_000.pt \
     --model-dir $SMPLX --dataset-root $DATA/OMOMO --max-frames 30
 
 # SFU (locomotion, sans objet ni dataset-root)
-$PY -m src.viz.viewer --dataset sfu \
+$PY -m src.viz.app --dataset sfu \
     --motion-path $DATA/SFU/SFU/0005/0005_Jogging001_stageii.npz \
     --model-dir $SMPLX --max-frames 30
 ```

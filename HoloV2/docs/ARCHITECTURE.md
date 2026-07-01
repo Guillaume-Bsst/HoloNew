@@ -82,7 +82,7 @@ HoloV2/                  racine : CLAUDE.md · .gitignore · docs/ · cache/ · 
       pipeline.py      process_frame -> FrameTargets ; trace_frame -> FrameTrace
 
     viz/             VISUALISEUR — consommateur pur, zéro hook                         [VIZ.md]
-      viewer.py        gros viewer viser, toggles ; lit FrameTrace + assets prepare
+      app.py           viewer prod unifié (Source → VizFrame → Layers) ; core/ + layers/ + model + sources
 
     solve/           ÉTAPE 3 (à venir) — contracts.py + config.py + point d'entrée     [SOLVE.md]
 ```
@@ -98,7 +98,7 @@ solve/    ──► qpos                from ..targets.contracts import FrameTar
 ```
 Aucun cycle (deps aval seulement). **`viz` est un consommateur, pas un étage du pipeline** : la règle
 « sortie publique seulement » contraint le pipeline linéaire (prepare→targets→solve), pas le visu. Le
-viewer de PROD (`viz/viewer.py`, le `FrameTrace`) respecte la seam (`runner.prepare` + `.contracts`),
+viewer de PROD (`viz/app.py`, Source → VizFrame → Layers) respecte la seam (`runner.prepare` + `.contracts`),
 mais les viewers de DEBUG *par étage* (`viz/scene`=load, `viz/cloud`=point_cloud, `viz/sdf`=sdf,
 `viz/hoim3_multiperson`) pilotent **délibérément le builder interne de l'étage qu'ils visualisent**
 (`load.mesh`, `load.smpl`, `sdf.build`, `point_cloud.*`, `calibration`…) pour montrer des intermédiaires
