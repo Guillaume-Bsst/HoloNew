@@ -55,7 +55,7 @@ def test_context_bad_channel_count_raises():
     with pytest.raises(ValueError):
         VizContext(channel_names=("ground",), margin=0.05, style_link_names=(),
                    smpl_faces=np.zeros((4, 3), np.int64), smpl_parents=np.array([-1]),
-                   n_objects=2,  # 2 objects but only 1 channel name -> mismatch
+                   n_objects=2,  # 2 objets mais seulement 1 nom de canal -> désaccord
                    robot_urdf_path=__import__("pathlib").Path("/x"), has_solve=False, ground_sdf=_sdf())
 
 
@@ -76,7 +76,7 @@ def test_vizframe_solved_none_ok():
 def test_vizframe_bad_cloud_raises():
     with pytest.raises(ValueError):
         VizFrame(pose=_pose(), smpl_verts_world=None,
-                 human_cloud_world=np.zeros((3, 2), np.float32),  # not (N, 3)
+                 human_cloud_world=np.zeros((3, 2), np.float32),  # pas (N, 3)
                  object_clouds_world=(), human_field=_field(), targets=_targets(), solved=None)
 
 

@@ -1,7 +1,6 @@
 """Protocole Layer + UiState — sélecteurs gelés et conformance structurelle runtime_checkable."""
 import dataclasses
 
-import numpy as np
 import pytest
 
 from src.viz.core.layer import Layer, UiState

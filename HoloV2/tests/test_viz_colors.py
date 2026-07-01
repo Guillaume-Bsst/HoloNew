@@ -1,15 +1,15 @@
-"""colors — known input -> known uint8 RGB (ports viewer.py/_heat_distance/_active_colors,
-cloud.py/_heat, sdf.py/_diverging into one module)."""
+"""colors — entrée connue -> sortie uint8 RGB connue (regroupe viewer.py/_heat_distance/_active_colors,
+cloud.py/_heat, sdf.py/_diverging en un seul module)."""
 import numpy as np
 
 from src.viz.core.colors import AXIS_COLORS, active_mask, diverging, heat_distance, parity
 
 
 def test_heat_distance_anchors():
-    # d <= 0 -> NEAR (blue) ; d == margin -> FAR (red) ; clamped both ends.
+    # d <= 0 -> NEAR (bleu) ; d == margin -> FAR (rouge) ; clamped aux deux extrémités.
     out = heat_distance(np.array([-1.0, 0.0, 0.05]), 0.05)
     assert out.dtype == np.uint8 and out.shape == (3, 3)
-    assert np.array_equal(out[0], [40, 90, 255])     # clamped to NEAR
+    assert np.array_equal(out[0], [40, 90, 255])     # clamped vers NEAR
     assert np.array_equal(out[1], [40, 90, 255])     # d=0 -> NEAR
     assert np.array_equal(out[2], [255, 60, 50])     # d=margin -> FAR
 
@@ -17,23 +17,23 @@ def test_heat_distance_anchors():
 def test_active_mask():
     out = active_mask(np.array([True, False]))
     assert out.dtype == np.uint8
-    assert np.array_equal(out[0], [90, 255, 130])    # active -> bright green
-    assert np.array_equal(out[1], [70, 70, 80])      # inactive -> dim grey
+    assert np.array_equal(out[0], [90, 255, 130])    # actif -> vert vif
+    assert np.array_equal(out[1], [70, 70, 80])      # inactif -> gris tamisé
 
 
 def test_diverging_white_blue_red():
     out = diverging(np.array([0.0, -1.0, 1.0]), 1.0)
     assert out.dtype == np.uint8
-    assert np.array_equal(out[0], [255, 255, 255])   # 0 -> white
-    assert np.array_equal(out[1], [51, 89, 255])     # -vmax -> blue
-    assert np.array_equal(out[2], [255, 63, 51])     # +vmax -> red
+    assert np.array_equal(out[0], [255, 255, 255])   # 0 -> blanc
+    assert np.array_equal(out[1], [51, 89, 255])     # -vmax -> bleu
+    assert np.array_equal(out[2], [255, 63, 51])     # +vmax -> rouge
 
 
 def test_parity_blue_to_red():
     out = parity(np.array([0.0, 0.02]), 0.02)
     assert out.dtype == np.uint8
-    assert np.array_equal(out[0], [0, 0, 255])       # err 0 -> blue
-    assert np.array_equal(out[1], [255, 0, 0])       # err >= vmax -> red
+    assert np.array_equal(out[0], [0, 0, 255])       # err 0 -> bleu
+    assert np.array_equal(out[1], [255, 0, 0])       # err >= vmax -> rouge
 
 
 def test_axis_colors():

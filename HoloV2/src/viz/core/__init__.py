@@ -1,1 +1,1 @@
-"""viz/core — the shared framework (colormaps, viser-confined ops, Layer protocol, Player)."""
+"""viz/core — le cadre partagé (colormaps, ops confinées à viser, protocole Layer, Player)."""
