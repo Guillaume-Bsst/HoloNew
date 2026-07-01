@@ -82,3 +82,32 @@ def test_O_nonzero_when_pose_drifts():
     R_cur = np.array([[[1, 0, 0], [0, 0, -1], [0, 1, 0.0]]]); p_cur = np.array([[0.1, 0.0, 0.0]])
     e = se3_log_world(R_ref, p_ref, R_cur, p_cur)
     assert e.shape == (1, 6) and not np.allclose(e, 0.0)
+
+
+def test_O_anchors_current_iterate_to_observed():
+    """Le terme O ancre l'itéré COURANT du solveur à la pose OBSERVÉE : quand la pose courante a dérivé,
+    ``c = w_obj · se3_log_world(observée, courante)`` est NON nul et ramène l'objet. Sans l'itéré courant
+    (défaut = observée) ``c = 0`` -> O ne fait qu'amortir δξ sans jamais ancrer (``w_obj`` inopérant)."""
+    rng = np.random.default_rng(5)
+    N, C, P, nv, M = 1, 2, 2, 9, 1
+    names = ("ground", "obj0")
+    act = np.zeros((C, P), bool)                          # aucun CO-D actif -> on isole le terme O
+    env_field = _mcf(C, P, rng, act, names)
+    env = ContactEnvEval(field=env_field, cloud_jac_self=rng.standard_normal((P, 3, 6)),
+                         probe_jac_obj=rng.standard_normal((C, P, 3, 6)))
+    ev = ContactEval(field=_mcf(C, M, rng, np.zeros((C, M), bool), names),
+                     point_jac=rng.standard_normal((M, 3, nv)),
+                     probe_jac_obj=rng.standard_normal((C, M, 3, 6)), env=(env,))
+    refs = EnvironmentInteractionTargets(per_object=(env_field,))
+    R_obs = np.eye(3)[None]; p_obs = np.zeros((1, 3))                     # pose OBSERVÉE (ancre)
+    R_cur = np.array([[[1, 0, 0], [0, 0, -1], [0, 1, 0.0]]])             # pose COURANTE (dérivée)
+    p_cur = np.array([[0.10, -0.20, 0.05]])
+    cfg = SolveConfig(w_obj=1.0)
+    o = {b.name: b for b in build_object(ev, refs, R_obs, p_obs, cfg,
+                                         object_rot_cur=R_cur, object_pos_cur=p_cur)}["O"]
+    expect = cfg.w_obj * se3_log_world(R_obs, p_obs, R_cur, p_cur).reshape(-1)
+    assert not np.allclose(o.c, 0.0)                      # O ancre réellement (pas juste amortir)
+    assert np.allclose(o.c, expect)
+    # défaut (pas d'itéré courant) -> ancre = observée == observée -> c = 0 (rétro-compat v1)
+    o0 = {b.name: b for b in build_object(ev, refs, R_obs, p_obs, cfg)}["O"]
+    assert np.allclose(o0.c, 0.0)

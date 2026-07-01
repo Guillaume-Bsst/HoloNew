@@ -11,9 +11,10 @@ diagonale propre (objet ``i`` vs son propre canal) est déjà ``active=False`` e
 
 NOTE — CO-X (géodésique) est DÉFÉRÉ (Assumption 6 du plan) : il a besoin des tables géodésiques par-canal, que la
 signature canonique 5-arg ``build_object`` ne porte pas (contrairement au ``geo`` de ``build_contact``). C'est
-identique à C-X une fois qu'un paquet ``geo`` est enfilé ; ``cfg.w_cox`` est réservé pour lui. Le ``c`` de O est
-zéro au point de linéarisation en v1 (pose courant == observée au départ de la trame) ; la formule générale
-``se3_log_world(ref, cur)`` est implémentée pour qu'une pose courant en direct du Plan-C donne un ancrage non-zéro."""
+identique à C-X une fois qu'un paquet ``geo`` est enfilé ; ``cfg.w_cox`` est réservé pour lui. Le ``c`` de O
+est ``se3_log_world(pose observée, pose COURANTE du solveur)`` : nul à la 1ʳᵉ itération (courant == observé)
+puis NON nul dès que l'objet dérive, ce qui ramène l'objet vers l'observée (l'itéré courant est câblé par
+``assemble``/``loop`` ; sans lui — appel 5-args — O retombe sur zéro et ne fait qu'amortir ``δξ``)."""
 from __future__ import annotations
 
 import numpy as np
@@ -26,11 +27,21 @@ from ...targets.contracts import ContactEval, EnvironmentInteractionTargets
 
 def build_object(contact_eval: ContactEval, env_refs: EnvironmentInteractionTargets,
                  object_rot: np.ndarray, object_pos: np.ndarray,
-                 cfg: SolveConfig) -> list[ResidualBlock]:
+                 cfg: SolveConfig,
+                 object_rot_cur: np.ndarray | None = None,
+                 object_pos_cur: np.ndarray | None = None) -> list[ResidualBlock]:
     """``[CO-D]`` (si quelconque auto-contact d'objet actif) + ``[O]`` (toujours, un bloc 6-ligne par objet).
-    ``A = 0`` pour les deux (les termes d'objet ne touchent que ``δξ``). ``nv`` depuis ``point_jac`` ; ``N`` objets."""
+    ``A = 0`` pour les deux (les termes d'objet ne touchent que ``δξ``). ``nv`` depuis ``point_jac`` ; ``N`` objets.
+
+    ``object_rot``/``object_pos`` = pose OBSERVÉE (la cible d'ancrage du terme O). ``object_rot_cur``/
+    ``object_pos_cur`` = itéré COURANT du solveur (le point de linéarisation où ``contact_eval`` a été évalué) ;
+    ``None`` -> retombe sur la pose observée (⇒ ancrage O nul, comportement v1). Le frame CO-D et l'ancre O
+    utilisent le COURANT ; seul le RÉF de O est l'OBSERVÉE. Sans l'itéré courant, O ne peut qu'amortir ``δξ``."""
     N = object_rot.shape[0]
     nv = contact_eval.point_jac.shape[2]
+    # itéré courant (frame de linéarisation) : défaut = observée -> ancrage O nul (v1)
+    cur_rot = object_rot if object_rot_cur is None else np.asarray(object_rot_cur, np.float64)
+    cur_pos = object_pos if object_pos_cur is None else np.asarray(object_pos_cur, np.float64)
     blocks: list[ResidualBlock] = []
 
     # --- CO-D : auto-cohérence d'objet, per object cloud i, empilé sur (canal, point) actifs ---
@@ -44,7 +55,7 @@ def build_object(contact_eval: ContactEval, env_refs: EnvironmentInteractionTarg
             if rows.size == 0:
                 continue
             jc = cidx - 1                                     # canal -> index d'objet (-1 = sol)
-            R_c = np.eye(3) if jc < 0 else object_rot[jc]    # frame monde du canal
+            R_c = np.eye(3) if jc < 0 else cur_rot[jc]       # frame monde du canal (itéré COURANT, cohérent avec field_cur)
             dir_local = field_cur.direction[cidx, rows]       # (k,3) local-canal (monde si sol)
             # Vrai gradient de distance signée = ``sign(distance)·direction`` (voir C-D dans contact.py) :
             # ``direction`` s'inverse sous la surface, le gradient SDF non. Sans ce facteur, un point
@@ -69,8 +80,8 @@ def build_object(contact_eval: ContactEval, env_refs: EnvironmentInteractionTarg
         blocks.append(ResidualBlock(A=np.vstack(cod_A), c=np.concatenate(cod_c),
                                     A_obj=np.vstack(cod_Aobj), name="CO-D"))
 
-    # --- O : ancre chaque objet à sa pose observée (courant == observé au pt de linéarisation) ---
-    e = se3_log_world(object_rot, object_pos, object_rot, object_pos)      # (N,6) -> 0 en v1 (Assumption 6)
+    # --- O : ancre l'itéré COURANT de chaque objet à sa pose OBSERVÉE ---
+    e = se3_log_world(object_rot, object_pos, cur_rot, cur_pos)            # (N,6) : 0 si courant==observé
     blocks.append(ResidualBlock(A=np.zeros((N * 6, nv)), c=cfg.w_obj * e.reshape(N * 6),
                                 A_obj=cfg.w_obj * np.eye(N * 6), name="O"))
     return blocks

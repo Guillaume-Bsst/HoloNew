@@ -24,7 +24,7 @@ def _patch(monkeypatch):
     # evaluate renvoie q tel quel ("evals" = la config courante) ; assemble construit le QP de tracking.
     monkeypatch.setattr(L, "evaluate", lambda ev, q, poses: q)
 
-    def fake_assemble(evals, ft, geo, robot, cfg):
+    def fake_assemble(evals, ft, geo, robot, cfg, **kw):
         q = np.asarray(evals, np.float64)
         r = ResidualBlock(A=np.eye(1), c=(q - _TARGET), A_obj=None, name="track")
         tr = TrustRegion(var="dv", radius=np.array([0.3]), norm=-1)

@@ -56,7 +56,8 @@ def solve_frame(evaluator, frame_targets_f, geo, robot, backend, cfg, q0, poses0
     with prof.span("frame_solve"):
         for it in range(1, max_iter + 1):
             evals = evaluate(evaluator, q, poses)
-            problem = assemble(evals, frame_targets_f, geo, robot, cfg)
+            # ``poses`` = itéré COURANT des objets : cible de linéarisation du terme O (ancre à l'observée)
+            problem = assemble(evals, frame_targets_f, geo, robot, cfg, object_poses_cur=poses)
             step = backend.solve(problem)
             status, cost = step.status, step.value
             if step.dv is None or not np.all(np.isfinite(step.dv)):

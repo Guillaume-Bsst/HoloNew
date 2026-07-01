@@ -24,7 +24,7 @@ def test_assemble_concatenates_into_well_formed_problem(monkeypatch):
     monkeypatch.setattr(A, "_geo_field", lambda ch, orot, opos: object())   # isolate from GeoField internals
     monkeypatch.setattr(A, "build_style", lambda se, st, cfg: _blocks(nv, ["S-pos", "S-rot"]))
     monkeypatch.setattr(A, "build_contact", lambda ce, rf, geo, cfg: _blocks(nv, ["C-D", "C-X"]))
-    monkeypatch.setattr(A, "build_object", lambda ce, ev, orot, opos, cfg: _blocks(nv, ["O"]))
+    monkeypatch.setattr(A, "build_object", lambda ce, ev, orot, opos, cfg, **kw: _blocks(nv, ["O"]))
     monkeypatch.setattr(A, "build_reg", lambda nv_, cfg: _blocks(nv, ["reg"]))
     monkeypatch.setattr(A, "build_constraints", lambda robot, cfg: (
         [LinearConstraint(A=np.zeros((1, nv)), lb=np.zeros(1), ub=None, A_obj=None, name="jl")],
@@ -54,7 +54,7 @@ def test_assemble_no_objects_sets_n_obj_zero(monkeypatch):
     monkeypatch.setattr(A, "_geo_field", lambda ch, orot, opos: object())   # isolate from GeoField internals
     monkeypatch.setattr(A, "build_style", lambda se, st, cfg: _blocks(nv, ["S-pos"]))
     monkeypatch.setattr(A, "build_contact", lambda ce, rf, geo, cfg: [])
-    monkeypatch.setattr(A, "build_object", lambda ce, ev, orot, opos, cfg: [])
+    monkeypatch.setattr(A, "build_object", lambda ce, ev, orot, opos, cfg, **kw: [])
     monkeypatch.setattr(A, "build_reg", lambda nv_, cfg: _blocks(nv, ["reg"]))
     monkeypatch.setattr(A, "build_constraints", lambda robot, cfg: ([], []))
 

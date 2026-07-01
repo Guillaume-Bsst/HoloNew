@@ -63,7 +63,7 @@ def test_cd_jacobian_uses_signed_sdf_gradient_for_penetration():
                      probe_jac_obj=np.zeros((C, M, 3, 6)), env=())
     ref = RobotInteractionTargets(field=_mcf(C, M, rng, active))
     geo = GeoField(tables=(None,), rot=np.eye(3)[None], pos=np.zeros((1, 3)), object_idx=(-1,))
-    cfg = SolveConfig(contact_d_ref_scale=0.0)
+    cfg = SolveConfig(w_cd=1.0, contact_d_ref_scale=0.0)   # w_cd épinglé (indépendant du défaut config)
     cd = {b.name: b for b in build_contact(ev, ref, geo, cfg)}["C-D"]
     grad = np.sign(field.distance[0])[:, None] * field.direction[0]   # vrai gradient == +z partout
     assert np.allclose(cd.A, cfg.w_cd * dist_jac(grad, point_jac))
