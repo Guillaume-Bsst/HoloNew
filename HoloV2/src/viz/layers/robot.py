@@ -48,12 +48,12 @@ class RobotLayer:
         with gui.add_folder(_FOLDER):
             self._toggle = gui.add_checkbox("Show solved G1", bool(ctx.has_solve))
 
-        def _bascule(_) -> None:
+        def _on_change(_) -> None:
             """Re-rend le frame courant immédiatement quand le toggle change en pause."""
             if self._last_frame is not None and self._last_ui is not None:
                 self.update(self._last_frame, self._last_ui)
 
-        self._toggle.on_update(_bascule)
+        self._toggle.on_update(_on_change)
 
     def update(self, frame: VizFrame, ui: UiState) -> None:
         """Rafraîchit la pose du robot depuis le frame résolu courant.

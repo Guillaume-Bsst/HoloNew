@@ -5,14 +5,14 @@ câblaient leurs checkboxes SANS on_update → basculer en pause était sans eff
 le slider frame bouge. Ce test reproduit le chemin interactif PAUSED-TOGGLE sans serveur viser.
 
 Structure :
-  - Fakes capturant les callbacks on_update (``_CaptureCb``, ``_CaptureNumber``,
-    ``_CaptureSlider``) + GUI capturante (``_CaptureGui``).
-  - Un test par couche couverte (contacts + correspondence).
+  - Fakes capturant les callbacks on_update (``_CaptureCb``) + GUI capturante (``_CaptureGui``).
+  - Un test par couche couverte (contacts + correspondence + robot).
   - Scénario : setup() → update() données présentes → changement checkbox → déclenchement du
     callback capturé → assertion que la visibilité reflète immédiatement le nouveau état.
 """
 from __future__ import annotations
 
+import sys
 import types
 
 import numpy as np
@@ -21,6 +21,7 @@ from src.targets.contracts import MultiChannelField
 from src.viz.core.layer import UiState
 from src.viz.layers.contacts import ContactsLayer
 from src.viz.layers.correspondence import CorrespondenceLayer
+from src.viz.layers.robot import RobotLayer
 
 
 # =============================================================================
@@ -44,36 +45,6 @@ class _CaptureCb:
             cb(None)
 
 
-class _CaptureNumber:
-    """Curseur numérique factice capturant les callbacks on_update."""
-
-    def __init__(self, val: float = 0.5) -> None:
-        self.value = val
-        self._callbacks: list = []
-
-    def on_update(self, cb) -> None:
-        self._callbacks.append(cb)
-
-    def trigger(self) -> None:
-        for cb in self._callbacks:
-            cb(None)
-
-
-class _CaptureSlider:
-    """Curseur entier factice capturant les callbacks on_update."""
-
-    def __init__(self, val: int = 0) -> None:
-        self.value = val
-        self._callbacks: list = []
-
-    def on_update(self, cb) -> None:
-        self._callbacks.append(cb)
-
-    def trigger(self) -> None:
-        for cb in self._callbacks:
-            cb(None)
-
-
 class _FolderCtx:
     """Contexte de dossier GUI factice (gestionnaire de contexte)."""
 
@@ -88,19 +59,15 @@ class _FolderCtx:
 
 
 class _CaptureGui:
-    """GUI factice capturant TOUS les contrôles créés dans des listes ordonnées.
+    """GUI factice capturant les checkboxes créées dans une liste ordonnée.
 
-    Les couches appellent add_checkbox / add_number / add_slider dans un ordre connu ;
-    les tests accèdent aux contrôles via self.checkboxes[i], self.numbers[i], self.sliders[i].
+    Les couches appellent add_checkbox dans un ordre connu ;
+    les tests accèdent aux contrôles via self.checkboxes[i].
     """
 
-    def __init__(self, cb_val: bool = True, num_val: float = 0.5, sld_val: int = 0) -> None:
+    def __init__(self, cb_val: bool = True) -> None:
         self._cb_val = cb_val
-        self._num_val = num_val
-        self._sld_val = sld_val
         self.checkboxes: list[_CaptureCb] = []
-        self.numbers: list[_CaptureNumber] = []
-        self.sliders: list[_CaptureSlider] = []
 
     def add_folder(self, name: str):
         return _FolderCtx(self)
@@ -109,16 +76,6 @@ class _CaptureGui:
         cb = _CaptureCb(self._cb_val)
         self.checkboxes.append(cb)
         return cb
-
-    def add_number(self, label: str, initial: float, **kwargs) -> _CaptureNumber:
-        n = _CaptureNumber(self._num_val)
-        self.numbers.append(n)
-        return n
-
-    def add_slider(self, label: str, min_val, max_val, step, default) -> _CaptureSlider:
-        s = _CaptureSlider(self._sld_val)
-        self.sliders.append(s)
-        return s
 
 
 # =============================================================================
@@ -145,7 +102,7 @@ class _SegHandle:
 
 
 class _FakeScene:
-    """Scène factice renvoyant des handles."""
+    """Scène factice renvoyant des handles (points / segments)."""
 
     def add_point_cloud(self, name, pts, cols, point_size=None):
         return _PtHandle()
@@ -354,3 +311,120 @@ def test_correspondence_toggle_noop_before_first_update():
 
     gui.checkboxes[0].value = False
     gui.checkboxes[0].trigger()   # last_frame=None -> silencieux
+
+
+# =============================================================================
+# Fakes robot (setup() avec stubs yourdfpy/ViserUrdf)
+# =============================================================================
+
+class _FakeUrdf:
+    """Substitut ViserUrdf pour setup() sans dépendance viser/yourdfpy."""
+
+    def __init__(self, dof: int = 4) -> None:
+        self.show_visual = True
+        self._dof = dof
+        self._cfg_calls: list = []
+
+    def update_cfg(self, cfg) -> None:
+        """Enregistre la config joints reçue."""
+        self._cfg_calls.append(np.asarray(cfg, np.float64))
+
+    def get_actuated_joint_limits(self):
+        """Retourne une liste fictive de longueur dof pour initialiser _dof dans setup."""
+        return [None] * self._dof
+
+
+class _FakeBaseFrame:
+    """Substitut du frame de base viser (position + wxyz écrits par update)."""
+
+    def __init__(self) -> None:
+        self.visible = True
+        self.position = np.zeros(3)
+        self.wxyz = np.array([1.0, 0.0, 0.0, 0.0])
+
+
+class _FakeSceneRobot:
+    """Scène factice retournant un frame de base pré-construit (pour add_frame)."""
+
+    def __init__(self, base: _FakeBaseFrame) -> None:
+        self._base = base
+
+    def add_frame(self, name, show_axes=False) -> _FakeBaseFrame:
+        return self._base
+
+
+class _FakeServerRobot:
+    """Serveur factice portant une scène robot."""
+
+    def __init__(self, base: _FakeBaseFrame) -> None:
+        self.scene = _FakeSceneRobot(base)
+
+
+# =============================================================================
+# Tests : RobotLayer — bascule en pause
+# =============================================================================
+
+def test_robot_toggle_paused():
+    """Décocher 'Show solved G1' en pause → masquage immédiat sans appel player.
+
+    Reproduit le chemin interactif sur RobotLayer (couche la plus distincte
+    structurellement : _last_frame/_last_ui initialisés dans __init__,
+    callback _on_change câblé dans setup()).
+    setup() est appelé avec des stubs yourdfpy/ViserUrdf injectés dans sys.modules
+    (imports lazy dans setup — pas besoin d'un vrai serveur viser).
+    Vérifie que le callback on_update capturé masque immédiatement _base.visible
+    et _urdf.show_visual sans nudge du slider.
+    """
+    dof = 4
+    fake_urdf = _FakeUrdf(dof=dof)
+    fake_base = _FakeBaseFrame()
+
+    # Stubber les modules lourds importés lazily dans setup() sans vrai serveur
+    _yourdfpy = types.ModuleType("yourdfpy")
+    _yourdfpy.URDF = types.SimpleNamespace(load=lambda *a, **kw: None)
+
+    _viser_extras = types.ModuleType("viser.extras")
+    _viser_extras.ViserUrdf = lambda *a, **kw: fake_urdf
+
+    _viser = types.ModuleType("viser")
+    _viser.extras = _viser_extras
+
+    _saved = {k: sys.modules.pop(k, None) for k in ("yourdfpy", "viser", "viser.extras")}
+    sys.modules.update({"yourdfpy": _yourdfpy, "viser": _viser, "viser.extras": _viser_extras})
+    try:
+        gui = _CaptureGui(cb_val=True)
+        ctx = types.SimpleNamespace(robot_urdf_path="dummy", has_solve=True)
+        layer = RobotLayer()
+        layer.setup(_FakeServerRobot(fake_base), gui, ctx)
+    finally:
+        # Restaure sys.modules dans tous les cas (exception incluse)
+        for k, v in _saved.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+
+    # _on_change doit avoir été capturé par on_update
+    cb = gui.checkboxes[0]
+    assert len(cb._callbacks) == 1, "_on_change doit être enregistré via on_update"
+
+    # Premier update : frame avec solved présent → robot visible
+    q = np.zeros(7 + dof)
+    q[3:7] = [0.0, 0.0, 0.0, 1.0]  # quaternion identité xyzw (qx=qy=qz=0, qw=1)
+    solved_ns = types.SimpleNamespace(q=q)
+    frame = types.SimpleNamespace(solved=solved_ns)
+
+    layer.update(frame, _UI)
+
+    assert fake_base.visible is True, "prérequis : robot visible après update() données présentes"
+    assert fake_urdf.show_visual is True
+
+    # Simulation clic en pause : décocher le toggle
+    cb.value = False
+    cb.trigger()  # invoque _on_change → re-appelle update() → show=False
+
+    # Invariant : masquage immédiat sans nudge du slider
+    assert fake_base.visible is False, \
+        "bascule en pause : _base doit être masquée immédiatement"
+    assert fake_urdf.show_visual is False, \
+        "bascule en pause : _urdf.show_visual doit être False immédiatement"
