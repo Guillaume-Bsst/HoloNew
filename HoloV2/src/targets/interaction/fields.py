@@ -29,8 +29,10 @@ def eval_fields(points: np.ndarray, channels: tuple[Channel, ...], object_rot: n
     ``object_rot (N, 3, 3)`` / ``object_pos (N, 3)`` sont les transformations mondiales d'objet par frame
     (de ``FramePose``, réutilisé — pas de recalcul) : un canal avec ``object_idx=i`` lit
     ``(object_rot[i], object_pos[i])`` comme son frame, un canal avec ``object_idx is None`` utilise
-    le frame mondial (sol). Un sondage est ``actif`` dans la ``margin`` de la surface ; les sondages
-    inactifs portent ``distance = +margin`` et direction/témoin mis à zéro, donc la sortie est homogène ``(C, P)``.
+    le frame mondial (sol). Un sondage est ``actif`` dans la ``margin`` de la surface. La GÉOMÉTRIE
+    (``direction`` = gradient, ``témoin``) est évaluée pour TOUS les sondages (même hors zone) pour que
+    les termes d'interaction gardent un gradient valide et capturent un contact de loin ; seule la
+    ``distance`` d'un sondage inactif est CAPÉE à ``+margin`` (résidu borné). Sortie homogène ``(C, P)``.
 
     ``self_idx`` est l'index d'objet du nuage en cours d'évaluation (son PROPRE objet), ou ``None`` pour un
     nuage qui n'est pas un objet (l'humain). Quand ``object_idx`` d'un canal == ``self_idx`` le nuage repose sur
@@ -73,10 +75,16 @@ def eval_fields(points: np.ndarray, channels: tuple[Channel, ...], object_rot: n
         den = np.where(norm > 1e-6, norm, 1.0)                     # (P, 1) diviseur sûr
         direction = np.where(norm > 1e-6, delta / den, 0.0)        # (P, 3) normale de contact unitaire
 
-        # Homogénéiser la disposition (C, P) : les sondages inactifs portent distance=+margin, dir/témoin mis à zéro.
-        dist_ch.append(np.where(active, dist, margin))             # (P,)
-        dir_ch.append(np.where(active[:, None], direction, 0.0))   # (P, 3)
-        wit_ch.append(np.where(active[:, None], witness, 0.0))     # (P, 3)
+        # Géométrie évaluée sur TOUS les sondages, dedans OU dehors : ``direction`` (vrai gradient unitaire
+        # surface->point) et ``witness`` (point de surface réel) sont GARDÉS même hors zone, pour que les
+        # termes d'interaction (C-D/C-X/CO-D) aient un gradient VALIDE partout et puissent CAPTURER un contact
+        # depuis l'extérieur de la bande (sinon Jacobien nul -> le contact ne s'établit jamais de loin). Seule
+        # la DISTANCE est CAPÉE à +margin hors zone : le résidu (delta = d_cur − d_ref) reste borné par la zone,
+        # donc chaque pas SQP pousse le point vers la surface avec une urgence bornée, sans coût explosif. Le
+        # masque ``active`` (dans la marge) reste la sélection des paires de contact démontrées.
+        dist_ch.append(np.where(active, dist, margin))             # (P,) distance capée à +margin hors zone
+        dir_ch.append(direction)                                   # (P, 3) vrai gradient partout (0 seulement sur-surface)
+        wit_ch.append(witness)                                     # (P, 3) témoin réel partout
         act_ch.append(active)                                      # (P,)
 
     return MultiChannelField(

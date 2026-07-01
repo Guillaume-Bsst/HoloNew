@@ -94,18 +94,29 @@ def test_object_channel_local_frame_mapping():
     assert field.active[0, 0]
 
 
-def test_inactive_probe_is_zeroed():
+def test_inactive_probe_keeps_gradient_caps_distance():
+    """Hors zone (inactive), la géométrie est TOUJOURS évaluée : ``direction`` = vrai gradient unitaire
+    (surface->point) et ``witness`` réel sont GARDÉS, pour que les termes d'interaction (C-D/C-X/CO-D)
+    aient un gradient VALIDE partout et puissent CAPTURER un contact depuis l'extérieur de la bande.
+    Seule la ``distance`` est CAPÉE à +margin -> le résidu/coût borné par la zone. ``active`` (dans la
+    marge) reste la sélection des contacts démontrés."""
     margin = 0.1
     ch = _ground_channel(margin)
     points = np.array([
         [0.0, 0.0, 0.04],   # active reference
-        [0.1, 0.1, 5.0],    # far -> out of grid -> inactive
+        [0.1, 0.1, 0.20],   # au-dessus de la marge mais DANS la grille -> inactive
+        [0.1, 0.1, 5.00],   # loin, HORS grille -> inactive
     ])
     field = eval_fields(points, (ch,), _NO_OBJ_ROT, _NO_OBJ_POS, margin)
-    assert not field.active[0, 1]
-    assert field.distance[0, 1] == margin             # inactive distance clamps to +margin
-    assert np.allclose(field.direction[0, 1], 0.0)    # zeroed
-    assert np.allclose(field.witness[0, 1], 0.0)      # zeroed
+    assert field.active[0].tolist() == [True, False, False]
+    # distance CAPÉE à +margin pour les inactifs (delta borné)
+    assert field.distance[0, 1] == margin
+    assert field.distance[0, 2] == margin
+    # direction = vrai gradient +z (PAS zéro) -> le contact peut tirer le point vers le sol
+    assert np.allclose(field.direction[0, 1], [0, 0, 1], atol=1e-5)
+    assert np.allclose(field.direction[0, 2], [0, 0, 1], atol=1e-5)
+    # witness réel (x, y, 0), pas zéro
+    assert np.allclose(field.witness[0, 1], [0.1, 0.1, 0.0], atol=1e-4)
 
 
 def test_self_channel_is_short_circuited_not_sampled():

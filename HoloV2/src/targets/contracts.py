@@ -26,7 +26,8 @@ import numpy as np
 # =============================================================================
 @dataclass(frozen=True)
 class ContactField:
-    """Un nuage vs UN canal, UNE frame. Probes inactives : distance=+margin, le reste 0.
+    """Un nuage vs UN canal, UNE frame. Probes inactives : SEULE la distance est capée à +margin ;
+    ``direction`` (gradient) et ``witness`` restent évalués partout (capture de contact hors zone).
     ``direction``/``witness`` sont dans le frame du CANAL (voir ``MultiChannelField``)."""
 
     distance: np.ndarray   # (P,)    distance signée
