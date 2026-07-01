@@ -9,8 +9,8 @@ pour chaque champ (toggle indépendant).
 
 Ajout : lignes witness (sonde → point surface le plus proche) pour les probes ACTIVES du canal
 sélectionné, dessinées via ``_contact_ops.witness_segments``.
-  - Witness CIBLE  : mappé via la pose objet SOURCE lorsque le canal est un canal objet
-    (``ctx.channels[c].object_idx is not None``), sinon identité (canal sol déjà en monde).
+  - Witness CIBLE  : mappé via la pose objet RÉSOLUE (``solved.object_poses[oi]``) lorsque le
+    canal est un canal objet, sinon identité (canal sol déjà en monde).
   - Witness ATTEINT : mappé via la pose objet RÉSOLUE (``solved.object_poses[oi]``).
 
 Couche SOLVE-GATED : sans ``solved`` les M points n'ont pas de position monde -> masquée. Pure
@@ -59,7 +59,7 @@ class ContactsLayer:
     ``targets``/``robot_interaction`` est None ou si le canal sélectionné est inconnu.
 
     Witness : segments (sonde_monde → witness_monde) pour les probes actives du canal courant.
-    Canal objet → mapping par la pose objet SOURCE (cible) ou RÉSOLUE (atteint).
+    Canal objet → mapping par la pose objet RÉSOLUE (cible et atteint).
     Canal sol (object_idx=None) → witness déjà en monde (passage identité).
     """
 
@@ -152,16 +152,17 @@ class ContactsLayer:
         self._h_target.point_size = sz
         self._h_target.visible = bool(self._cb_target.value)
 
-        # --- Witness CIBLE (pose SOURCE pour un canal objet ; identité pour sol) ---
+        # --- Pose canal-objet RÉSOLUE pour le mapping witness cible et atteint ---
         oi = self._ctx.channels[c].object_idx    # None si canal sol
         if oi is not None:
-            R_src = np.asarray(frame.pose.object_rot[oi], np.float64)  # (3, 3)
-            t_src = np.asarray(frame.pose.object_pos[oi], np.float64)  # (3,)
+            pose7 = np.asarray(frame.solved.object_poses[oi], np.float64)  # (7,)
+            t_sol = pose7[:3]                                                # (3,)
+            R_sol = quat_wxyz_to_R(pose7[3:7][np.newaxis])[0]              # (3, 3)
         else:
-            R_src = np.eye(3, dtype=np.float64)
-            t_src = np.zeros(3, np.float64)
+            R_sol = np.eye(3, dtype=np.float64)
+            t_sol = np.zeros(3, np.float64)
 
-        segs_tgt = witness_segments(pts, tgt.witness[c], tgt.active[c], R_src, t_src)
+        segs_tgt = witness_segments(pts, tgt.witness[c], tgt.active[c], R_sol, t_sol)
         if bool(self._cb_wit_target.value) and len(segs_tgt):
             self._h_wit_target.points = segs_tgt
             self._h_wit_target.colors = np.tile(
@@ -182,15 +183,7 @@ class ContactsLayer:
         self._h_achieved.point_size = sz
         self._h_achieved.visible = bool(self._cb_achieved.value)
 
-        # --- Witness ATTEINT (pose RÉSOLUE pour un canal objet ; identité pour sol) ---
-        if oi is not None:
-            pose7 = np.asarray(frame.solved.object_poses[oi], np.float64)  # (7,)
-            t_sol = pose7[:3]                                                # (3,) position
-            R_sol = quat_wxyz_to_R(pose7[3:7][np.newaxis])[0]              # (3, 3)
-        else:
-            R_sol = np.eye(3, dtype=np.float64)
-            t_sol = np.zeros(3, np.float64)
-
+        # --- Witness ATTEINT (même pose RÉSOLUE que la cible) ---
         segs_ach = witness_segments(pts, ach.witness[c], ach.active[c], R_sol, t_sol)
         if bool(self._cb_wit_achieved.value) and len(segs_ach):
             self._h_wit_achieved.points = segs_ach

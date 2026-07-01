@@ -415,10 +415,11 @@ def test_contact_achieved_none_hides_achieved_only():
 # 4. Cloud résolu ≠ cloud source quand la pose résolue diffère
 # =============================================================================
 
-def test_solved_cloud_differs_from_source_cloud_when_pose_differs():
-    """Quand la pose résolue est non-identité, le cloud atteint diffère du cloud source.
+def test_both_clouds_use_solved_cloud_when_pose_differs():
+    """Cible et atteint affichent tous les deux le cloud résolu (scène résolue).
 
-    Un objet avec cloud source non-nul + translation résolue différente → h_achieved.points ≠ source.
+    Un objet avec cloud source non-nul + translation résolue [10,0,0] →
+    h_targets et h_achieved contiennent tous les deux le cloud décalé de +10 en x.
     """
     n_objects, C, P = 1, 2, 4
     layer = _build_layer(cb_val=True, n_objects=n_objects)
@@ -453,14 +454,16 @@ def test_solved_cloud_differs_from_source_cloud_when_pose_differs():
 
     layer.update(frame, ui)
 
-    src_pts = layer._h_targets[0].points
-    sol_pts = layer._h_achieved[0].points
+    cible_pts = layer._h_targets[0].points
+    atteint_pts = layer._h_achieved[0].points
 
-    assert src_pts is not None and sol_pts is not None
-    # Le cloud résolu doit avoir été déplacé de ~10 en x (T_résolu ∘ T_source⁻¹ = translation 10)
-    assert not np.allclose(src_pts, sol_pts), "cloud résolu doit différer du cloud source"
-    np.testing.assert_allclose(sol_pts[:, 0], src_pts[:, 0] + 10.0, atol=1e-5,
-                                err_msg="cloud résolu décalé de +10 en x")
+    assert cible_pts is not None and atteint_pts is not None
+    # Les deux nuages doivent afficher le cloud résolu (identique entre cible et atteint)
+    np.testing.assert_allclose(cible_pts, atteint_pts, atol=1e-5,
+                                err_msg="cible et atteint doivent afficher le même cloud résolu")
+    # Le cloud résolu est décalé de +10 en x par rapport au cloud source original
+    np.testing.assert_allclose(cible_pts[:, 0], cloud_src[:, 0] + 10.0, atol=1e-5,
+                                err_msg="cloud résolu décalé de +10 en x par rapport au source")
 
 
 # =============================================================================
@@ -468,15 +471,15 @@ def test_solved_cloud_differs_from_source_cloud_when_pose_differs():
 # =============================================================================
 
 def test_witness_mapped_via_channel_object_pose_not_object_k():
-    """Le witness est mappé via la pose de l'objet DU CANAL c (oi), pas celle de l'objet k.
+    """Le witness est mappé via la pose RÉSOLUE de l'objet DU CANAL c (oi), pas celle de k.
 
     Configuration :
       - canal 1 = 'obj0' → oi=0 → l'objet 0 est le canal-objet.
       - 2 objets : k=0 (canal-objet) et k=1 (autre objet).
-      - Pose source oi=0 : t_src=[5,0,0] → witness cible endpoint = [1,0,0]+[5,0,0] = [6,0,0].
+      - Pose résolue oi=0 : t_sol=[20,0,0] → witness cible endpoint = [1,0,0]+[20,0,0] = [21,0,0].
       - Pose résolue oi=0 : t_sol=[20,0,0] → witness atteint endpoint = [1,0,0]+[20,0,0] = [21,0,0].
     On teste sur l'objet k=1 (l'objet non-canal) et le canal obj0 : le witness de k=1 sur le
-    canal obj0 doit utiliser la pose de oi=0 (le canal-objet), pas celle de k=1.
+    canal obj0 doit utiliser la pose RÉSOLUE de oi=0 (le canal-objet) pour cible et atteint.
     """
     n_objects, C, P = 2, 3, 4
     # Channels : ground (oi=None), obj0 (oi=0), obj1 (oi=1)
@@ -535,14 +538,14 @@ def test_witness_mapped_via_channel_object_pose_not_object_k():
     ui = UiState(channel="obj0", color_mode="distance", point_size=0.01)
     layer.update(frame, ui)
 
-    # Vérification sur l'objet k=1 (le non-canal) : le witness doit utiliser oi=0
-    # Witness cible endpoint : [1,0,0] @ I.T + [5,0,0] = [6,0,0]
+    # Vérification sur l'objet k=1 (le non-canal) : le witness doit utiliser oi=0 (pose RÉSOLUE)
+    # Witness cible endpoint : [1,0,0] @ I.T + [20,0,0] = [21,0,0] (pose RÉSOLUE du canal-objet)
     seg_tgt = layer._h_wit_targets[1].points
     assert seg_tgt is not None and seg_tgt.shape == (1, 2, 3)
-    np.testing.assert_allclose(seg_tgt[0, 1], [6.0, 0.0, 0.0], atol=1e-5,
-                                err_msg="endpoint witness CIBLE via pose SOURCE du canal-objet")
+    np.testing.assert_allclose(seg_tgt[0, 1], [21.0, 0.0, 0.0], atol=1e-5,
+                                err_msg="endpoint witness CIBLE via pose RÉSOLUE du canal-objet")
 
-    # Witness atteint endpoint : [1,0,0] @ I.T + [20,0,0] = [21,0,0]
+    # Witness atteint endpoint : [1,0,0] @ I.T + [20,0,0] = [21,0,0] (pose RÉSOLUE du canal-objet)
     seg_ach = layer._h_wit_achieved[1].points
     assert seg_ach is not None and seg_ach.shape == (1, 2, 3)
     np.testing.assert_allclose(seg_ach[0, 1], [21.0, 0.0, 0.0], atol=1e-5,

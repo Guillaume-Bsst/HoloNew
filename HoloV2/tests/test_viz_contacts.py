@@ -8,7 +8,7 @@ Trois familles :
      légères). Couvre le chemin nominal ET les gardes de données manquantes (solved=None,
      targets/robot_interaction absents, canal inconnu).
   3. Lignes witness (cible + atteint) : segments peuplés sur chemin nominal, mapping de pose
-     correct (source pour cible, résolue pour atteint), gardes de données, toggle en pause."""
+     correct (résolue pour cible et atteint), gardes de données, toggle en pause."""
 import types
 
 import numpy as np
@@ -248,8 +248,8 @@ def _make_frame_obj(
 
     Paramètres
     ----------
-    R_src, t_src : pose objet SOURCE (cible witness mappé via cette pose).
-    R_sol, t_sol : pose objet RÉSOLUE (atteint witness mappé via cette pose).
+    R_src, t_src : pose objet SOURCE (peuple frame.pose ; non utilisée pour le mapping witness).
+    R_sol, t_sol : pose objet RÉSOLUE (mapping witness cible ET atteint via cette pose).
                    NOTE : on suppose R_sol = I dans les tests (quaternion identité).
     wit_local     : (M, 3) witness local pour canal 1 ; zeros par défaut.
     active_mask   : (M,) booléen pour canal 1 ; premier seul actif par défaut.
@@ -452,11 +452,11 @@ def test_witness_cb_false_makes_handles_not_visible():
 # 5. Tests witness — mapping de pose (canal objet)
 # =============================================================================
 
-def test_witness_cible_uses_source_pose_atteint_uses_solved_pose():
-    """Canal objet : cible mappé via pose SOURCE, atteint via pose RÉSOLUE.
+def test_witness_cible_and_atteint_both_use_solved_pose():
+    """Canal objet : cible et atteint mappés via pose RÉSOLUE.
 
-    Vérifie que les endpoints witness diffèrent selon la pose utilisée :
-    - Pose source : R=I, t=[5, 0, 0]  → endpoint cible = [1,0,0]+[5,0,0] = [6,0,0]
+    Vérifie que les deux endpoints witness utilisent la pose RÉSOLUE :
+    - Pose résolue : R=I, t=[20, 0, 0] → endpoint cible  = [1,0,0]+[20,0,0] = [21,0,0]
     - Pose résolue : R=I, t=[20, 0, 0] → endpoint atteint = [1,0,0]+[20,0,0] = [21,0,0]
     """
     R_src = np.eye(3)
@@ -475,13 +475,13 @@ def test_witness_cible_uses_source_pose_atteint_uses_solved_pose():
 
     layer.update(frame, ui)
 
-    # Endpoint cible : [1,0,0] @ I.T + [5,0,0] = [6,0,0]
+    # Endpoint cible : [1,0,0] @ I.T + [20,0,0] = [21,0,0] (pose RÉSOLUE)
     assert layer._h_wit_target.points is not None, "segments cible doivent être définis"
     assert layer._h_wit_target.points.shape == (1, 2, 3)
-    np.testing.assert_allclose(layer._h_wit_target.points[0, 1], [6.0, 0.0, 0.0], atol=1e-5,
-                                err_msg="endpoint witness CIBLE doit utiliser la pose SOURCE")
+    np.testing.assert_allclose(layer._h_wit_target.points[0, 1], [21.0, 0.0, 0.0], atol=1e-5,
+                                err_msg="endpoint witness CIBLE doit utiliser la pose RÉSOLUE")
 
-    # Endpoint atteint : [1,0,0] @ I.T + [20,0,0] = [21,0,0]
+    # Endpoint atteint : [1,0,0] @ I.T + [20,0,0] = [21,0,0] (pose RÉSOLUE)
     assert layer._h_wit_achieved.points is not None, "segments atteint doivent être définis"
     assert layer._h_wit_achieved.points.shape == (1, 2, 3)
     np.testing.assert_allclose(layer._h_wit_achieved.points[0, 1], [21.0, 0.0, 0.0], atol=1e-5,

@@ -1,17 +1,17 @@
 """Couche contacts objets (roadmap — composant 2) — contact CIBLE vs ATTEINT sur les nuages objets.
 
-Pour chaque objet ``k`` (0..n_objects-1), on affiche les probes du nuage objet source ET résolu,
+Pour chaque objet ``k`` (0..n_objects-1), on affiche les probes du nuage objet résolu,
 colorés par le canal sélectionné, plus les lignes witness correspondantes.
 
-Convention « en ref objet » (source vs résolu) :
-  - **CIBLE**   : nuage objet SOURCE (``frame.object_clouds_world[k]``), coloré par
+Convention (scène affichée = scène résolue) :
+  - **CIBLE**   : nuage objet RÉSOLU (``object_cloud_solved(k)``), coloré par
     ``frame.targets.env_interaction.per_object[k]`` sur le canal sélectionné.
   - **ATTEINT** : nuage objet RÉSOLU (``object_cloud_solved(k)``), coloré par
     ``frame.solved.contact_achieved.env[k].field`` sur le canal sélectionné.
 
 Les lignes witness (sonde → point de surface le plus proche) sont mappées via la pose de
 l'objet DU CANAL c (pas de l'objet k) :
-  - Witness CIBLE  : pose SOURCE du canal-objet (``frame.pose.object_rot/pos[oi]``).
+  - Witness CIBLE  : pose RÉSOLUE du canal-objet (``frame.solved.object_poses[oi]``).
   - Witness ATTEINT : pose RÉSOLUE du canal-objet (``frame.solved.object_poses[oi]``).
   - Canal sol (``object_idx=None``) : identité (witness déjà en monde).
 
@@ -55,12 +55,13 @@ def _obj_contact_colors(
 
 
 class ObjectContactsLayer:
-    """Contact cible ET atteint (nuages + lignes witness) pour chaque objet k, « en ref objet ».
+    """Contact cible ET atteint (nuages + lignes witness) pour chaque objet k, en scène résolue.
 
     Pour chaque objet k, quatre handles sont créés :
-      - nuage CIBLE   : probes du cloud source, colorés distance/active/uniform sur le canal ui.
-      - nuage ATTEINT : probes du cloud résolu (transfo relative T_résolu ∘ T_source⁻¹).
-      - witness CIBLE   : segments (probe_source → witness_monde) via pose SOURCE du canal.
+      - nuage CIBLE   : probes du cloud résolu, colorés distance/active/uniform par le champ cible.
+      - nuage ATTEINT : probes du cloud résolu (transfo relative T_résolu ∘ T_source⁻¹), colorés
+        par le champ atteint.
+      - witness CIBLE   : segments (probe_résolu → witness_monde) via pose RÉSOLUE du canal.
       - witness ATTEINT : segments (probe_résolu → witness_monde) via pose RÉSOLUE du canal.
 
     Les quatre checkboxes GUI contrôlent la visibilité de tous les handles d'un même type.
@@ -178,16 +179,8 @@ class ObjectContactsLayer:
         margin = float(self._ctx.margin)
         sz = float(ui.point_size)
 
-        # Pose canal-objet SOURCE pour le mapping witness cible
+        # Pose canal-objet RÉSOLUE pour le mapping witness (cible ET atteint)
         oi = self._ctx.channels[c].object_idx    # None si canal sol
-        if oi is not None:
-            R_src_ch = np.asarray(frame.pose.object_rot[oi], np.float64)   # (3, 3)
-            t_src_ch = np.asarray(frame.pose.object_pos[oi], np.float64)   # (3,)
-        else:
-            R_src_ch = np.eye(3, dtype=np.float64)
-            t_src_ch = np.zeros(3, np.float64)
-
-        # Pose canal-objet RÉSOLUE pour le mapping witness atteint
         if oi is not None:
             pose7_ch = np.asarray(frame.solved.object_poses[oi], np.float64)  # (7,)
             t_sol_ch = pose7_ch[:3]                                            # (3,)
@@ -218,22 +211,33 @@ class ObjectContactsLayer:
             # Cloud source de l'objet k
             cloud_src = np.asarray(frame.object_clouds_world[k], np.float32)  # (P, 3)
 
-            # Pose source de l'objet k (pour object_cloud_solved)
+            # Pose source de l'objet k (pour object_cloud_solved uniquement)
             R_src_k = np.asarray(frame.pose.object_rot[k], np.float64)   # (3, 3)
             t_src_k = np.asarray(frame.pose.object_pos[k], np.float64)   # (3,)
 
-            # --- Nuage CIBLE (cloud source coloré par le champ cible) ---
+            # Pose résolue de l'objet k (pour object_cloud_solved)
+            pose7_k = np.asarray(frame.solved.object_poses[k], np.float64)  # (7,)
+            t_sol_k = pose7_k[:3]                                             # (3,)
+            R_sol_k = quat_wxyz_to_R(pose7_k[3:7][np.newaxis])[0]           # (3, 3)
+
+            # Cloud résolu = transfo relative T_résolu ∘ T_source⁻¹ appliquée au cloud source
+            # Utilisé pour CIBLE et ATTEINT (scène affichée = scène résolue)
+            cloud_sol = object_cloud_solved(
+                cloud_src, R_src_k, t_src_k, R_sol_k, t_sol_k,
+            ).astype(np.float32)  # (P, 3)
+
+            # --- Nuage CIBLE (cloud résolu coloré par le champ cible) ---
             tgt_field = per_obj[k]                                         # MultiChannelField
-            self._h_targets[k].points = cloud_src
+            self._h_targets[k].points = cloud_sol
             self._h_targets[k].colors = _obj_contact_colors(
                 tgt_field, c, ui.color_mode, margin, uniform_rgb=_TARGET_RGB,
             )
             self._h_targets[k].point_size = sz
             self._h_targets[k].visible = bool(self._cb_target.value)
 
-            # --- Witness CIBLE (probe source → witness monde via pose canal SOURCE) ---
+            # --- Witness CIBLE (probe résolu → witness monde via pose canal RÉSOLUE) ---
             segs_tgt = witness_segments(
-                cloud_src, tgt_field.witness[c], tgt_field.active[c], R_src_ch, t_src_ch,
+                cloud_sol, tgt_field.witness[c], tgt_field.active[c], R_sol_ch, t_sol_ch,
             )
             if bool(self._cb_wit_target.value) and len(segs_tgt):
                 self._h_wit_targets[k].points = segs_tgt
@@ -251,16 +255,6 @@ class ObjectContactsLayer:
                 self._h_achieved[k].visible = False
                 self._h_wit_achieved[k].visible = False
                 continue
-
-            # Pose résolue de l'objet k (pour object_cloud_solved)
-            pose7_k = np.asarray(frame.solved.object_poses[k], np.float64)  # (7,)
-            t_sol_k = pose7_k[:3]                                             # (3,)
-            R_sol_k = quat_wxyz_to_R(pose7_k[3:7][np.newaxis])[0]           # (3, 3)
-
-            # Cloud résolu = transfo relative T_résolu ∘ T_source⁻¹ appliquée au cloud source
-            cloud_sol = object_cloud_solved(
-                cloud_src, R_src_k, t_src_k, R_sol_k, t_sol_k,
-            ).astype(np.float32)  # (P, 3)
 
             ach_field = frame.solved.contact_achieved.env[k].field          # MultiChannelField
             self._h_achieved[k].points = cloud_sol
