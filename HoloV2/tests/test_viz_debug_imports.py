@@ -27,3 +27,13 @@ def test_cloud_imports():
     from src.viz.debug import cloud
     assert callable(cloud.view_cloud) and callable(cloud.main)
     assert cloud.Player is Player and cloud.parity is parity    # consomme core/Player + core/colors.parity
+
+
+def test_sdf_imports():
+    """Vérifie que ``src.viz.debug.sdf`` s'importe, expose ``view_sdf``/``main`` et consomme
+    ``core.colors.diverging`` + ``core.geometry.node_coords`` (assertions structurelles : le viewer
+    est sans axe temps et délègue bien aux helpers core partagés, sans re-rouler la logique)."""
+    from src.viz.debug import sdf
+    assert callable(sdf.view_sdf) and callable(sdf.main)
+    assert sdf.diverging is diverging                       # consomme core/colors.diverging
+    assert callable(sdf.node_coords)                        # consomme le helper pur core.geometry
