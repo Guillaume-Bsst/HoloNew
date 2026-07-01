@@ -21,3 +21,8 @@ meta   = "~/Documents/wbt_rl/data/00_raw_datasets/OMOMO"
 
 [datasets.hoim3]
 motion = "~/Documents/wbt_rl/data/00_raw_datasets/HOI-M3/mocap_ground"
+
+# PA-HOI (Physics-Aware HOI, Noitom mocap) : `motion` = le dossier Mocap_data ; --motion-path relatif
+# = "cap_res_bvh_s1/1_001/1_001.npz". La trajectoire d'objet est lue du frère cap_res_fbx/<seq>_o.fbx.
+[datasets.pahoi]
+motion = "~/Documents/wbt_rl/data/00_raw_datasets/PA-HOI_Dataset/Mocap_data"

@@ -137,7 +137,7 @@ class SceneSpec:
     """QUOI exécuter. Le loader transforme ceci en ``RawMotion`` ; les clés cache mélangent cette
     identité avec le sous-ensemble pertinent de config d'étape (les schémas dans ``prepare/config.py``)."""
 
-    dataset: str                              # clé loader (omomo/hodome/sfu/hoim3)
+    dataset: str                              # clé loader (omomo/hodome/sfu/hoim3/pahoi)
     motion_path: Path                         # la séquence
     robot: RobotSpec
     smpl_model_dir: Path | None = None        # répertoire modèle corps paramétrique (None ok => style-only)

@@ -96,7 +96,8 @@ src/                    (sous `HoloV2/` ; chaque étage porte SES types + SA con
     config.py            knobs : PrepareConfig + sous-configs CalibrationConfig/SdfConfig/CloudConfig/CorrespondenceConfig/GeodesicConfig
     load/                loaders OFFLINE (sous-package)
       base.py              protocol MotionLoader + registre
-      datasets/            un loader par dataset (omomo, hodome, sfu, hoim3) -> RawMotion (params + chemins)
+      datasets/            un loader par dataset (omomo, hodome, sfu, hoim3, pahoi) -> RawMotion (params + chemins)
+      fbx.py               lecteur FBX binaire minimal (pur-Python) : <seq>_o.fbx PA-HOI -> trajectoire objet + mesh proxy
       smpl.py              SmplParams -> BodyModel (instancie SMPL, FK os)
       smpl2smplx.py        transfert de paramètres SMPL -> SMPL-X
       mesh.py              chemin -> (verts, faces) local (trimesh ; poses ajoutées à l'assemblage scène)
