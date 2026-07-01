@@ -19,3 +19,11 @@ def test_scene_imports():
     from src.viz.debug import scene
     assert callable(scene.view_scene) and callable(scene.main)
     assert scene.Player is Player                        # consomme core/Player (pas de player ré-roulé)
+
+
+def test_cloud_imports():
+    """Vérifie que ``src.viz.debug.cloud`` s'importe, expose ``view_cloud``/``main`` et consomme
+    ``core.player.Player`` + ``core.colors.parity`` (assertion structurelle : socle core bien câblé)."""
+    from src.viz.debug import cloud
+    assert callable(cloud.view_cloud) and callable(cloud.main)
+    assert cloud.Player is Player and cloud.parity is parity    # consomme core/Player + core/colors.parity
