@@ -4,6 +4,10 @@ Vérifie que ``node_coords`` calcule correctement les coordonnées monde d'une g
 petits et analytiquement connus : origine nulle, origine décalée, plusieurs espacements."""
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -67,13 +71,30 @@ def test_node_coords_arbitrary_spacing():
 
 
 def test_node_coords_import_numpy_only():
-    """Vérifie qu'importer le module ne tire PAS viser ni torch (numpy-only)."""
-    import sys
-    # Le module doit être déjà importé ; viser et torch NE doivent PAS être dans sys.modules
-    # (ce test passe seulement en environnement pytest headless, qui est le cas ici).
-    assert "viser" not in sys.modules, "geometry.py ne doit pas importer viser"
-    # torch peut être présent dans l'env (chargé par d'autres tests) ; on vérifie seulement que
-    # l'import DE CE MODULE ne l'introduit pas — impossible à garantir a posteriori dans une suite
-    # complète, donc on se contente de vérifier que node_coords est appelable sans lever.
-    result = node_coords(_sdf(2, 2, 2))
-    assert result is not None
+    """Vérifie qu'importer le module ne tire PAS viser ni torch (numpy-only).
+
+    Testé dans un sous-processus isolé pour garantir un sys.modules frais,
+    robuste à l'ordre des tests : même si un test antérieur a importé viser,
+    ce test procède à une vérification en processus enfant indépendant."""
+    # Racine HoloV2/ (cwd pour le sous-processus et pour importer src.*)
+    holov2 = Path(__file__).resolve().parent.parent
+
+    script = (
+        "import sys; "
+        "import src.viz.core.geometry; "
+        "viser_present = 'viser' in sys.modules; "
+        "torch_present = 'torch' in sys.modules; "
+        "assert not viser_present, "
+        "'geometry.py ne doit pas importer viser'; "
+        "assert not torch_present, "
+        "'geometry.py ne doit pas importer torch'"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        cwd=str(holov2),
+    )
+    assert result.returncode == 0, (
+        f"import src.viz.core.geometry a chargé viser ou torch :\n{result.stderr}"
+    )
