@@ -54,8 +54,15 @@ class CorrespondenceLayer:
           - ``frame.solved is None``              (couche solve-gated)
           - ``frame.human_cloud_world is None``   (nuage humain absent)
           - ``not self._cb.value``                (couche désactivée par l'utilisateur)
+          - taille incohérente entre la table OT et le frame courant (M_table ≠ M_frame)
         """
         if frame.solved is None or frame.human_cloud_world is None or not bool(self._cb.value):
+            self._h.visible = False
+            return
+        # Garde taille : la table OT est figée au setup (self._smpl_idx.size = M_table) ; si le
+        # frame courant apporte un nombre différent de points robot (M_frame), np.stack lèverait
+        # ValueError → masquer silencieusement plutôt que crasher.
+        if self._smpl_idx.size != frame.solved.robot_points_world.shape[0]:
             self._h.visible = False
             return
         seg = correspondence_segments(frame.human_cloud_world, frame.solved.robot_points_world,

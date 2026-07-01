@@ -192,3 +192,18 @@ def test_update_cb_false_hides_no_raise():
     layer.update(frame, _UI)
 
     assert layer._h.visible is False
+
+
+def test_update_size_mismatch_hides_no_raise():
+    """Incohérence de taille table/frame (M_table ≠ M_frame) → handle masqué, aucune levée.
+
+    La table OT est figée au setup (ici M_table=2) ; si le frame courant apporte M_frame=3
+    points robot, np.stack lèverait ValueError sans la garde. On vérifie que la couche masque
+    silencieusement au lieu de crasher.
+    """
+    layer = _build_layer(cb_val=True, smpl_idx=np.array([0, 1]))   # M_table = 2
+    frame = _make_frame(solved=True, human_cloud=True, M=3)         # M_frame = 3 → incohérence
+
+    layer.update(frame, _UI)
+
+    assert layer._h.visible is False

@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import dataclasses
 import shutil
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 from src.viz.model import VizContext
+from datapaths import CORR_NEUTRAL as _CORR, G1_URDF as _URDF
 
 
 def test_vizcontext_declares_interaction_fields():
@@ -28,9 +28,7 @@ def test_vizcontext_declares_interaction_fields():
 
 # --- déterminisme/forme via BakeSource sur la scène démo (gated data, max_frames bas) ---
 
-# Chemins externes — skip propre si données absentes (mêmes chemins que test_viz_bake_source.py).
-_CORR = Path(__file__).resolve().parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
-_URDF = Path(__file__).resolve().parent.parent / "models" / "g1" / "g1_29dof.urdf"
+# Chemins HoloV2-internes — skip propre si données absentes (sources via datapaths).
 
 
 def _pick_hodome():

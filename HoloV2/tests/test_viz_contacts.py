@@ -10,7 +10,6 @@ Deux familles :
 import types
 
 import numpy as np
-import pytest
 
 from src.targets.contracts import MultiChannelField
 from src.viz.core.layer import UiState

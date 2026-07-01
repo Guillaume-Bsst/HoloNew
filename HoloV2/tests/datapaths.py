@@ -51,6 +51,7 @@ SFU = _p("datasets", "sfu", "motion")                # SFU release root (<subjec
 OMOMO_NEW = _p("datasets", "omomo", "motion")        # InterMimic .pt sequences
 OMOMO = _p("datasets", "omomo", "meta")              # OMOMO release root (betas pickle)
 HOIM3 = _p("datasets", "hoim3", "motion")            # HOI-M3 mocap_ground
+PAHOI = _opt("datasets", "pahoi", "motion")          # PA-HOI Mocap_data root (None si absent)
 
 # HOI-M3 auxiliary (usually absent on disk -> the gated tests skip): take the toml value if present,
 # else derive the conventional location under the top-level models dir so `.exists()` simply returns
@@ -62,3 +63,7 @@ SMPL2SMPLX = _opt("models", "smpl2smplx") or (MODEL_TRANSFER / "smpl2smplx_deftr
 # --- repo-internal (travel with the checkout, NOT external) ---
 V1_TEST_SOCP = _REPO / "HoloNew" / "src" / "test_socp"
 DEMO_DATA = _REPO / "HoloNew" / "demo_data"
+
+# Assets HoloV2-internes fixés dans le checkout (ni machine-spécifiques, ni dans paths.toml)
+CORR_NEUTRAL = _HOLOV2 / "cache" / "correspondence" / "corr_neutral.npz"   # appariement OT figé
+G1_URDF      = _HOLOV2 / "models" / "g1" / "g1_29dof.urdf"                 # URDF robot G1
