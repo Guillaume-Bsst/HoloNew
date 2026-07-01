@@ -63,6 +63,10 @@ class _Cb:
     def __init__(self, val: bool = True):
         self.value = val
 
+    def on_update(self, callback) -> None:
+        """No-op : les tests existants n'exercent pas le chemin on_update."""
+        pass
+
 
 class _FolderCtx:
     """Contexte de dossier GUI factice (gestionnaire de contexte)."""

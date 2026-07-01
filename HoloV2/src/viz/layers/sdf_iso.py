@@ -53,10 +53,20 @@ class SdfIsoLayer:
     def setup(self, server, gui, ctx: VizContext) -> None:
         """Crée les contrôles GUI (dossier, checkbox, curseur bande) et un nuage par canal."""
         self._ctx = ctx
+        self._last_frame = None   # dernier VizFrame reçu (re-rendu en pause)
+        self._last_ui = None      # dernière UiState reçue (re-rendu en pause)
         with gui.add_folder(self.folder):
             self._cb = gui.add_checkbox("bande iso", False)
             self._band = gui.add_number(
                 "bande (m)", float(ctx.margin), min=0.005, max=0.5, step=0.005)
+
+        def _on_change(_) -> None:
+            """Re-rend le frame courant immédiatement quand checkbox ou bande change en pause."""
+            if self._last_frame is not None and self._last_ui is not None:
+                self.update(self._last_frame, self._last_ui)
+
+        self._cb.on_update(_on_change)
+        self._band.on_update(_on_change)
         # Un handle viser par canal — persistant, points recalculés à chaque update
         self._handles = []
         for ch in ctx.channels:
@@ -77,6 +87,9 @@ class SdfIsoLayer:
         - Gardes données manquantes : ``frame.pose`` absent ou ``object_idx`` hors bornes →
           masque le handle concerné, continue (pas de levée d'exception).
         """
+        # Mémorise le frame et l'état UI pour permettre le re-rendu en pause (bascule contrôles)
+        self._last_frame = frame
+        self._last_ui = ui
         show = bool(self._cb.value)
         band = float(self._band.value)
         for ch, h in zip(self._ctx.channels, self._handles):

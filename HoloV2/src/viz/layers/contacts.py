@@ -48,9 +48,19 @@ class ContactsLayer:
     def setup(self, server, gui, ctx: VizContext) -> None:
         """Crée les deux poignées de nuage persistantes et les checkboxes GUI."""
         self._ctx = ctx
+        self._last_frame = None   # dernier VizFrame reçu (re-rendu en pause)
+        self._last_ui = None      # dernière UiState reçue (re-rendu en pause)
+
+        def _on_change(_) -> None:
+            """Re-rend le frame courant immédiatement quand un toggle change en pause."""
+            if self._last_frame is not None and self._last_ui is not None:
+                self.update(self._last_frame, self._last_ui)
+
         with gui.add_folder(self.folder):
             self._cb_target = gui.add_checkbox("contact cible", True)
             self._cb_achieved = gui.add_checkbox("contact atteint", True)
+        self._cb_target.on_update(_on_change)
+        self._cb_achieved.on_update(_on_change)
         zero = np.zeros((1, 3), np.float32)
         self._h_target = server.scene.add_point_cloud(
             "/contacts/target", zero, np.zeros((1, 3), np.uint8), point_size=0.014)
@@ -65,6 +75,9 @@ class ContactsLayer:
           - ``frame.targets`` ou ``robot_interaction`` est None
           - ``ui.channel`` absent de ``ctx.channel_names``
         Le nuage atteint est masqué seul si ``contact_achieved`` est None (résolution partielle)."""
+        # Mémorise le frame et l'état UI pour permettre le re-rendu en pause (bascule toggle)
+        self._last_frame = frame
+        self._last_ui = ui
         # --- Garde 1 : solve-gated — pas de position monde sans q résolu ---
         if frame.solved is None:
             self._h_target.visible = False

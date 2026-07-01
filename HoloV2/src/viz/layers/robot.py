@@ -29,6 +29,8 @@ class RobotLayer:
         self._base = None      # frame de base (scène viser)
         self._dof = 0
         self._toggle = None    # checkbox GUI
+        self._last_frame = None   # dernier VizFrame reçu (re-rendu en pause)
+        self._last_ui = None      # dernière UiState reçue (re-rendu en pause)
 
     def setup(self, server, gui, ctx: VizContext) -> None:
         """Charge l'URDF G1 avec ViserUrdf (meshes), crée le frame de base dans la scène et
@@ -46,6 +48,13 @@ class RobotLayer:
         with gui.add_folder(_FOLDER):
             self._toggle = gui.add_checkbox("Show solved G1", bool(ctx.has_solve))
 
+        def _bascule(_) -> None:
+            """Re-rend le frame courant immédiatement quand le toggle change en pause."""
+            if self._last_frame is not None and self._last_ui is not None:
+                self.update(self._last_frame, self._last_ui)
+
+        self._toggle.on_update(_bascule)
+
     def update(self, frame: VizFrame, ui: UiState) -> None:
         """Rafraîchit la pose du robot depuis le frame résolu courant.
 
@@ -54,6 +63,9 @@ class RobotLayer:
         toggle GUI — pattern explicitement ré-appliqué ici (et pas seulement dans le callback
         on_update) pour que le robot réapparaisse dès que les données reviennent.
         """
+        # Mémorise le frame et l'état UI pour permettre le re-rendu en pause (bascule toggle)
+        self._last_frame = frame
+        self._last_ui = ui
         solved = frame.solved
         # Masquage explicite : le robot ne peut pas être positionné sans q résolu
         show = bool(self._toggle.value) and solved is not None

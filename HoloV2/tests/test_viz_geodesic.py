@@ -75,12 +75,20 @@ class _Cb:
     def __init__(self, val: bool = True) -> None:
         self.value = val
 
+    def on_update(self, callback) -> None:
+        """No-op : les tests existants n'exercent pas le chemin on_update."""
+        pass
+
 
 class _Slider:
     """Curseur entier factice."""
 
     def __init__(self, val: int = 0) -> None:
         self.value = val
+
+    def on_update(self, callback) -> None:
+        """No-op : les tests existants n'exercent pas le chemin on_update."""
+        pass
 
 
 class _FolderCtx:

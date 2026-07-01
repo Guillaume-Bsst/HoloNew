@@ -46,6 +46,8 @@ class GeodesicLayer:
     def setup(self, server, gui, ctx: VizContext) -> None:
         """Crée les contrôles GUI et un nuage + des segments de normale par canal géodésique."""
         self._ctx = ctx
+        self._last_frame = None   # dernier VizFrame reçu (re-rendu en pause)
+        self._last_ui = None      # dernière UiState reçue (re-rendu en pause)
         # Seuls les canaux portant une GeodesicTable sont rendus ; le sol-plan (None) est ignoré
         self._geo = [(ch.geodesic, ch.object_idx, ch.name)
                      for ch in ctx.channels if ch.geodesic is not None]
@@ -54,6 +56,15 @@ class GeodesicLayer:
             self._cb_pts = gui.add_checkbox("points (heat géodésique)", False)
             self._cb_nrm = gui.add_checkbox("normales", False)
             self._src = gui.add_slider("point source", 0, max(max_src, 0), 1, 0)
+
+        def _on_change(_) -> None:
+            """Re-rend le frame courant immédiatement quand un contrôle change en pause."""
+            if self._last_frame is not None and self._last_ui is not None:
+                self.update(self._last_frame, self._last_ui)
+
+        self._cb_pts.on_update(_on_change)
+        self._cb_nrm.on_update(_on_change)
+        self._src.on_update(_on_change)
         self._h_pts, self._h_nrm = [], []
         for _g, _oi, name in self._geo:
             self._h_pts.append(server.scene.add_point_cloud(
@@ -78,6 +89,9 @@ class GeodesicLayer:
         - Gardes : ``frame.pose`` absent, ``object_idx`` hors bornes, ensemble vide ->
           masque les deux handles du canal concerné et passe au suivant.
         """
+        # Mémorise le frame et l'état UI pour permettre le re-rendu en pause (bascule contrôles)
+        self._last_frame = frame
+        self._last_ui = ui
         show_pts = bool(self._cb_pts.value)
         show_nrm = bool(self._cb_nrm.value)
         src = int(self._src.value)

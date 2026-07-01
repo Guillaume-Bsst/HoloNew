@@ -78,12 +78,20 @@ class _Cb:
     def __init__(self, val: bool = True) -> None:
         self.value = val
 
+    def on_update(self, callback) -> None:
+        """No-op : les tests existants n'exercent pas le chemin on_update."""
+        pass
+
 
 class _Number:
     """Curseur numérique factice."""
 
     def __init__(self, val: float = 0.5) -> None:
         self.value = val
+
+    def on_update(self, callback) -> None:
+        """No-op : les tests existants n'exercent pas le chemin on_update."""
+        pass
 
 
 class _FolderCtx:

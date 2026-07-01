@@ -40,8 +40,17 @@ class CorrespondenceLayer:
     def setup(self, server, gui, ctx: VizContext) -> None:
         """Crée la poignée de segments persistante et le dossier GUI une fois."""
         self._smpl_idx = np.asarray(ctx.correspondence.smpl_idx, np.int64)
+        self._last_frame = None   # dernier VizFrame reçu (re-rendu en pause)
+        self._last_ui = None      # dernière UiState reçue (re-rendu en pause)
         with gui.add_folder(self.folder):
             self._cb = gui.add_checkbox("lignes SMPL↔G1", True)
+
+        def _on_change(_) -> None:
+            """Re-rend le frame courant immédiatement quand le toggle change en pause."""
+            if self._last_frame is not None and self._last_ui is not None:
+                self.update(self._last_frame, self._last_ui)
+
+        self._cb.on_update(_on_change)
         # Segment factice initial (1, 2, 3) : sera remplacé à la première MAJ
         self._h = server.scene.add_line_segments(
             "/correspondence", np.zeros((1, 2, 3), np.float32), np.zeros((1, 2, 3), np.uint8),
@@ -56,6 +65,9 @@ class CorrespondenceLayer:
           - ``not self._cb.value``                (couche désactivée par l'utilisateur)
           - taille incohérente entre la table OT et le frame courant (M_table ≠ M_frame)
         """
+        # Mémorise le frame et l'état UI pour permettre le re-rendu en pause (bascule toggle)
+        self._last_frame = frame
+        self._last_ui = ui
         if frame.solved is None or frame.human_cloud_world is None or not bool(self._cb.value):
             self._h.visible = False
             return
