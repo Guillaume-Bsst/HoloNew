@@ -71,3 +71,33 @@ manuel. Tests dans `HoloV2/tests/`, python de l'env `holonew`.
   rien n'importe `viz/`.
 - viser confiné (core/viser_ops + layers + Player + app) ; `model.py`/`sources.py` numpy-only.
 - `targets`/`solve` jamais modifiés (consommateur pur) ; `solved` optionnel partout.
+
+## Seam solve : couche `robot` + panel `cost_dashboard` (phase B)
+
+Le viz consomme aussi `solve/` (optionnel). `BakeSource(spec, config, solve=True)` exécute
+`solve.runner.solve` une fois sur la séquence montrée, construit un `targets.Evaluator` une fois, et
+remplit `VizFrame.solved` par frame via `build_solved_frame(traj, ev, ctx, f)` (pur, numpy-only) :
+
+- `q` / `object_poses` / `cost`/`cost_by_term`/`n_iters`/`status` : lus directement dans
+  `SolveTrajectory[f]` (+ `FrameInfo[f]`).
+- `style_achieved = ev.style(q)`, `contact_achieved = ev.contacts(q, object_rot, object_pos)` :
+  l'« atteint » réutilise l'`Evaluator` (recompute prouvé dans `test_solve_runner`), aucune
+  nouvelle logique de retargeting. `object_poses` (wxyz) → matrices via scipy.
+- `robot_points_world = pose_cloud(robot_cloud, R, t)` et `link_transforms (L,4,4)` : FK @ q via
+  `ctx.robot`.
+
+Sans `solve` (`solve=False`), `VizFrame.solved is None` et tout le pré-solve marche ; les
+consommateurs solve se masquent. Couches/panels concernés :
+
+- **`layers/robot.py` (`RobotLayer`)** : le G1 résolu en meshes complets via
+  `viser.extras.ViserUrdf` (yourdfpy). `update_cfg(q[7:7+dof])` + pose de base `q[:3]` /
+  `q[[6,3,4,5]]` (le `q` pinocchio porte le quat en xyzw sur `q[3:7]` ⇒ réordonné en wxyz pour
+  viser). No-op/masquée quand `frame.solved is None`. URDF depuis `VizContext.robot_urdf_path`.
+- **`panels/cost_dashboard.py` (`CostDashboard`)** : panel 2D (matplotlib `Agg` → image
+  viser, car plotly absent de l'env) — `cost_by_term` empilé + `cost` total sur toutes les frames,
+  + marqueurs/tableau des frames non convergées (`status`/`n_iters`). Lit `solved.*` sur toute la
+  séquence (fourni par la Source au `setup`).
+
+`app.py --solve` câble `BakeSource(solve=True)` + `RobotLayer` + `CostDashboard`. Invariant tenu :
+`viz` n'importe que les surfaces publiques (`solve.runner`/`solve.contracts`, `targets.Evaluator`) ;
+`targets`/`solve` restent inchangés.
