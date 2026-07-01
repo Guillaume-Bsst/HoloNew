@@ -1,16 +1,18 @@
-"""Glue CLI partagé pour les points d'entrée viz : déclare les flags de scène communs et assemble une
-``SceneSpec`` entièrement résolue (complète les défauts à partir du paths.toml local machine).
+"""Glue CLI partagé pour les points d'entrée viz debug : déclare les flags de scène communs et assemble
+une ``SceneSpec`` entièrement résolue (complète les défauts à partir du paths.toml local machine).
 
-EDGE-uniquement : importé par les fonctions ``main()`` viz, jamais par le pipeline pur. Évite aux quatre
-viewers de dupliquer chacun la construction RobotSpec/SceneSpec.
+EDGE-uniquement : importé par les fonctions ``main()`` des viewers debug, jamais par le pipeline pur.
+Évite aux viewers de dupliquer chacun la construction RobotSpec/SceneSpec.
+(Déplacé de ``viz/_scene_args.py`` vers ``viz/debug/`` lors de la refonte viz — même surface publique,
+imports approfondis d'un niveau.)
 """
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from .. import paths
-from ..prepare.contracts import RobotSpec, SceneSpec
+from ... import paths
+from ...prepare.contracts import RobotSpec, SceneSpec
 
 
 def add_scene_args(ap: argparse.ArgumentParser) -> None:

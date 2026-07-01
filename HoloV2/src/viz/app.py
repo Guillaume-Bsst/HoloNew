@@ -14,7 +14,7 @@ import argparse
 
 from ..prepare.config import PrepareConfig
 from ..prepare.contracts import SceneSpec
-from ._scene_args import add_scene_args, scene_from_args
+from .debug._args import add_scene_args, scene_from_args
 from .core.player import Player
 from .layers.contacts import ContactsLayer
 from .layers.correspondence import CorrespondenceLayer

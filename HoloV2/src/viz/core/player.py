@@ -120,3 +120,53 @@ class Player:
         # Keep-alive principal
         while True:
             time.sleep(1)
+
+
+def play_loop(server, *, n_frames: int, render, fps_default: int = 20) -> None:
+    """Boucle de lecture générique pour les viewers debug (sans Source ni VizFrame).
+
+    Construit un dossier GUI « Playback » (slider frame / case à cocher play / fps) sur le serveur
+    viser fourni, câble ``render(i)`` sur le slider + déclenche un rendu initial, puis lance la
+    boucle daemon play/fps et le keep-alive principal.
+
+    ``render`` est un callable prenant l'index de frame (int) ; les viewers debug passent leur propre
+    ``render(i)`` (qui pilote les internes de l'étage qu'ils visualisent). Le Player prod conserve
+    sa propre logique (``Player.run()``), cette fonction est réservée aux viewers sans Source.
+
+    ``import viser`` est local à cette fonction : le module ``player`` reste importable sans viser.
+
+    Args:
+        server: Serveur viser sur lequel construire la GUI (``viser.ViserServer``).
+        n_frames: Nombre total de frames (borne du slider : 0 .. n_frames-1).
+        render: Callable ``(int) -> None`` — appelé à chaque changement de slider et au démarrage.
+        fps_default: Valeur initiale du contrôle fps (défaut 20).
+    """
+    import threading
+
+    # Dossier Playback : slider frame, play, fps — même structure que Player.run()
+    with server.gui.add_folder("Playback"):
+        sld = server.gui.add_slider("frame", 0, max(n_frames - 1, 1), 1, 0)
+        play = server.gui.add_checkbox("play", False)
+        fps = server.gui.add_number("fps", fps_default, min=1, max=120, step=1)
+
+    def _on_update(_=None) -> None:
+        """Callback déclenché par le slider : appelle render avec l'index courant."""
+        render(int(sld.value))
+
+    sld.on_update(_on_update)
+    # Rendu initial
+    render(0)
+
+    # Boucle daemon play/fps : avance le slider quand play=True
+    def _loop() -> None:
+        while True:
+            if play.value:
+                sld.value = (int(sld.value) + 1) % n_frames
+                render(int(sld.value))
+            time.sleep(1.0 / float(fps.value))
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+    # Keep-alive principal
+    while True:
+        time.sleep(1)

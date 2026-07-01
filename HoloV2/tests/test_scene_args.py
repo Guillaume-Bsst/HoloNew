@@ -1,7 +1,7 @@
 import argparse
 from pathlib import Path
 
-from src.viz._scene_args import add_scene_args, scene_from_args
+from src.viz.debug._args import add_scene_args, scene_from_args
 
 
 def _toml(tmp_path: Path) -> Path:
@@ -74,3 +74,11 @@ def test_robot_urdf_is_real_repo_model(tmp_path):
     spec = scene_from_args(a, paths_file=_toml(tmp_path))
     assert spec.robot.urdf_path.name == "g1_29dof.urdf"
     assert spec.robot.urdf_path.is_absolute()
+
+
+def test_g1_robot_smoke():
+    """Vérifie que _g1_robot() retourne un RobotSpec G1 correct (nom, DOF, URDF absolu)."""
+    from src.viz.debug._args import _g1_robot
+    r = _g1_robot()
+    assert r.name == "g1" and r.dof == 29
+    assert r.urdf_path.name == "g1_29dof.urdf" and r.urdf_path.is_absolute()

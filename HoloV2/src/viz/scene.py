@@ -23,7 +23,7 @@ from ..prepare.config import CalibrationConfig
 from ..prepare.calibration import build_calibration
 from ..prepare.load import load
 from ..prepare.load.smpl import build_body_model
-from ._scene_args import add_scene_args, scene_from_args
+from .debug._args import add_scene_args, scene_from_args
 
 
 def _object_world_lowz(vl: np.ndarray, poses: np.ndarray, cap: int = 8000):

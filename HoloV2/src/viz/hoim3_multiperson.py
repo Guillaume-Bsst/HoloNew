@@ -22,7 +22,7 @@ from ..prepare.contracts import SceneSpec
 from .. import paths
 from ..prepare.load import load
 from ..prepare.load.datasets.hoim3 import build_person_params
-from ._scene_args import _g1_robot
+from .debug._args import _g1_robot
 
 _PALETTE = [(70, 130, 220), (220, 90, 90), (90, 200, 120), (210, 170, 60), (170, 110, 210)]
 

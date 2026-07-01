@@ -28,7 +28,7 @@ from ..prepare.load.smpl import build_body_model
 from ..prepare.point_cloud import build_human_cloud, build_object_cloud
 from ..prepare.point_cloud.correspondence import load_correspondence
 from ..targets.interaction import pose_cloud
-from ._scene_args import add_scene_args, scene_from_args
+from .debug._args import add_scene_args, scene_from_args
 
 _DEFAULT_CORR = Path(__file__).resolve().parent.parent.parent / "cache" / "correspondence" / "corr_neutral.npz"
 
