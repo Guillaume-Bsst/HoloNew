@@ -50,14 +50,20 @@ def build_contact(contact_eval: ContactEval, robot_field_ref: RobotInteractionTa
         R_i = geo.rot[cidx]
         obj = geo.object_idx[cidx]
         dir_local = field_cur.direction[cidx, rows]                 # (k,3) local-d'objet (monde si sol)
-        n_world = world_normal(R_i, dir_local)                      # (k,3) -> monde pour point_jac
+        # Vrai gradient de distance signée = ``sign(distance)·direction`` : ``direction`` (surface->point)
+        # s'INVERSE sous la surface (pointe dans la pénétration), mais le gradient SDF pointe TOUJOURS vers
+        # l'extérieur. Sans ce facteur, un point pénétrant (distance<0) reçoit un Jacobien de signe opposé
+        # et le QP l'enfonce PLUS profond (feedback positif -> le contact traverse le sol). Porté de V1
+        # ``test_socp/interaction.py`` (``g = sign(d0)·n0``).
+        g_local = np.sign(field_cur.distance[cidx, rows])[:, None] * dir_local  # (k,3) gradient SDF local
+        n_world = world_normal(R_i, g_local)                        # (k,3) -> monde pour point_jac
         w = (cfg.w_cd * _alpha(field_ref.distance[cidx, rows], cfg))[:, None]   # (k,1)
 
         # --- C-D : erreur de distance signée ---
         cd_A.append(w * dist_jac(n_world, contact_eval.point_jac[rows]))        # (k,nv)
         cd_c.append((w[:, 0]) * (field_cur.distance[cidx, rows] - field_ref.distance[cidx, rows]))
         if obj >= 0:
-            blk = w * dist_jac(dir_local, contact_eval.probe_jac_obj[cidx, rows])  # (k,6) local-d'objet
+            blk = w * dist_jac(g_local, contact_eval.probe_jac_obj[cidx, rows])  # (k,6) local-d'objet
             cd_Aobj.append(scatter_obj(blk, obj, n_obj))
         else:
             cd_Aobj.append(np.zeros((rows.size, n_obj * 6)) if n_obj else None)

@@ -46,15 +46,19 @@ def build_object(contact_eval: ContactEval, env_refs: EnvironmentInteractionTarg
             jc = cidx - 1                                     # canal -> index d'objet (-1 = sol)
             R_c = np.eye(3) if jc < 0 else object_rot[jc]    # frame monde du canal
             dir_local = field_cur.direction[cidx, rows]       # (k,3) local-canal (monde si sol)
-            n_world = world_normal(R_c, dir_local)            # pour cloud_jac_self (monde)
+            # Vrai gradient de distance signée = ``sign(distance)·direction`` (voir C-D dans contact.py) :
+            # ``direction`` s'inverse sous la surface, le gradient SDF non. Sans ce facteur, un point
+            # pénétrant est poussé plus profond au lieu d'être repoussé. Porté de V1 (``g = sign(d0)·n0``).
+            g_local = np.sign(field_cur.distance[cidx, rows])[:, None] * dir_local  # (k,3) gradient SDF local
+            n_world = world_normal(R_c, g_local)              # pour cloud_jac_self (monde)
             w = cfg.w_cod
 
             # terme propre : l'objet i déplace son propre point de nuage -> slot d'objet i
             self_blk = w * dist_jac(n_world, env.cloud_jac_self[rows])     # (k,6)
             A_obj = scatter_obj(self_blk, i, N)
-            # terme croisé objet↔objet : le canal jc != i déplace la sonde -> slot objet jc (normale locale brute)
+            # terme croisé objet↔objet : le canal jc != i déplace la sonde -> slot objet jc (gradient SDF local)
             if jc >= 0 and jc != i:
-                cross_blk = w * dist_jac(dir_local, env.probe_jac_obj[cidx, rows])
+                cross_blk = w * dist_jac(g_local, env.probe_jac_obj[cidx, rows])
                 A_obj = A_obj + scatter_obj(cross_blk, jc, N)
 
             cod_A.append(np.zeros((rows.size, nv)))

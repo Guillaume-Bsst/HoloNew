@@ -37,11 +37,38 @@ def test_cd_linearization_vs_distance_fd():
     cfg = SolveConfig(contact_d_ref_scale=0.0)     # disable falloff -> weight = w_cd on active rows
     cd = {b.name: b for b in build_contact(ev, ref, geo, cfg)}["C-D"]
     assert cd.A.shape == (M, nv) and cd.c.shape == (M,) and cd.A_obj is None
-    # per-row: c = w·(d_cur − d_ref) ; A·v = w·(n_world·point_jac)·v  (linear distance model)
-    n_world = world_normal(np.eye(3), ev.field.direction[0])      # ground: local == world
+    # per-row: c = w·(d_cur − d_ref) ; A·v = w·(g_world·point_jac)·v  (linear distance model)
+    # gradient de distance signée = sign(d)·direction (pas la direction brute — voir test de pénétration)
+    g_world = world_normal(np.eye(3), np.sign(ev.field.distance[0])[:, None] * ev.field.direction[0])
     assert np.allclose(cd.c, cfg.w_cd * (ev.field.distance[0] - ref.field.distance[0]))
     v = rng.standard_normal(nv)
-    assert np.allclose(cd.A @ v, cfg.w_cd * (dist_jac(n_world, ev.point_jac) @ v))
+    assert np.allclose(cd.A @ v, cfg.w_cd * (dist_jac(g_world, ev.point_jac) @ v))
+
+
+def test_cd_jacobian_uses_signed_sdf_gradient_for_penetration():
+    """Régression : pour un point PÉNÉTRANT (distance < 0), le Jacobien C-D doit utiliser le VRAI
+    gradient de distance signée ``sign(distance)·direction`` (pointe HORS de la surface -> restaurateur),
+    PAS le vecteur géométrique brut surface->point (``direction``) qui s'inverse sous la surface et
+    enfoncerait le contact plus profond. Porté de V1 ``interaction.py`` : ``g = sign(d0)·n0``."""
+    rng = np.random.default_rng(7)
+    C, M, nv = 1, 3, 9                                   # sol seul (R_i = I), n_obj = 0
+    active = np.ones((C, M), bool)
+    field = MultiChannelField(
+        distance=np.array([[-0.02, -0.05, 0.03]]),       # deux points sous le sol, un au-dessus
+        # direction = surface->point : pointe vers le BAS (−z) là où le point pénètre (comme le vrai SDF)
+        direction=np.array([[[0, 0, -1.0], [0, 0, -1.0], [0, 0, 1.0]]]),
+        witness=np.zeros((C, M, 3)), active=active, channels=("ground",))
+    point_jac = np.tile(np.eye(3, nv), (M, 1, 1))        # (M,3,nv) : colonnes 0..2 = xyz monde du point
+    ev = ContactEval(field=field, point_jac=point_jac,
+                     probe_jac_obj=np.zeros((C, M, 3, 6)), env=())
+    ref = RobotInteractionTargets(field=_mcf(C, M, rng, active))
+    geo = GeoField(tables=(None,), rot=np.eye(3)[None], pos=np.zeros((1, 3)), object_idx=(-1,))
+    cfg = SolveConfig(contact_d_ref_scale=0.0)
+    cd = {b.name: b for b in build_contact(ev, ref, geo, cfg)}["C-D"]
+    grad = np.sign(field.distance[0])[:, None] * field.direction[0]   # vrai gradient == +z partout
+    assert np.allclose(cd.A, cfg.w_cd * dist_jac(grad, point_jac))
+    # ∂distance/∂(point_z) doit être POSITIF pour CHAQUE point (monter => distance augmente => restaurateur)
+    assert np.all(cd.A[:, 2] > 0)
 
 
 def test_cd_object_channel_couples_dxi():
@@ -56,11 +83,13 @@ def test_cd_object_channel_couples_dxi():
     cfg = SolveConfig(contact_d_ref_scale=0.0)
     cd = {b.name: b for b in build_contact(ev, ref, geo, cfg)}["C-D"]
     assert cd.A_obj is not None and cd.A_obj.shape == (M, 6)
-    # object side uses the LOCAL direction against probe_jac_obj of channel 1
-    expect = cfg.w_cd * dist_jac(ev.field.direction[1], ev.probe_jac_obj[1])
+    # gradient SDF local signé du canal 1 (sign(d)·direction) — pas la direction brute
+    g1 = np.sign(ev.field.distance[1])[:, None] * ev.field.direction[1]
+    # object side uses the LOCAL signed gradient against probe_jac_obj of channel 1
+    expect = cfg.w_cd * dist_jac(g1, ev.probe_jac_obj[1])
     assert np.allclose(cd.A_obj, expect)
-    # robot side uses the WORLD-mapped normal world_normal(R1, dir_local)
-    expect_A = cfg.w_cd * dist_jac(world_normal(R1, ev.field.direction[1]), ev.point_jac)
+    # robot side uses the WORLD-mapped gradient world_normal(R1, g1)
+    expect_A = cfg.w_cd * dist_jac(world_normal(R1, g1), ev.point_jac)
     assert np.allclose(cd.A, expect_A)
 
 
