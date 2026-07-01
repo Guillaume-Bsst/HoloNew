@@ -29,9 +29,7 @@ from ...prepare.point_cloud import build_human_cloud, build_object_cloud
 from ...prepare.point_cloud.correspondence import load_correspondence
 from ...targets.interaction import pose_cloud       # op AVAL (délibéré) : chemin runtime cloud du solveur
 from ..core.colors import parity                    # colormap parité : bleu 0 → rouge ≥ vmax
-# Player importé pour l'assertion structurelle du smoke (cloud.Player is core.player.Player) ;
-# play_loop est le chemin effectif de lecture — les viewers debug n'ont ni Source ni VizFrame.
-from ..core.player import Player, play_loop
+from ..core.player import play_loop
 from ..core.viser_ops import add_point_cloud, hide, quat_wxyz_to_R
 from ._args import add_scene_args, scene_from_args
 from ._geometry import parity_error, surface_points

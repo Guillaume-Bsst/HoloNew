@@ -23,9 +23,7 @@ from ...prepare.config import CalibrationConfig
 from ...prepare.contracts import SceneSpec
 from ...prepare.load import load
 from ...prepare.load.smpl import build_body_model
-# Player importé pour l'assertion structurelle du smoke (scene.Player is core.player.Player) ;
-# play_loop est le chemin effectif de lecture — les viewers debug n'ont ni Source ni VizFrame.
-from ..core.player import Player, play_loop
+from ..core.player import play_loop
 from ..core.viser_ops import add_line_segments, add_point_cloud, hide, quat_wxyz_to_R
 from ._args import add_scene_args, scene_from_args
 from ._geometry import lowest_point, object_world_lowz
